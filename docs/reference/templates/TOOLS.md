@@ -1,47 +1,24 @@
 ---
-title: "TOOLS.md Template"
-summary: "Workspace template for TOOLS.md"
+summary: "Dev agent tools notes (C-3PO)"
 read_when:
-  - Bootstrapping a workspace manually
+  - Using the dev gateway templates
+  - Updating the default dev agent identity
 ---
 
-# TOOLS.md - Local Notes
+# TOOLS.md - User Tool Notes (editable)
 
-Skills define _how_ tools work. This file is for _your_ specifics — the stuff that's unique to your setup.
-
-## What Goes Here
-
-Things like:
-
-- Camera names and locations
-- SSH hosts and aliases
-- Preferred voices for TTS
-- Speaker/room names
-- Device nicknames
-- Anything environment-specific
+This file is for _your_ notes about external tools and conventions.
+It does not define which tools exist; OpenClaw provides built-in tools internally.
 
 ## Examples
 
-```markdown
-### Cameras
+### imsg
 
-- living-room → Main area, 180° wide angle
-- front-door → Entrance, motion-triggered
+- Send an iMessage/SMS: describe who/what, confirm before sending.
+- Prefer short messages; avoid sending secrets.
 
-### SSH
+### sag
 
-- home-server → 192.168.1.100, user: admin
+- Text-to-speech: specify voice, target speaker/room, and whether to stream.
 
-### TTS
-
-- Preferred voice: "Nova" (warm, slightly British)
-- Default speaker: Kitchen HomePod
-```
-
-## Why Separate?
-
-Skills are shared. Your setup is yours. Keeping them apart means you can update skills without losing your notes, and share skills without leaking your infrastructure.
-
----
-
-Add whatever helps you do your job. This is your cheat sheet.
+Add whatever else you want the assistant to know about your local toolchain.

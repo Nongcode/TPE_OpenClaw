@@ -1,0 +1,34 @@
+# dependencies
+node_modules/
+**/node_modules/
+
+# package managers
+.pnpm-store/
+.npm/
+.yarn/
+.yarn-cache/
+.pnp.*
+.pnpm-debug.log*
+
+# build outputs
+dist/
+dist-runtime/
+build/
+coverage/
+artifacts/
+
+# caches
+.cache/
+.gradle/
+tmp/
+.temp/
+*.log
+*.stackdump
+
+# system
+.DS_Store
+Thumbs.db
+
+# generated bundles
+src/canvas-host/a2ui/.bundle.hash
+src/canvas-host/a2ui/a2ui.bundle.js
