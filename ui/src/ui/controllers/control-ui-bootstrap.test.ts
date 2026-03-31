@@ -1,7 +1,10 @@
 /* @vitest-environment jsdom */
 
 import { describe, expect, it, vi } from "vitest";
-import { CONTROL_UI_BOOTSTRAP_CONFIG_PATH } from "../../../../src/gateway/control-ui-contract.js";
+import {
+  CONTROL_UI_BOOTSTRAP_CONFIG_PATH,
+  type ControlUiDemoLoginConfig,
+} from "../../../../src/gateway/control-ui-contract.js";
 import { loadControlUiBootstrapConfig } from "./control-ui-bootstrap.ts";
 
 describe("loadControlUiBootstrapConfig", () => {
@@ -14,6 +17,16 @@ describe("loadControlUiBootstrapConfig", () => {
         assistantAvatar: "O",
         assistantAgentId: "main",
         serverVersion: "2026.3.7",
+        accessPolicy: {
+          employeeName: "Long",
+          lockedAgentId: "quan_ly",
+          lockedSessionKey: "agent:quan_ly:main",
+          lockSession: true,
+        },
+        demoLogin: {
+          enabled: true,
+          accounts: [{ email: "quanly@example.com", label: "Quan ly" }],
+        } satisfies ControlUiDemoLoginConfig,
       }),
     });
     vi.stubGlobal("fetch", fetchMock as unknown as typeof fetch);
@@ -24,6 +37,8 @@ describe("loadControlUiBootstrapConfig", () => {
       assistantAvatar: null,
       assistantAgentId: null,
       serverVersion: null,
+      bootstrapAccessPolicy: null,
+      demoLoginConfig: null,
     };
 
     await loadControlUiBootstrapConfig(state);
@@ -36,6 +51,16 @@ describe("loadControlUiBootstrapConfig", () => {
     expect(state.assistantAvatar).toBe("O");
     expect(state.assistantAgentId).toBe("main");
     expect(state.serverVersion).toBe("2026.3.7");
+    expect(state.bootstrapAccessPolicy).toEqual({
+      employeeName: "Long",
+      lockedAgentId: "quan_ly",
+      lockedSessionKey: "agent:quan_ly:main",
+      lockSession: true,
+    });
+    expect(state.demoLoginConfig).toEqual({
+      enabled: true,
+      accounts: [{ email: "quanly@example.com", label: "Quan ly" }],
+    });
 
     vi.unstubAllGlobals();
   });
@@ -50,6 +75,8 @@ describe("loadControlUiBootstrapConfig", () => {
       assistantAvatar: null,
       assistantAgentId: null,
       serverVersion: null,
+      bootstrapAccessPolicy: null,
+      demoLoginConfig: null,
     };
 
     await loadControlUiBootstrapConfig(state);
@@ -73,12 +100,43 @@ describe("loadControlUiBootstrapConfig", () => {
       assistantAvatar: null,
       assistantAgentId: null,
       serverVersion: null,
+      bootstrapAccessPolicy: null,
+      demoLoginConfig: null,
     };
 
     await loadControlUiBootstrapConfig(state);
 
     expect(fetchMock).toHaveBeenCalledWith(
       `/openclaw${CONTROL_UI_BOOTSTRAP_CONFIG_PATH}`,
+      expect.objectContaining({ method: "GET" }),
+    );
+
+    vi.unstubAllGlobals();
+  });
+
+  it("passes through employee access policy query params to bootstrap fetch", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: false });
+    vi.stubGlobal("fetch", fetchMock as unknown as typeof fetch);
+    window.history.replaceState(
+      {},
+      "",
+      "/chat?agent=nv_content&lockSession=1&employeeName=Lan&employeeId=emp-01&autoConnect=1",
+    );
+
+    const state = {
+      basePath: "",
+      assistantName: "Assistant",
+      assistantAvatar: null,
+      assistantAgentId: null,
+      serverVersion: null,
+      bootstrapAccessPolicy: null,
+      demoLoginConfig: null,
+    };
+
+    await loadControlUiBootstrapConfig(state);
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      `${CONTROL_UI_BOOTSTRAP_CONFIG_PATH}?agent=nv_content&lockSession=1&employeeName=Lan&employeeId=emp-01&autoConnect=1`,
       expect.objectContaining({ method: "GET" }),
     );
 

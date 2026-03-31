@@ -118,6 +118,35 @@ export type GatewayControlUiConfig = {
   allowInsecureAuth?: boolean;
   /** DANGEROUS: Disable device identity checks for the Control UI (default: false). */
   dangerouslyDisableDeviceAuth?: boolean;
+  /**
+   * Optional employee -> agent/session mapping for Control UI access.
+   * Use this to bind named employee identities to a single agent/session lane.
+   */
+  employeeDirectory?: Array<{
+    employeeId?: string;
+    employeeName?: string;
+    aliases?: string[];
+    lockedAgentId: string;
+    lockedSessionKey?: string;
+    canViewAllSessions?: boolean;
+    visibleAgentIds?: string[];
+    lockAgent?: boolean;
+    lockSession?: boolean;
+    autoConnect?: boolean;
+  }>;
+  /** Optional demo login form for local role-based Control UI access. */
+  demoLogin?: {
+    enabled?: boolean;
+    accounts?: Array<{
+      email: string;
+      password: string;
+      employeeId?: string;
+      employeeName?: string;
+      lockedAgentId?: string;
+      lockedSessionKey?: string;
+      label?: string;
+    }>;
+  };
 };
 
 export type GatewayAuthMode = "none" | "token" | "password" | "trusted-proxy";
@@ -133,6 +162,11 @@ export type GatewayTrustedProxyConfig = {
    * Common values: "x-forwarded-user", "x-remote-user", "x-pomerium-claim-email"
    */
   userHeader: string;
+  /**
+   * Optional header name containing the authenticated display name.
+   * Falls back to `x-forwarded-name` when unset in Control UI bootstrap flows.
+   */
+  displayNameHeader?: string;
   /**
    * Additional headers that MUST be present for the request to be trusted.
    * Use this to verify the request actually came through the proxy.

@@ -1,7 +1,8 @@
 import { resetToolStream } from "../app-tool-stream.ts";
 import { extractText } from "../chat/message-extract.ts";
 import { formatConnectError } from "../connect-error.ts";
-import type { GatewayBrowserClient } from "../gateway.ts";
+import { GatewayRequestError, type GatewayBrowserClient } from "../gateway.ts";
+import { syncUrlWithSessionKey } from "../app-settings.ts";
 import type { ChatAttachment } from "../ui-types.ts";
 import { generateUUID } from "../uuid.ts";
 
@@ -32,6 +33,15 @@ export type ChatState = {
   client: GatewayBrowserClient | null;
   connected: boolean;
   sessionKey: string;
+  lockedSessionKey?: string | null;
+  lockedAgentId?: string | null;
+  bootstrapAccessPolicy?: {
+    employeeId?: string;
+    employeeName?: string;
+  } | null;
+  settings?: { sessionKey: string; lastActiveSessionKey?: string };
+  applySettings?: (next: { sessionKey: string; lastActiveSessionKey?: string }) => void;
+  loadAssistantIdentity?: () => Promise<unknown> | void;
   chatLoading: boolean;
   chatMessages: unknown[];
   chatThinkingLevel: string | null;
@@ -87,6 +97,37 @@ export async function loadChatHistory(state: ChatState) {
     state.chatStream = null;
     state.chatStreamStartedAt = null;
   } catch (err) {
+    if (
+      err instanceof GatewayRequestError &&
+      err.gatewayCode === "INVALID_REQUEST" &&
+      /unauthorized/i.test(err.message) &&
+      state.lockedSessionKey &&
+      state.sessionKey !== state.lockedSessionKey
+    ) {
+      const fallbackSessionKey = state.lockedSessionKey;
+      state.sessionKey = fallbackSessionKey;
+      if (state.settings && state.applySettings) {
+        state.applySettings({
+          ...state.settings,
+          sessionKey: fallbackSessionKey,
+          lastActiveSessionKey: fallbackSessionKey,
+        });
+      }
+      try {
+        syncUrlWithSessionKey(
+          state as unknown as Parameters<typeof syncUrlWithSessionKey>[0],
+          fallbackSessionKey,
+          true,
+        );
+      } catch {
+        // Ignore URL sync failures; fallback history load still matters.
+      }
+      if (state.loadAssistantIdentity) {
+        void state.loadAssistantIdentity();
+      }
+      await loadChatHistory(state);
+      return;
+    }
     state.lastError = String(err);
   } finally {
     state.chatLoading = false;

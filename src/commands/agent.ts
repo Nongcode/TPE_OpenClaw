@@ -9,6 +9,7 @@ import { createSubsystemLogger } from "../logging/subsystem.js";
 const log = createSubsystemLogger("commands/agent");
 import {
   listAgentIds,
+  resolveAgentAuthProfile,
   resolveAgentDir,
   resolveEffectiveModelFallbacks,
   resolveSessionAgentId,
@@ -451,9 +452,20 @@ function runAgentAttempt(params: {
     });
   }
 
-  const authProfileId =
+  const sessionAuthProfileId =
     params.providerOverride === params.primaryProvider
       ? params.sessionEntry?.authProfileOverride
+      : undefined;
+  const configuredAuthProfileId = resolveAgentAuthProfile(
+    params.cfg,
+    params.sessionAgentId,
+    params.providerOverride,
+  );
+  const authProfileId = sessionAuthProfileId ?? configuredAuthProfileId;
+  const authProfileIdSource = sessionAuthProfileId
+    ? params.sessionEntry?.authProfileOverrideSource
+    : configuredAuthProfileId
+      ? "user"
       : undefined;
   return runEmbeddedPiAgent({
     sessionId: params.sessionId,
@@ -483,7 +495,7 @@ function runAgentAttempt(params: {
     provider: params.providerOverride,
     model: params.modelOverride,
     authProfileId,
-    authProfileIdSource: authProfileId ? params.sessionEntry?.authProfileOverrideSource : undefined,
+    authProfileIdSource,
     thinkLevel: params.resolvedThinkLevel,
     verboseLevel: params.resolvedVerboseLevel,
     timeoutMs: params.timeoutMs,

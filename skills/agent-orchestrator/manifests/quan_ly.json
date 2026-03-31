@@ -1,0 +1,14 @@
+{
+  "id": "quan_ly",
+  "label": "Quan ly cap cao",
+  "role": "executive manager",
+  "canDelegateTo": ["truong_phong"],
+  "capabilities": [
+    "strategy",
+    "approval",
+    "escalation",
+    "delegation",
+    "oversight"
+  ],
+  "taskTypes": ["management.review", "campaign.approve"]
+}

@@ -1,0 +1,53 @@
+{
+  tools: {
+    agentToAgent: {
+      enabled: true,
+      allow: ["quan_ly", "truong_phong", "pho_phong", "nv_content", "nv_media"],
+    },
+    subagents: {
+      tools: {
+        allow: ["sessions_send", "sessions_spawn", "subagents", "agents_list", "session_status"],
+      },
+    },
+  },
+  session: {
+    agentToAgent: {
+      maxPingPongTurns: 1,
+    },
+  },
+  agents: {
+    defaults: {
+      subagents: {
+        maxSpawnDepth: 2,
+        maxChildrenPerAgent: 4,
+      },
+    },
+    list: [
+      {
+        id: "quan_ly",
+        workspace: "~/.openclaw/workspace_quanly",
+        subagents: { allowAgents: ["truong_phong"] },
+      },
+      {
+        id: "truong_phong",
+        workspace: "~/.openclaw/workspace_truongphong",
+        subagents: { allowAgents: ["pho_phong"] },
+      },
+      {
+        id: "pho_phong",
+        workspace: "~/.openclaw/workspace_phophong",
+        subagents: { allowAgents: ["nv_content", "nv_media"] },
+      },
+      {
+        id: "nv_content",
+        workspace: "~/.openclaw/workspace_content",
+        subagents: { allowAgents: [] },
+      },
+      {
+        id: "nv_media",
+        workspace: "~/.openclaw/workspace_media",
+        subagents: { allowAgents: [] },
+      },
+    ],
+  },
+}

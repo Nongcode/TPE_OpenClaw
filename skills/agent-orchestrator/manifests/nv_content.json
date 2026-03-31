@@ -1,0 +1,15 @@
+{
+  "id": "nv_content",
+  "label": "Nhan vien content",
+  "role": "content specialist",
+  "reportsTo": "pho_phong",
+  "canDelegateTo": [],
+  "requiresReviewBy": "pho_phong",
+  "capabilities": [
+    "write",
+    "storytelling",
+    "facebook-post",
+    "copywriting"
+  ],
+  "taskTypes": ["content.write"]
+}

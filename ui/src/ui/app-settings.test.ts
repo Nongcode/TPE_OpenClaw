@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  applyBootstrapAccessPolicy,
   applyResolvedTheme,
   applySettings,
   applySettingsFromUrl,
@@ -7,6 +8,7 @@ import {
   setTabFromRoute,
   syncThemeWithSettings,
 } from "./app-settings.ts";
+import type { ControlUiBootstrapAccessPolicy } from "../../../src/gateway/control-ui-contract.js";
 import type { ThemeMode, ThemeName } from "./theme.ts";
 
 type Tab =
@@ -50,6 +52,8 @@ type SettingsHost = {
   themeResolved: import("./theme.ts").ResolvedTheme;
   applySessionKey: string;
   sessionKey: string;
+  lockedAgentId?: string | null;
+  lockedSessionKey?: string | null;
   tab: Tab;
   connected: boolean;
   chatHasAutoScrolled: boolean;
@@ -63,6 +67,7 @@ type SettingsHost = {
   debugPollInterval: number | null;
   pendingGatewayUrl?: string | null;
   pendingGatewayToken?: string | null;
+  bootstrapAccessPolicy?: ControlUiBootstrapAccessPolicy | null;
 };
 
 function createStorageMock(): Storage {
@@ -110,6 +115,8 @@ const createHost = (tab: Tab): SettingsHost => ({
   themeResolved: "dark",
   applySessionKey: "main",
   sessionKey: "main",
+  lockedAgentId: null,
+  lockedSessionKey: null,
   tab,
   connected: false,
   chatHasAutoScrolled: false,
@@ -123,6 +130,7 @@ const createHost = (tab: Tab): SettingsHost => ({
   debugPollInterval: null,
   pendingGatewayUrl: null,
   pendingGatewayToken: null,
+  bootstrapAccessPolicy: null,
 });
 
 describe("setTabFromRoute", () => {
@@ -155,6 +163,25 @@ describe("setTabFromRoute", () => {
 
     setTabFromRoute(host, "chat");
     expect(host.debugPollInterval).toBeNull();
+  });
+
+  it("redirects worker roles away from the sessions tab", () => {
+    const host = createHost("chat");
+    host.bootstrapAccessPolicy = {
+      employeeId: "emp-01",
+      employeeName: "Lan",
+      lockedAgentId: "nv_content",
+      lockedSessionKey: "agent:nv_content:main",
+      visibleAgentIds: ["nv_content"],
+      lockSession: true,
+      enforcedByServer: true,
+    };
+    window.history.replaceState({}, "", "/sessions?employeeId=emp-01");
+
+    setTabFromRoute(host, "sessions");
+
+    expect(host.tab).toBe("chat");
+    expect(window.location.pathname).toBe("/chat");
   });
 
   it("re-resolves the active palette when only themeMode changes", () => {
@@ -305,5 +332,101 @@ describe("applySettingsFromUrl", () => {
     expect(host.settings.lastActiveSessionKey).toBe("agent:test_old:main");
     expect(host.pendingGatewayUrl).toBe("ws://gateway-b.example:18789");
     expect(host.pendingGatewayToken).toBe("test-token");
+  });
+
+  it("locks a tab to an agent main session derived from the URL", () => {
+    const host = createHost("chat");
+
+    window.history.replaceState({}, "", "/chat?agent=quan_ly&lockSession=1");
+
+    applySettingsFromUrl(host);
+
+    expect(host.sessionKey).toBe("agent:quan_ly:main");
+    expect(host.settings.sessionKey).toBe("agent:quan_ly:main");
+    expect(host.lockedSessionKey).toBe("agent:quan_ly:main");
+    expect(host.lockedAgentId).toBe("quan_ly");
+  });
+
+  it("prefers the agent lock when the URL session points at a different agent", () => {
+    const host = createHost("chat");
+
+    window.history.replaceState(
+      {},
+      "",
+      "/chat?agent=pho_phong&session=agent%3Anv_content%3Amain&lockAgent=1",
+    );
+
+    applySettingsFromUrl(host);
+
+    expect(host.sessionKey).toBe("agent:pho_phong:main");
+    expect(host.lockedAgentId).toBe("pho_phong");
+    expect(host.lockedSessionKey).toBeNull();
+  });
+});
+
+describe("applyBootstrapAccessPolicy", () => {
+  it("lets server-enforced employee policy override a conflicting URL lock", () => {
+    const host = createHost("chat");
+    host.bootstrapAccessPolicy = {
+      employeeId: "emp-01",
+      employeeName: "Lan",
+      lockedAgentId: "nv_content",
+      lockedSessionKey: "agent:nv_content:main",
+      lockSession: true,
+      enforcedByServer: true,
+    };
+
+    window.history.replaceState({}, "", "/chat?agent=quan_ly&lockSession=1");
+
+    applyBootstrapAccessPolicy(host);
+
+    expect(host.sessionKey).toBe("agent:nv_content:main");
+    expect(host.lockedSessionKey).toBe("agent:nv_content:main");
+    expect(host.lockedAgentId).toBe("nv_content");
+  });
+
+  it("keeps supervisors on their home session without hard-locking session switching", () => {
+    const host = createHost("chat");
+    host.bootstrapAccessPolicy = {
+      employeeId: "tp-01",
+      employeeName: "Truong Phong",
+      lockedAgentId: "truong_phong",
+      lockedSessionKey: "agent:truong_phong:main",
+      visibleAgentIds: ["truong_phong", "pho_phong", "nv_content", "nv_media"],
+      lockSession: true,
+      enforcedByServer: true,
+    };
+
+    applyBootstrapAccessPolicy(host);
+
+    expect(host.sessionKey).toBe("agent:truong_phong:main");
+    expect(host.lockedSessionKey).toBeNull();
+    expect(host.lockedAgentId).toBeNull();
+  });
+
+  it("releases URL lock flags when the bootstrap policy allows manager-wide visibility", () => {
+    const host = createHost("chat");
+    host.bootstrapAccessPolicy = {
+      employeeId: "boss-01",
+      employeeName: "Sep Long",
+      lockedAgentId: "quan_ly",
+      lockedSessionKey: "agent:quan_ly:main",
+      lockAgent: true,
+      lockSession: true,
+      canViewAllSessions: true,
+      enforcedByServer: false,
+    };
+
+    window.history.replaceState(
+      {},
+      "",
+      "/chat?employeeId=sep_long%40example.com&session=agent%3Aquan_ly%3Amain&agent=quan_ly&lockSession=1&lockAgent=1",
+    );
+
+    applyBootstrapAccessPolicy(host);
+
+    expect(host.sessionKey).toBe("agent:quan_ly:main");
+    expect(host.lockedSessionKey).toBeNull();
+    expect(host.lockedAgentId).toBeNull();
   });
 });

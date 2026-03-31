@@ -4,6 +4,7 @@ import type { Tab } from "../navigation.ts";
 
 export type BottomTabsProps = {
   activeTab: Tab;
+  visibleTabs?: Tab[];
   onTabChange: (tab: Tab) => void;
 };
 
@@ -15,9 +16,10 @@ const BOTTOM_TABS: Array<{ id: Tab; label: string; icon: keyof typeof icons }> =
 ];
 
 export function renderBottomTabs(props: BottomTabsProps) {
+  const visibleTabs = new Set(props.visibleTabs ?? BOTTOM_TABS.map((tab) => tab.id));
   return html`
     <nav class="bottom-tabs">
-      ${BOTTOM_TABS.map(
+      ${BOTTOM_TABS.filter((tab) => visibleTabs.has(tab.id)).map(
         (tab) => html`
           <button
             class="bottom-tab ${props.activeTab === tab.id ? "bottom-tab--active" : ""}"

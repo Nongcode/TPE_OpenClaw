@@ -5,7 +5,7 @@ import { describe, expect, test, vi } from "vitest";
 import { WebSocket } from "ws";
 import { emitAgentEvent, registerAgentRunContext } from "../infra/agent-events.js";
 import { extractFirstTextBlock } from "../shared/chat-message-content.js";
-import { GATEWAY_CLIENT_MODES, GATEWAY_CLIENT_NAMES } from "../utils/message-channel.js";
+import { GATEWAY_CLIENT_IDS, GATEWAY_CLIENT_MODES, GATEWAY_CLIENT_NAMES } from "./protocol/client-info.js";
 import {
   connectOk,
   getReplyFromConfig,
@@ -471,6 +471,84 @@ describe("gateway server chat", () => {
     // because entry.text takes precedence over entry.content for the silent check.
     // The user message with NO_REPLY text is preserved (only assistant filtered).
     expect(textValues).toEqual(["hello", "real reply", "real text field reply", "NO_REPLY"]);
+  });
+
+  test("chat.history rejects sessions outside control-ui hierarchy access", async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), "openclaw-gw-"));
+    const gatedWs = new WebSocket(`ws://127.0.0.1:${port}`, {
+      headers: { origin: `http://127.0.0.1:${port}` },
+    });
+    trackConnectChallengeNonce(gatedWs);
+    await new Promise<void>((resolve) => gatedWs.once("open", resolve));
+
+    try {
+      testState.gatewayControlUi = {
+        employeeDirectory: [
+          {
+            employeeId: "pp-01",
+            lockedAgentId: "pho_phong",
+            lockSession: true,
+          },
+        ],
+      };
+      testState.sessionStorePath = path.join(dir, "sessions.json");
+      await writeSessionStore({
+        entries: {
+          "agent:pho_phong:main": {
+            sessionId: "sess-deputy",
+            updatedAt: Date.now(),
+          },
+          "agent:nv_content:main": {
+            sessionId: "sess-content",
+            updatedAt: Date.now(),
+          },
+          "agent:truong_phong:main": {
+            sessionId: "sess-head",
+            updatedAt: Date.now(),
+          },
+        },
+      });
+
+      await fs.writeFile(
+        path.join(dir, "sess-content.jsonl"),
+        `${JSON.stringify({ message: { role: "assistant", content: "visible" } })}\n`,
+        "utf-8",
+      );
+      await fs.writeFile(
+        path.join(dir, "sess-head.jsonl"),
+        `${JSON.stringify({ message: { role: "assistant", content: "hidden" } })}\n`,
+        "utf-8",
+      );
+
+      await connectOk(gatedWs, {
+        client: {
+          id: GATEWAY_CLIENT_IDS.CONTROL_UI,
+          version: "1.0.0",
+          platform: "web",
+          mode: GATEWAY_CLIENT_MODES.WEBCHAT,
+        },
+        controlUiAccess: {
+          employeeId: "pp-01",
+        },
+      });
+
+      const allowed = await rpcReq<{ messages?: unknown[] }>(gatedWs, "chat.history", {
+        sessionKey: "agent:nv_content:main",
+      });
+      expect(allowed.ok).toBe(true);
+      expect(allowed.payload?.messages).toHaveLength(1);
+
+      const denied = await rpcReq(gatedWs, "chat.history", {
+        sessionKey: "agent:truong_phong:main",
+      });
+      expect(denied.ok).toBe(false);
+      expect(denied.error?.message).toMatch(/unauthorized/i);
+    } finally {
+      testState.gatewayControlUi = undefined;
+      testState.sessionStorePath = undefined;
+      gatedWs.close();
+      await fs.rm(dir, { recursive: true, force: true });
+    }
   });
 
   test("routes chat.send slash commands without agent runs", async () => {

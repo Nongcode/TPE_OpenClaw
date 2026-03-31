@@ -1,4 +1,5 @@
 import { buildDeviceAuthPayload } from "../../../src/gateway/device-auth.js";
+import type { ControlUiBootstrapAccessPolicy } from "../../../src/gateway/control-ui-contract.js";
 import {
   GATEWAY_CLIENT_MODES,
   GATEWAY_CLIENT_NAMES,
@@ -132,6 +133,7 @@ export type GatewayBrowserClientOptions = {
   url: string;
   token?: string;
   password?: string;
+  accessPolicy?: ControlUiBootstrapAccessPolicy | null;
   clientName?: GatewayClientName;
   clientVersion?: string;
   platform?: string;
@@ -321,6 +323,21 @@ export class GatewayBrowserClient {
       device,
       caps: ["tool-events"],
       auth,
+      controlUiAccess: this.opts.accessPolicy
+        ? {
+            employeeId: this.opts.accessPolicy.employeeId?.trim() || undefined,
+            employeeName: this.opts.accessPolicy.employeeName?.trim() || undefined,
+            lockedAgentId: this.opts.accessPolicy.lockedAgentId?.trim() || undefined,
+            lockedSessionKey: this.opts.accessPolicy.lockedSessionKey?.trim() || undefined,
+            canViewAllSessions: this.opts.accessPolicy.canViewAllSessions === true,
+            visibleAgentIds:
+              this.opts.accessPolicy.visibleAgentIds
+                ?.map((agentId) => agentId.trim())
+                .filter(Boolean) || undefined,
+            lockAgent: this.opts.accessPolicy.lockAgent === true,
+            lockSession: this.opts.accessPolicy.lockSession === true,
+          }
+        : undefined,
       userAgent: navigator.userAgent,
       locale: navigator.language,
     };

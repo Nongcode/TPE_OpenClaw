@@ -508,6 +508,29 @@ describe("trusted-proxy auth", () => {
     expect(res.user).toBe("nick@example.com");
   });
 
+  it("captures display name from trusted proxy header", async () => {
+    const res = await authorizeTrustedProxy({
+      auth: {
+        mode: "trusted-proxy",
+        allowTailscale: false,
+        trustedProxy: {
+          userHeader: "x-forwarded-user",
+          displayNameHeader: "x-forwarded-name",
+          requiredHeaders: ["x-forwarded-proto"],
+        },
+      },
+      headers: {
+        "x-forwarded-user": "nick@example.com",
+        "x-forwarded-name": "Nick Admin",
+        "x-forwarded-proto": "https",
+      },
+    });
+
+    expect(res.ok).toBe(true);
+    expect(res.user).toBe("nick@example.com");
+    expect(res.userDisplayName).toBe("Nick Admin");
+  });
+
   it("rejects request from untrusted source", async () => {
     const res = await authorizeTrustedProxy({
       remoteAddress: "192.168.1.100",

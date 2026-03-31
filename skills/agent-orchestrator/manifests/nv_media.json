@@ -1,0 +1,15 @@
+{
+  "id": "nv_media",
+  "label": "Nhan vien media",
+  "role": "media specialist",
+  "reportsTo": "pho_phong",
+  "canDelegateTo": [],
+  "requiresReviewBy": "pho_phong",
+  "capabilities": [
+    "image",
+    "visual",
+    "design",
+    "creative"
+  ],
+  "taskTypes": ["media.create"]
+}

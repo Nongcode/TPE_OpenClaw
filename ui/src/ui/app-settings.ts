@@ -31,11 +31,19 @@ import {
   tabFromPath,
   type Tab,
 } from "./navigation.ts";
+import { buildAgentMainSessionKey, normalizeAgentId } from "../../../src/routing/session-key.js";
+import { parseAgentSessionKey } from "../../../src/sessions/session-key-utils.js";
 import { saveSettings, type UiSettings } from "./storage.ts";
 import { startThemeTransition, type ThemeTransitionContext } from "./theme-transition.ts";
 import { resolveTheme, type ResolvedTheme, type ThemeMode, type ThemeName } from "./theme.ts";
 import type { AgentsListResult, AttentionItem } from "./types.ts";
 import { resetChatViewState } from "./views/chat.ts";
+import type { ControlUiBootstrapAccessPolicy } from "../../../src/gateway/control-ui-contract.js";
+import {
+  canBrowseMultipleControlUiSessions,
+  shouldApplyStrictControlUiLock,
+  shouldShowControlUiTab,
+} from "./control-ui-access.ts";
 
 type SettingsHost = {
   settings: UiSettings;
@@ -45,6 +53,8 @@ type SettingsHost = {
   themeResolved: ResolvedTheme;
   applySessionKey: string;
   sessionKey: string;
+  lockedAgentId?: string | null;
+  lockedSessionKey?: string | null;
   tab: Tab;
   connected: boolean;
   chatHasAutoScrolled: boolean;
@@ -53,6 +63,7 @@ type SettingsHost = {
   eventLogBuffer: unknown[];
   basePath: string;
   agentsList?: AgentsListResult | null;
+  bootstrapAccessPolicy?: ControlUiBootstrapAccessPolicy | null;
   agentsSelectedId?: string | null;
   agentsPanel?: "overview" | "files" | "tools" | "skills" | "channels" | "cron";
   pendingGatewayUrl?: string | null;
@@ -86,6 +97,23 @@ export function setLastActiveSessionKey(host: SettingsHost, next: string) {
   applySettings(host, { ...host.settings, lastActiveSessionKey: trimmed });
 }
 
+function parseBooleanUrlFlag(raw: string | null): boolean {
+  if (!raw) {
+    return false;
+  }
+  const normalized = raw.trim().toLowerCase();
+  return normalized === "1" || normalized === "true" || normalized === "yes" || normalized === "on";
+}
+
+function applyResolvedSessionSelection(host: SettingsHost, sessionKey: string) {
+  host.sessionKey = sessionKey;
+  applySettings(host, {
+    ...host.settings,
+    sessionKey,
+    lastActiveSessionKey: sessionKey,
+  });
+}
+
 export function applySettingsFromUrl(host: SettingsHost) {
   if (!window.location.search && !window.location.hash) {
     return;
@@ -100,6 +128,9 @@ export function applySettingsFromUrl(host: SettingsHost) {
   const tokenRaw = hashParams.get("token");
   const passwordRaw = params.get("password") ?? hashParams.get("password");
   const sessionRaw = params.get("session") ?? hashParams.get("session");
+  const agentRaw = params.get("agent") ?? hashParams.get("agent");
+  const lockSessionRaw = params.get("lockSession") ?? hashParams.get("lockSession");
+  const lockAgentRaw = params.get("lockAgent") ?? hashParams.get("lockAgent");
   const shouldResetSessionForToken = Boolean(
     tokenRaw?.trim() && !sessionRaw?.trim() && !gatewayUrlChanged,
   );
@@ -137,17 +168,30 @@ export function applySettingsFromUrl(host: SettingsHost) {
     shouldCleanUrl = true;
   }
 
-  if (sessionRaw != null) {
-    const session = sessionRaw.trim();
-    if (session) {
-      host.sessionKey = session;
-      applySettings(host, {
-        ...host.settings,
-        sessionKey: session,
-        lastActiveSessionKey: session,
-      });
-    }
+  const normalizedAgentId = agentRaw?.trim() ? normalizeAgentId(agentRaw) : "";
+  let resolvedSession = sessionRaw?.trim() ?? "";
+  if (!resolvedSession && normalizedAgentId) {
+    resolvedSession = buildAgentMainSessionKey({ agentId: normalizedAgentId });
   }
+  const parsedResolvedSession = parseAgentSessionKey(resolvedSession);
+  if (
+    normalizedAgentId &&
+    parsedResolvedSession &&
+    parsedResolvedSession.agentId !== normalizedAgentId
+  ) {
+    resolvedSession = buildAgentMainSessionKey({ agentId: normalizedAgentId });
+  }
+
+  if (resolvedSession) {
+    applyResolvedSessionSelection(host, resolvedSession);
+  }
+
+  const shouldLockSession = parseBooleanUrlFlag(lockSessionRaw);
+  const shouldLockAgent = parseBooleanUrlFlag(lockAgentRaw);
+  const resolvedLockedAgentId =
+    normalizedAgentId || parseAgentSessionKey(resolvedSession)?.agentId || null;
+  host.lockedSessionKey = shouldLockSession && resolvedSession ? resolvedSession : null;
+  host.lockedAgentId = shouldLockAgent || shouldLockSession ? resolvedLockedAgentId : null;
 
   if (gatewayUrlRaw != null) {
     if (gatewayUrlChanged) {
@@ -175,6 +219,37 @@ export function applySettingsFromUrl(host: SettingsHost) {
 
 export function setTab(host: SettingsHost, next: Tab) {
   applyTabSelection(host, next, { refreshPolicy: "always", syncUrl: true });
+}
+
+export function applyBootstrapAccessPolicy(host: SettingsHost) {
+  const policy = host.bootstrapAccessPolicy;
+  if (!policy) {
+    return;
+  }
+
+  const lockedAgentId = policy.lockedAgentId?.trim()
+    ? normalizeAgentId(policy.lockedAgentId)
+    : null;
+  const lockedSessionKey = policy.lockedSessionKey?.trim()
+    ? policy.lockedSessionKey.trim().toLowerCase()
+    : lockedAgentId
+      ? buildAgentMainSessionKey({ agentId: lockedAgentId })
+      : null;
+  const strictLock = shouldApplyStrictControlUiLock(policy);
+  const shouldLockSession = strictLock && policy.lockSession === true && Boolean(lockedSessionKey);
+  const shouldLockAgent = strictLock && (policy.lockAgent === true || shouldLockSession);
+
+  if (lockedSessionKey) {
+    applyResolvedSessionSelection(host, lockedSessionKey);
+  } else if (!canBrowseMultipleControlUiSessions(policy)) {
+    const currentSessionKey = host.sessionKey?.trim();
+    if (currentSessionKey) {
+      applyResolvedSessionSelection(host, currentSessionKey);
+    }
+  }
+  host.lockedSessionKey = shouldLockSession ? lockedSessionKey : null;
+  host.lockedAgentId =
+    shouldLockAgent ? lockedAgentId ?? parseAgentSessionKey(lockedSessionKey)?.agentId ?? null : null;
 }
 
 export function setTheme(host: SettingsHost, next: ThemeName, context?: ThemeTransitionContext) {
@@ -382,14 +457,25 @@ export function onPopState(host: SettingsHost) {
 
   const url = new URL(window.location.href);
   const session = url.searchParams.get("session")?.trim();
-  if (session) {
-    host.sessionKey = session;
+  const agent = url.searchParams.get("agent")?.trim();
+  const normalizedAgentId = agent ? normalizeAgentId(agent) : "";
+  const resolvedSession =
+    session || (normalizedAgentId ? buildAgentMainSessionKey({ agentId: normalizedAgentId }) : "");
+  if (resolvedSession) {
+    host.sessionKey = resolvedSession;
     applySettings(host, {
       ...host.settings,
-      sessionKey: session,
-      lastActiveSessionKey: session,
+      sessionKey: resolvedSession,
+      lastActiveSessionKey: resolvedSession,
     });
   }
+  const lockSession = parseBooleanUrlFlag(url.searchParams.get("lockSession"));
+  const lockAgent = parseBooleanUrlFlag(url.searchParams.get("lockAgent"));
+  host.lockedSessionKey = lockSession && resolvedSession ? resolvedSession : null;
+  host.lockedAgentId =
+    lockAgent || lockSession
+      ? normalizedAgentId || parseAgentSessionKey(resolvedSession)?.agentId || null
+      : null;
 
   setTabFromRoute(host, resolved);
 }
@@ -403,25 +489,26 @@ function applyTabSelection(
   next: Tab,
   options: { refreshPolicy: "always" | "connected"; syncUrl?: boolean },
 ) {
+  const resolvedNext = shouldShowControlUiTab(host.bootstrapAccessPolicy, next) ? next : "chat";
   const prev = host.tab;
-  if (host.tab !== next) {
-    host.tab = next;
+  if (host.tab !== resolvedNext) {
+    host.tab = resolvedNext;
   }
 
   // Cleanup chat module state when navigating away from chat
-  if (prev === "chat" && next !== "chat") {
+  if (prev === "chat" && resolvedNext !== "chat") {
     resetChatViewState();
   }
 
-  if (next === "chat") {
+  if (resolvedNext === "chat") {
     host.chatHasAutoScrolled = false;
   }
-  if (next === "logs") {
+  if (resolvedNext === "logs") {
     startLogsPolling(host as unknown as Parameters<typeof startLogsPolling>[0]);
   } else {
     stopLogsPolling(host as unknown as Parameters<typeof stopLogsPolling>[0]);
   }
-  if (next === "debug") {
+  if (resolvedNext === "debug") {
     startDebugPolling(host as unknown as Parameters<typeof startDebugPolling>[0]);
   } else {
     stopDebugPolling(host as unknown as Parameters<typeof stopDebugPolling>[0]);
@@ -432,7 +519,9 @@ function applyTabSelection(
   }
 
   if (options.syncUrl) {
-    syncUrlWithTab(host, next, false);
+    syncUrlWithTab(host, resolvedNext, false);
+  } else if (resolvedNext !== next) {
+    syncUrlWithTab(host, resolvedNext, true);
   }
 }
 
@@ -448,6 +537,37 @@ export function syncUrlWithTab(host: SettingsHost, tab: Tab, replace: boolean) {
     url.searchParams.set("session", host.sessionKey);
   } else {
     url.searchParams.delete("session");
+  }
+
+  if (tab === "chat" && host.lockedAgentId) {
+    url.searchParams.set("agent", host.lockedAgentId);
+  } else {
+    url.searchParams.delete("agent");
+  }
+
+  const employeeId = host.bootstrapAccessPolicy?.employeeId?.trim();
+  const employeeName = host.bootstrapAccessPolicy?.employeeName?.trim();
+  if (employeeId) {
+    url.searchParams.set("employeeId", employeeId);
+  } else {
+    url.searchParams.delete("employeeId");
+  }
+  if (employeeName) {
+    url.searchParams.set("employeeName", employeeName);
+  } else {
+    url.searchParams.delete("employeeName");
+  }
+
+  if (tab === "chat" && host.lockedSessionKey) {
+    url.searchParams.set("lockSession", "1");
+  } else {
+    url.searchParams.delete("lockSession");
+  }
+
+  if (tab === "chat" && host.lockedAgentId) {
+    url.searchParams.set("lockAgent", "1");
+  } else {
+    url.searchParams.delete("lockAgent");
   }
 
   if (currentPath !== targetPath) {
@@ -467,6 +587,21 @@ export function syncUrlWithSessionKey(host: SettingsHost, sessionKey: string, re
   }
   const url = new URL(window.location.href);
   url.searchParams.set("session", sessionKey);
+  if (host.lockedAgentId) {
+    url.searchParams.set("agent", host.lockedAgentId);
+    url.searchParams.set("lockAgent", "1");
+  }
+  if (host.lockedSessionKey) {
+    url.searchParams.set("lockSession", "1");
+  }
+  const employeeId = host.bootstrapAccessPolicy?.employeeId?.trim();
+  const employeeName = host.bootstrapAccessPolicy?.employeeName?.trim();
+  if (employeeId) {
+    url.searchParams.set("employeeId", employeeId);
+  }
+  if (employeeName) {
+    url.searchParams.set("employeeName", employeeName);
+  }
   if (replace) {
     window.history.replaceState({}, "", url.toString());
   } else {

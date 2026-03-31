@@ -2,6 +2,7 @@ import fs from "node:fs";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import path from "node:path";
 import type { OpenClawConfig } from "../config/config.js";
+import { normalizeSecretInputString } from "../config/types.secrets.js";
 import { openBoundaryFileSync } from "../infra/boundary-file-read.js";
 import {
   isPackageProvenControlUiRootSync,
@@ -12,9 +13,21 @@ import { openVerifiedFileSync } from "../infra/safe-open-sync.js";
 import { AVATAR_MAX_BYTES } from "../shared/avatar-policy.js";
 import { resolveRuntimeServiceVersion } from "../version.js";
 import { DEFAULT_ASSISTANT_IDENTITY, resolveAssistantIdentity } from "./assistant-identity.js";
+import { authorizeTrustedProxy, type ResolvedGatewayAuth } from "./auth.js";
+import {
+  buildClientDeclaredAccessPolicy,
+  normalizeBootstrapAgentId,
+  normalizeBootstrapSessionKey,
+  resolveDirectoryAccessPolicy,
+} from "./control-ui-access.js";
 import {
   CONTROL_UI_BOOTSTRAP_CONFIG_PATH,
+  CONTROL_UI_LOGIN_PATH,
+  type ControlUiDemoLoginConfig,
+  type ControlUiBootstrapAccessPolicy,
   type ControlUiBootstrapConfig,
+  type ControlUiLoginRequest,
+  type ControlUiLoginResponse,
 } from "./control-ui-contract.js";
 import { buildControlUiCspHeader } from "./control-ui-csp.js";
 import {
@@ -22,6 +35,7 @@ import {
   respondNotFound as respondControlUiNotFound,
   respondPlainText,
 } from "./control-ui-http-utils.js";
+import { readJsonBodyOrError, sendMethodNotAllowed } from "./http-common.js";
 import { classifyControlUiRequest } from "./control-ui-routing.js";
 import {
   buildControlUiAvatarUrl,
@@ -34,11 +48,17 @@ const ROOT_PREFIX = "/";
 const CONTROL_UI_ASSETS_MISSING_MESSAGE =
   "Control UI assets not found. Build them with `pnpm ui:build` (auto-installs UI deps), or run `pnpm ui:dev` during development.";
 
+function isValidAgentId(agentId: string): boolean {
+  return /^[a-z0-9][a-z0-9_-]{0,63}$/i.test(agentId);
+}
+
 export type ControlUiRequestOptions = {
   basePath?: string;
   config?: OpenClawConfig;
   agentId?: string;
   root?: ControlUiRootState;
+  resolvedAuth?: ResolvedGatewayAuth;
+  trustedProxies?: string[];
 };
 
 export type ControlUiRootState =
@@ -149,8 +169,179 @@ function respondHeadForFile(req: IncomingMessage, res: ServerResponse, filePath:
   return true;
 }
 
-function isValidAgentId(agentId: string): boolean {
-  return /^[a-z0-9][a-z0-9_-]{0,63}$/i.test(agentId);
+function parseBooleanFlag(raw: string | null): boolean {
+  if (!raw) {
+    return false;
+  }
+  const normalized = raw.trim().toLowerCase();
+  return normalized === "1" || normalized === "true" || normalized === "yes" || normalized === "on";
+}
+
+function normalizeDemoEmail(raw: string | null | undefined): string | undefined {
+  const value = raw?.trim().toLowerCase() ?? "";
+  return value || undefined;
+}
+
+function resolveControlUiDemoLoginConfig(
+  config?: OpenClawConfig,
+): ControlUiDemoLoginConfig | undefined {
+  const demoLogin = config?.gateway?.controlUi?.demoLogin;
+  if (!demoLogin?.enabled) {
+    return undefined;
+  }
+  const accounts =
+    demoLogin.accounts
+      ?.map((entry) => {
+        const email = normalizeDemoEmail(entry.email);
+        if (!email) {
+          return null;
+        }
+        return {
+          email,
+          label: entry.label?.trim() || undefined,
+          employeeId: entry.employeeId?.trim() || undefined,
+          employeeName: entry.employeeName?.trim() || undefined,
+          lockedAgentId: normalizeBootstrapAgentId(entry.lockedAgentId) ?? undefined,
+        };
+      })
+      .filter((entry): entry is NonNullable<typeof entry> => Boolean(entry)) ?? [];
+  return {
+    enabled: true,
+    accounts,
+  };
+}
+
+function resolveControlUiDemoLoginResult(params: {
+  config?: OpenClawConfig;
+  email?: string;
+  password?: string;
+}): ControlUiLoginResponse | undefined {
+  const demoLogin = params.config?.gateway?.controlUi?.demoLogin;
+  if (!demoLogin?.enabled || !Array.isArray(demoLogin.accounts) || demoLogin.accounts.length === 0) {
+    return undefined;
+  }
+  const requestedEmail = normalizeDemoEmail(params.email);
+  const requestedPassword = params.password?.trim();
+  if (!requestedEmail || !requestedPassword) {
+    return undefined;
+  }
+  const matched = demoLogin.accounts.find((entry) => {
+    const candidateEmail = normalizeDemoEmail(entry.email);
+    const candidatePassword = entry.password?.trim();
+    return candidateEmail === requestedEmail && candidatePassword === requestedPassword;
+  });
+  if (!matched) {
+    return undefined;
+  }
+
+  const accessPolicy =
+    resolveDirectoryAccessPolicy({
+      config: params.config,
+      employeeId: matched.employeeId,
+      employeeName: matched.employeeName,
+    }) ??
+    buildClientDeclaredAccessPolicy({
+      employeeId: matched.employeeId,
+      employeeName: matched.employeeName,
+      lockedAgentId: matched.lockedAgentId,
+      lockedSessionKey: matched.lockedSessionKey,
+      lockAgent: true,
+      lockSession: true,
+    });
+
+  return {
+    ok: true,
+    token: normalizeSecretInputString(params.config?.gateway?.auth?.token) || undefined,
+    accessPolicy,
+  };
+}
+
+function resolveTrustedProxyEmployeeIdentity(params: {
+  req: IncomingMessage;
+  resolvedAuth?: ResolvedGatewayAuth;
+  trustedProxies?: string[];
+}): { employeeId?: string; employeeName?: string } | undefined {
+  if (params.resolvedAuth?.mode !== "trusted-proxy" || !params.resolvedAuth.trustedProxy) {
+    return undefined;
+  }
+  const result = authorizeTrustedProxy({
+    req: params.req,
+    trustedProxies: params.trustedProxies,
+    trustedProxyConfig: params.resolvedAuth.trustedProxy,
+  });
+  if (!("user" in result)) {
+    return undefined;
+  }
+  const employeeId = result.user.trim() || undefined;
+  if (!employeeId) {
+    return undefined;
+  }
+  return {
+    employeeId,
+    employeeName: result.displayName?.trim() || employeeId,
+  };
+}
+
+function resolveBootstrapAccessPolicy(params: {
+  req: IncomingMessage;
+  url: URL;
+  config?: OpenClawConfig;
+  resolvedAuth?: ResolvedGatewayAuth;
+  trustedProxies?: string[];
+}): ControlUiBootstrapAccessPolicy | undefined {
+  const trustedProxyIdentity = resolveTrustedProxyEmployeeIdentity({
+    req: params.req,
+    resolvedAuth: params.resolvedAuth,
+    trustedProxies: params.trustedProxies,
+  });
+  const employeeId =
+    trustedProxyIdentity?.employeeId ??
+    params.url.searchParams.get("employeeId")?.trim() ??
+    undefined;
+  const employeeName =
+    trustedProxyIdentity?.employeeName ??
+    params.url.searchParams.get("employeeName")?.trim() ??
+    undefined;
+  const directoryPolicy = resolveDirectoryAccessPolicy({
+    config: params.config,
+    employeeId,
+    employeeName,
+  });
+  if (directoryPolicy) {
+    return directoryPolicy;
+  }
+
+  const url = params.url;
+  const lockedAgentId = normalizeBootstrapAgentId(url.searchParams.get("agent"));
+  const lockedSessionKey =
+    normalizeBootstrapSessionKey(url.searchParams.get("session")) ??
+    (lockedAgentId ? `agent:${lockedAgentId}:main` : undefined);
+  const lockSession = parseBooleanFlag(url.searchParams.get("lockSession"));
+  const lockAgent = parseBooleanFlag(url.searchParams.get("lockAgent")) || lockSession;
+  const autoConnect = parseBooleanFlag(url.searchParams.get("autoConnect"));
+
+  if (
+    !employeeId &&
+    !employeeName &&
+    !lockedAgentId &&
+    !lockedSessionKey &&
+    !lockAgent &&
+    !lockSession &&
+    !autoConnect
+  ) {
+    return undefined;
+  }
+
+  return buildClientDeclaredAccessPolicy({
+    employeeId,
+    employeeName,
+    lockedAgentId,
+    lockedSessionKey,
+    canViewAllSessions: lockedAgentId === "main" || lockedAgentId === "quan_ly",
+    autoConnect,
+    lockAgent,
+    lockSession,
+  });
 }
 
 export function handleControlUiAvatarRequest(
@@ -335,6 +526,7 @@ export function handleControlUiHttpRequest(
   const bootstrapConfigPath = basePath
     ? `${basePath}${CONTROL_UI_BOOTSTRAP_CONFIG_PATH}`
     : CONTROL_UI_BOOTSTRAP_CONFIG_PATH;
+  const loginPath = basePath ? `${basePath}${CONTROL_UI_LOGIN_PATH}` : CONTROL_UI_LOGIN_PATH;
   if (pathname === bootstrapConfigPath) {
     const config = opts?.config;
     const identity = config
@@ -358,7 +550,55 @@ export function handleControlUiHttpRequest(
       assistantAvatar: avatarValue ?? identity.avatar,
       assistantAgentId: identity.agentId,
       serverVersion: resolveRuntimeServiceVersion(process.env),
+      accessPolicy: resolveBootstrapAccessPolicy({
+        req,
+        url,
+        config,
+        resolvedAuth: opts?.resolvedAuth,
+        trustedProxies: opts?.trustedProxies,
+      }),
+      demoLogin: resolveControlUiDemoLoginConfig(config),
     } satisfies ControlUiBootstrapConfig);
+    return true;
+  }
+
+  if (pathname === loginPath) {
+    if (req.method === "HEAD") {
+      res.statusCode = 200;
+      res.setHeader("Content-Type", "application/json; charset=utf-8");
+      res.setHeader("Cache-Control", "no-cache");
+      res.end();
+      return true;
+    }
+    if (req.method !== "POST") {
+      sendMethodNotAllowed(res);
+      return true;
+    }
+    void (async () => {
+      const body = await readJsonBodyOrError(req, res, 16 * 1024);
+      if (!body) {
+        return;
+      }
+      const payload = body as ControlUiLoginRequest;
+      const loginResult = resolveControlUiDemoLoginResult({
+        config: opts?.config,
+        email: payload.email,
+        password: payload.password,
+      });
+      if (!loginResult) {
+        sendJson(res, 401, {
+          error: { message: "Invalid email or password", type: "unauthorized" },
+        });
+        return;
+      }
+      sendJson(res, 200, loginResult);
+    })().catch(() => {
+      if (!res.writableEnded) {
+        sendJson(res, 500, {
+          error: { message: "Internal server error", type: "server_error" },
+        });
+      }
+    });
     return true;
   }
 

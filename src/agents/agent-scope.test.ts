@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { OpenClawConfig } from "../config/config.js";
 import {
   hasConfiguredModelFallbacks,
+  resolveAgentAuthProfile,
   resolveAgentConfig,
   resolveAgentDir,
   resolveAgentEffectiveModelPrimary,
@@ -60,12 +61,34 @@ describe("resolveAgentConfig", () => {
       workspace: "~/openclaw",
       agentDir: "~/.openclaw/agents/main",
       model: "anthropic/claude-opus-4",
+      authProfiles: undefined,
       identity: undefined,
       groupChat: undefined,
       subagents: undefined,
       sandbox: undefined,
       tools: undefined,
     });
+  });
+
+  it("resolves per-agent auth profile locks by provider", () => {
+    const cfg: OpenClawConfig = {
+      agents: {
+        list: [
+          {
+            id: "main",
+            authProfiles: {
+              openai: "openai:main",
+              anthropic: "anthropic:main",
+            },
+          },
+        ],
+      },
+    };
+
+    expect(resolveAgentAuthProfile(cfg, "main", "openai")).toBe("openai:main");
+    expect(resolveAgentAuthProfile(cfg, "main", "OpenAI")).toBe("openai:main");
+    expect(resolveAgentAuthProfile(cfg, "main", "anthropic")).toBe("anthropic:main");
+    expect(resolveAgentAuthProfile(cfg, "main", "google")).toBeUndefined();
   });
 
   it("resolves explicit and effective model primary separately", () => {

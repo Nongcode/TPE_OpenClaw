@@ -8,6 +8,7 @@ import {
   updateSessionStore,
 } from "../../config/sessions.js";
 import { normalizeAgentId, parseAgentSessionKey } from "../../routing/session-key.js";
+import { canControlUiAccessSessionKey } from "../control-ui-access.js";
 import { GATEWAY_CLIENT_IDS } from "../protocol/client-info.js";
 import {
   ErrorCodes,
@@ -69,6 +70,34 @@ function resolveGatewaySessionTargetFromKey(key: string) {
   return { cfg, target, storePath: target.storePath };
 }
 
+function canClientAccessSession(params: {
+  client: GatewayClient | null;
+  key: string;
+  canonicalKey?: string | null;
+}): boolean {
+  const key = params.canonicalKey?.trim() || params.key.trim();
+  return canControlUiAccessSessionKey(params.client?.controlUiAccessPolicy, key);
+}
+
+function rejectUnauthorizedSessionAccess(params: {
+  client: GatewayClient | null;
+  key: string;
+  canonicalKey?: string | null;
+  respond: RespondFn;
+}): boolean {
+  if (
+    canClientAccessSession({
+      client: params.client,
+      key: params.key,
+      canonicalKey: params.canonicalKey,
+    })
+  ) {
+    return false;
+  }
+  params.respond(false, undefined, errorShape(ErrorCodes.INVALID_REQUEST, "unauthorized"));
+  return true;
+}
+
 function rejectWebchatSessionMutation(params: {
   action: "patch" | "delete";
   client: GatewayClient | null;
@@ -93,7 +122,7 @@ function rejectWebchatSessionMutation(params: {
 }
 
 export const sessionsHandlers: GatewayRequestHandlers = {
-  "sessions.list": ({ params, respond }) => {
+  "sessions.list": ({ params, respond, client }) => {
     if (!assertValidParams(params, validateSessionsListParams, "sessions.list", respond)) {
       return;
     }
@@ -106,9 +135,15 @@ export const sessionsHandlers: GatewayRequestHandlers = {
       store,
       opts: p,
     });
-    respond(true, result, undefined);
+    const sessions = result.sessions.filter((session) =>
+      canClientAccessSession({
+        client,
+        key: session.key,
+      }),
+    );
+    respond(true, { ...result, sessions }, undefined);
   },
-  "sessions.preview": ({ params, respond }) => {
+  "sessions.preview": ({ params, respond, client }) => {
     if (!assertValidParams(params, validateSessionsPreviewParams, "sessions.preview", respond)) {
       return;
     }
@@ -137,6 +172,16 @@ export const sessionsHandlers: GatewayRequestHandlers = {
     for (const key of keys) {
       try {
         const storeTarget = resolveGatewaySessionStoreTarget({ cfg, key, scanLegacyKeys: false });
+        if (
+          !canClientAccessSession({
+            client,
+            key,
+            canonicalKey: storeTarget.canonicalKey,
+          })
+        ) {
+          previews.push({ key, status: "missing", items: [] });
+          continue;
+        }
         const store =
           storeCache.get(storeTarget.storePath) ?? loadSessionStore(storeTarget.storePath);
         storeCache.set(storeTarget.storePath, store);
@@ -170,7 +215,7 @@ export const sessionsHandlers: GatewayRequestHandlers = {
 
     respond(true, { ts: Date.now(), previews } satisfies SessionsPreviewResult, undefined);
   },
-  "sessions.resolve": async ({ params, respond }) => {
+  "sessions.resolve": async ({ params, respond, client }) => {
     if (!assertValidParams(params, validateSessionsResolveParams, "sessions.resolve", respond)) {
       return;
     }
@@ -180,6 +225,9 @@ export const sessionsHandlers: GatewayRequestHandlers = {
     const resolved = await resolveSessionKeyFromResolveParams({ cfg, p });
     if (!resolved.ok) {
       respond(false, undefined, resolved.error);
+      return;
+    }
+    if (rejectUnauthorizedSessionAccess({ client, key: resolved.key, respond })) {
       return;
     }
     respond(true, { ok: true, key: resolved.key }, undefined);
@@ -198,6 +246,16 @@ export const sessionsHandlers: GatewayRequestHandlers = {
     }
 
     const { cfg, target, storePath } = resolveGatewaySessionTargetFromKey(key);
+    if (
+      rejectUnauthorizedSessionAccess({
+        client,
+        key,
+        canonicalKey: target.canonicalKey,
+        respond,
+      })
+    ) {
+      return;
+    }
     const applied = await updateSessionStore(storePath, async (store) => {
       const { primaryKey } = migrateAndPruneGatewaySessionStoreKey({ cfg, key, store });
       return await applySessionsPatchToStore({
@@ -227,7 +285,7 @@ export const sessionsHandlers: GatewayRequestHandlers = {
     };
     respond(true, result, undefined);
   },
-  "sessions.reset": async ({ params, respond }) => {
+  "sessions.reset": async ({ params, respond, client }) => {
     if (!assertValidParams(params, validateSessionsResetParams, "sessions.reset", respond)) {
       return;
     }
@@ -237,7 +295,18 @@ export const sessionsHandlers: GatewayRequestHandlers = {
       return;
     }
 
-    const reason = p.reason === "new" ? "new" : "reset";
+      const reason = p.reason === "new" ? "new" : "reset";
+      const { target } = resolveGatewaySessionTargetFromKey(key);
+      if (
+        rejectUnauthorizedSessionAccess({
+          client,
+          key,
+          canonicalKey: target.canonicalKey,
+          respond,
+        })
+      ) {
+        return;
+      }
     const result = await performGatewaySessionReset({
       key,
       reason,
@@ -263,6 +332,16 @@ export const sessionsHandlers: GatewayRequestHandlers = {
     }
 
     const { cfg, target, storePath } = resolveGatewaySessionTargetFromKey(key);
+    if (
+      rejectUnauthorizedSessionAccess({
+        client,
+        key,
+        canonicalKey: target.canonicalKey,
+        respond,
+      })
+    ) {
+      return;
+    }
     const mainKey = resolveMainSessionKey(cfg);
     if (target.canonicalKey === mainKey) {
       respond(
@@ -320,7 +399,7 @@ export const sessionsHandlers: GatewayRequestHandlers = {
 
     respond(true, { ok: true, key: target.canonicalKey, deleted, archived }, undefined);
   },
-  "sessions.get": ({ params, respond }) => {
+  "sessions.get": ({ params, respond, client }) => {
     const p = params;
     const key = requireSessionKey(p.key ?? p.sessionKey, respond);
     if (!key) {
@@ -332,6 +411,16 @@ export const sessionsHandlers: GatewayRequestHandlers = {
         : 200;
 
     const { target, storePath } = resolveGatewaySessionTargetFromKey(key);
+    if (
+      rejectUnauthorizedSessionAccess({
+        client,
+        key,
+        canonicalKey: target.canonicalKey,
+        respond,
+      })
+    ) {
+      return;
+    }
     const store = loadSessionStore(storePath);
     const entry = target.storeKeys.map((k) => store[k]).find(Boolean);
     if (!entry?.sessionId) {
@@ -342,7 +431,7 @@ export const sessionsHandlers: GatewayRequestHandlers = {
     const messages = limit < allMessages.length ? allMessages.slice(-limit) : allMessages;
     respond(true, { messages }, undefined);
   },
-  "sessions.compact": async ({ params, respond }) => {
+  "sessions.compact": async ({ params, respond, client }) => {
     if (!assertValidParams(params, validateSessionsCompactParams, "sessions.compact", respond)) {
       return;
     }
@@ -358,6 +447,16 @@ export const sessionsHandlers: GatewayRequestHandlers = {
         : 400;
 
     const { cfg, target, storePath } = resolveGatewaySessionTargetFromKey(key);
+    if (
+      rejectUnauthorizedSessionAccess({
+        client,
+        key,
+        canonicalKey: target.canonicalKey,
+        respond,
+      })
+    ) {
+      return;
+    }
     // Lock + read in a short critical section; transcript work happens outside.
     const compactTarget = await updateSessionStore(storePath, (store) => {
       const { entry, primaryKey } = migrateAndPruneGatewaySessionStoreKey({ cfg, key, store });

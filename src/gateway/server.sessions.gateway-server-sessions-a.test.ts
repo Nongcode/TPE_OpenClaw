@@ -1428,4 +1428,63 @@ describe("gateway server sessions", () => {
 
     ws.close();
   });
+
+  test("control-ui session list is filtered by hierarchy access policy", async () => {
+    await createSessionStoreDir();
+    testState.gatewayControlUi = {
+      employeeDirectory: [
+        {
+          employeeId: "tp-01",
+          lockedAgentId: "truong_phong",
+          lockSession: true,
+        },
+      ],
+    };
+
+    await writeSessionStore({
+      entries: {
+        "agent:main:main": { sessionId: "sess-root", updatedAt: Date.now() },
+        "agent:quan_ly:main": { sessionId: "sess-manager", updatedAt: Date.now() },
+        "agent:truong_phong:main": { sessionId: "sess-head", updatedAt: Date.now() },
+        "agent:pho_phong:main": { sessionId: "sess-deputy", updatedAt: Date.now() },
+        "agent:nv_content:main": { sessionId: "sess-content", updatedAt: Date.now() },
+        "agent:nv_media:main": { sessionId: "sess-media", updatedAt: Date.now() },
+      },
+    });
+
+    const { ws } = await openClient({
+      client: {
+        id: GATEWAY_CLIENT_IDS.CONTROL_UI,
+        version: "1.0.0",
+        platform: "test",
+        mode: GATEWAY_CLIENT_MODES.WEBCHAT,
+      },
+      controlUiAccess: {
+        employeeId: "tp-01",
+      },
+    });
+
+    const listed = await rpcReq<{
+      sessions: Array<{ key: string }>;
+    }>(ws, "sessions.list", {});
+    expect(listed.ok).toBe(true);
+    const visibleKeys = listed.payload?.sessions.map((session) => session.key) ?? [];
+    expect(visibleKeys).toHaveLength(4);
+    expect(visibleKeys).toEqual(
+      expect.arrayContaining([
+        "agent:truong_phong:main",
+        "agent:pho_phong:main",
+        "agent:nv_content:main",
+        "agent:nv_media:main",
+      ]),
+    );
+
+    const deniedGet = await rpcReq(ws, "sessions.get", {
+      key: "agent:quan_ly:main",
+    });
+    expect(deniedGet.ok).toBe(false);
+    expect(deniedGet.error?.message).toMatch(/unauthorized/i);
+
+    ws.close();
+  });
 });

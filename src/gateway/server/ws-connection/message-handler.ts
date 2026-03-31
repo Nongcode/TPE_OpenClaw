@@ -26,12 +26,16 @@ import { isGatewayCliClient, isWebchatClient } from "../../../utils/message-chan
 import { resolveRuntimeServiceVersion } from "../../../version.js";
 import type { AuthRateLimiter } from "../../auth-rate-limit.js";
 import type { GatewayAuthResult, ResolvedGatewayAuth } from "../../auth.js";
-import { isLocalDirectRequest } from "../../auth.js";
+import { authorizeTrustedProxy, isLocalDirectRequest } from "../../auth.js";
 import {
   buildCanvasScopedHostUrl,
   CANVAS_CAPABILITY_TTL_MS,
   mintCanvasCapabilityToken,
 } from "../../canvas-capability.js";
+import {
+  buildClientDeclaredAccessPolicy,
+  resolveDirectoryAccessPolicy,
+} from "../../control-ui-access.js";
 import { normalizeDeviceMetadataForAuth } from "../../device-auth.js";
 import {
   isLocalishHost,
@@ -95,6 +99,66 @@ import {
 import { isUnauthorizedRoleError, UnauthorizedFloodGuard } from "./unauthorized-flood-guard.js";
 
 type SubsystemLogger = ReturnType<typeof createSubsystemLogger>;
+
+function resolveControlUiAccessPolicyForConnect(params: {
+  configSnapshot: ReturnType<typeof loadConfig>;
+  connectParams: ConnectParams;
+  req: IncomingMessage;
+  resolvedAuth: ResolvedGatewayAuth;
+  trustedProxies: string[];
+}): import("../../control-ui-contract.js").ControlUiBootstrapAccessPolicy | undefined {
+  if (params.connectParams.client.id !== GATEWAY_CLIENT_IDS.CONTROL_UI) {
+    return undefined;
+  }
+
+  const trustedProxyIdentity =
+    params.resolvedAuth.mode === "trusted-proxy" && params.resolvedAuth.trustedProxy
+      ? (() => {
+          const result = authorizeTrustedProxy({
+            req: params.req,
+            trustedProxies: params.trustedProxies,
+            trustedProxyConfig: params.resolvedAuth.trustedProxy,
+          });
+          if (!("user" in result)) {
+            return undefined;
+          }
+          const employeeId = result.user.trim() || undefined;
+          if (!employeeId) {
+            return undefined;
+          }
+          return {
+            employeeId,
+            employeeName: result.displayName?.trim() || employeeId,
+          };
+        })()
+      : undefined;
+
+  const requestedEmployeeId =
+    trustedProxyIdentity?.employeeId ?? params.connectParams.controlUiAccess?.employeeId?.trim();
+  const requestedEmployeeName =
+    trustedProxyIdentity?.employeeName ??
+    params.connectParams.controlUiAccess?.employeeName?.trim();
+
+  const directoryPolicy = resolveDirectoryAccessPolicy({
+    config: params.configSnapshot,
+    employeeId: requestedEmployeeId,
+    employeeName: requestedEmployeeName,
+  });
+  if (directoryPolicy) {
+    return directoryPolicy;
+  }
+
+  return buildClientDeclaredAccessPolicy({
+    employeeId: requestedEmployeeId,
+    employeeName: requestedEmployeeName,
+    lockedAgentId: params.connectParams.controlUiAccess?.lockedAgentId,
+    lockedSessionKey: params.connectParams.controlUiAccess?.lockedSessionKey,
+    canViewAllSessions: params.connectParams.controlUiAccess?.canViewAllSessions,
+    visibleAgentIds: params.connectParams.controlUiAccess?.visibleAgentIds,
+    lockAgent: params.connectParams.controlUiAccess?.lockAgent,
+    lockSession: params.connectParams.controlUiAccess?.lockSession,
+  });
+}
 
 const DEVICE_SIGNATURE_SKEW_MS = 2 * 60 * 1000;
 
@@ -951,6 +1015,13 @@ export function attachGatewayWsMessageHandler(params: {
         const canvasCapabilityExpiresAtMs = canvasCapability
           ? Date.now() + CANVAS_CAPABILITY_TTL_MS
           : undefined;
+        const controlUiAccessPolicy = resolveControlUiAccessPolicyForConnect({
+          configSnapshot,
+          connectParams,
+          req: upgradeReq,
+          resolvedAuth,
+          trustedProxies,
+        });
         const scopedCanvasHostUrl =
           canvasHostUrl && canvasCapability
             ? (buildCanvasScopedHostUrl(canvasHostUrl, canvasCapability) ?? canvasHostUrl)
@@ -990,6 +1061,7 @@ export function attachGatewayWsMessageHandler(params: {
           canvasHostUrl,
           canvasCapability,
           canvasCapabilityExpiresAtMs,
+          controlUiAccessPolicy,
         };
         setSocketMaxPayload(socket, MAX_PAYLOAD_BYTES);
         setClient(nextClient);

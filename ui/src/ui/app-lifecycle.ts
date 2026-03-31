@@ -9,6 +9,7 @@ import {
 } from "./app-polling.ts";
 import { observeTopbar, scheduleChatScroll, scheduleLogsScroll } from "./app-scroll.ts";
 import {
+  applyBootstrapAccessPolicy,
   applySettingsFromUrl,
   attachThemeListener,
   detachThemeListener,
@@ -18,6 +19,8 @@ import {
 } from "./app-settings.ts";
 import { loadControlUiBootstrapConfig } from "./controllers/control-ui-bootstrap.ts";
 import type { Tab } from "./navigation.ts";
+
+const CONTROL_UI_DEMO_LOGIN_SESSION_KEY = "openclaw.control.demo-login.authed";
 
 type LifecycleHost = {
   basePath: string;
@@ -29,6 +32,10 @@ type LifecycleHost = {
   assistantAvatar: string | null;
   assistantAgentId: string | null;
   serverVersion: string | null;
+  bootstrapAccessPolicy?: import("../../../src/gateway/control-ui-contract.js").ControlUiBootstrapAccessPolicy | null;
+  demoLoginConfig?: import("../../../src/gateway/control-ui-contract.js").ControlUiDemoLoginConfig | null;
+  settings: { token: string };
+  pendingGatewayToken?: string | null;
   chatHasAutoScrolled: boolean;
   chatManualRefreshInFlight: boolean;
   chatLoading: boolean;
@@ -47,12 +54,19 @@ export function handleConnected(host: LifecycleHost) {
   host.basePath = inferBasePath();
   applySettingsFromUrl(host as unknown as Parameters<typeof applySettingsFromUrl>[0]);
   const bootstrapReady = loadControlUiBootstrapConfig(host);
-  syncTabWithLocation(host as unknown as Parameters<typeof syncTabWithLocation>[0], true);
   syncThemeWithSettings(host as unknown as Parameters<typeof syncThemeWithSettings>[0]);
   attachThemeListener(host as unknown as Parameters<typeof attachThemeListener>[0]);
   window.addEventListener("popstate", host.popStateHandler);
   void bootstrapReady.finally(() => {
     if (host.connectGeneration !== connectGeneration) {
+      return;
+    }
+    applyBootstrapAccessPolicy(host as unknown as Parameters<typeof applyBootstrapAccessPolicy>[0]);
+    syncTabWithLocation(host as unknown as Parameters<typeof syncTabWithLocation>[0], true);
+    const demoLoginUnlocked =
+      typeof window !== "undefined" &&
+      window.sessionStorage?.getItem(CONTROL_UI_DEMO_LOGIN_SESSION_KEY) === "1";
+    if (host.demoLoginConfig?.enabled && !demoLoginUnlocked) {
       return;
     }
     connectGateway(host as unknown as Parameters<typeof connectGateway>[0]);

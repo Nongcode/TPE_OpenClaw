@@ -63,6 +63,21 @@ export const ConnectParamsSchema = Type.Object(
         { additionalProperties: false },
       ),
     ),
+    controlUiAccess: Type.Optional(
+      Type.Object(
+        {
+          employeeId: Type.Optional(NonEmptyString),
+          employeeName: Type.Optional(NonEmptyString),
+          lockedAgentId: Type.Optional(NonEmptyString),
+          lockedSessionKey: Type.Optional(NonEmptyString),
+          canViewAllSessions: Type.Optional(Type.Boolean()),
+          visibleAgentIds: Type.Optional(Type.Array(NonEmptyString)),
+          lockAgent: Type.Optional(Type.Boolean()),
+          lockSession: Type.Optional(Type.Boolean()),
+        },
+        { additionalProperties: false },
+      ),
+    ),
     locale: Type.Optional(Type.String()),
     userAgent: Type.Optional(Type.String()),
   },

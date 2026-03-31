@@ -76,6 +76,9 @@ type GatewayHost = {
   assistantAvatar: string | null;
   assistantAgentId: string | null;
   serverVersion: string | null;
+  bootstrapAccessPolicy?: import("../../../src/gateway/control-ui-contract.js").ControlUiBootstrapAccessPolicy | null;
+  lockedAgentId?: string | null;
+  lockedSessionKey?: string | null;
   sessionKey: string;
   chatRunId: string | null;
   refreshSessionsAfterChat: Set<string>;
@@ -193,6 +196,14 @@ export function connectGateway(host: GatewayHost) {
     url: host.settings.gatewayUrl,
     token: host.settings.token.trim() ? host.settings.token : undefined,
     password: host.password.trim() ? host.password : undefined,
+    accessPolicy:
+      host.bootstrapAccessPolicy ??
+      (host.lockedAgentId || host.lockedSessionKey
+        ? {
+            lockedAgentId: host.lockedAgentId ?? undefined,
+            lockedSessionKey: host.lockedSessionKey ?? undefined,
+          }
+        : null),
     clientName: "openclaw-control-ui",
     clientVersion,
     mode: "webchat",

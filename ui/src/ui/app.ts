@@ -22,6 +22,8 @@ import {
 import { DEFAULT_CRON_FORM, DEFAULT_LOG_LEVEL_FILTERS } from "./app-defaults.ts";
 import type { EventLogEntry } from "./app-events.ts";
 import { connectGateway as connectGatewayInternal } from "./app-gateway.ts";
+import type { ControlUiBootstrapAccessPolicy } from "../../../src/gateway/control-ui-contract.js";
+import type { ControlUiDemoLoginConfig } from "../../../src/gateway/control-ui-contract.js";
 import {
   handleConnected,
   handleDisconnected,
@@ -37,9 +39,11 @@ import {
   scheduleChatScroll as scheduleChatScrollInternal,
 } from "./app-scroll.ts";
 import {
+  applyBootstrapAccessPolicy,
   applySettings as applySettingsInternal,
   loadCron as loadCronInternal,
   loadOverview as loadOverviewInternal,
+  syncTabWithLocation,
   setTab as setTabInternal,
   setTheme as setThemeInternal,
   setThemeMode as setThemeModeInternal,
@@ -96,6 +100,7 @@ declare global {
 }
 
 const bootAssistantIdentity = normalizeAssistantIdentity({});
+const CONTROL_UI_DEMO_LOGIN_SESSION_KEY = "openclaw.control.demo-login.authed";
 
 function resolveOnboardingMode(): boolean {
   if (!window.location.search) {
@@ -144,8 +149,15 @@ export class OpenClawApp extends LitElement {
   @state() assistantAvatar = bootAssistantIdentity.avatar;
   @state() assistantAgentId = bootAssistantIdentity.agentId ?? null;
   @state() serverVersion: string | null = null;
+  @state() bootstrapAccessPolicy: ControlUiBootstrapAccessPolicy | null = null;
+  @state() demoLoginConfig: ControlUiDemoLoginConfig | null = null;
+  @state() demoLoginEmail = "";
+  @state() demoLoginPassword = "";
+  @state() demoLoginBusy = false;
 
   @state() sessionKey = this.settings.sessionKey;
+  @state() lockedAgentId: string | null = null;
+  @state() lockedSessionKey: string | null = null;
   @state() chatLoading = false;
   @state() chatSending = false;
   @state() chatMessage = "";
@@ -499,6 +511,50 @@ export class OpenClawApp extends LitElement {
 
   connect() {
     connectGatewayInternal(this as unknown as Parameters<typeof connectGatewayInternal>[0]);
+  }
+
+  async handleDemoLogin() {
+    const email = this.demoLoginEmail.trim();
+    const password = this.demoLoginPassword;
+    if (!email || !password || this.demoLoginBusy) {
+      return;
+    }
+    this.demoLoginBusy = true;
+    this.lastError = null;
+    this.lastErrorCode = null;
+    try {
+      const { loginWithControlUiDemo } = await import("./controllers/control-ui-login.ts");
+      const result = await loginWithControlUiDemo({
+        basePath: this.basePath,
+        email,
+        password,
+      });
+      if (result.gatewayUrl?.trim()) {
+        this.applySettings({
+          ...this.settings,
+          gatewayUrl: result.gatewayUrl.trim(),
+          token: result.token?.trim() || this.settings.token,
+        });
+      } else {
+        this.applySettings({
+          ...this.settings,
+          token: result.token?.trim() || this.settings.token,
+        });
+      }
+      this.password = "";
+      this.demoLoginPassword = "";
+      this.bootstrapAccessPolicy = result.accessPolicy ?? null;
+      if (typeof window !== "undefined" && window.sessionStorage) {
+        window.sessionStorage.setItem(CONTROL_UI_DEMO_LOGIN_SESSION_KEY, "1");
+      }
+      applyBootstrapAccessPolicy(this as unknown as Parameters<typeof applyBootstrapAccessPolicy>[0]);
+      syncTabWithLocation(this as unknown as Parameters<typeof syncTabWithLocation>[0], true);
+      this.connect();
+    } catch (error) {
+      this.lastError = error instanceof Error ? error.message : "Demo login failed";
+    } finally {
+      this.demoLoginBusy = false;
+    }
   }
 
   handleChatScroll(event: Event) {
