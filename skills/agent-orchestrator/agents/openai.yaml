@@ -1,0 +1,3 @@
+display_name: Agent Orchestrator
+short_description: Route work across OpenClaw agents
+default_prompt: Coordinate tasks across agents with hierarchy-aware planning and permission boundaries.

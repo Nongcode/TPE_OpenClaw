@@ -7,6 +7,10 @@ import type { ExecApprovalsFile, ExecApprovalsSnapshot } from "./controllers/exe
 import type { SkillMessage } from "./controllers/skills.ts";
 import type { GatewayBrowserClient, GatewayHelloOk } from "./gateway.ts";
 import type { Tab } from "./navigation.ts";
+import type {
+  ControlUiBootstrapAccessPolicy,
+  ControlUiDemoLoginConfig,
+} from "../../../src/gateway/control-ui-contract.js";
 import type { UiSettings } from "./storage.ts";
 import type { ThemeTransitionContext } from "./theme-transition.ts";
 import type { ResolvedTheme, ThemeMode, ThemeName } from "./theme.ts";
@@ -57,7 +61,14 @@ export type AppViewState = {
   assistantName: string;
   assistantAvatar: string | null;
   assistantAgentId: string | null;
+  bootstrapAccessPolicy: ControlUiBootstrapAccessPolicy | null;
+  demoLoginConfig: ControlUiDemoLoginConfig | null;
+  demoLoginEmail: string;
+  demoLoginPassword: string;
+  demoLoginBusy: boolean;
   sessionKey: string;
+  lockedAgentId: string | null;
+  lockedSessionKey: string | null;
   chatLoading: boolean;
   chatSending: boolean;
   chatMessage: string;
@@ -308,6 +319,7 @@ export type AppViewState = {
     client: GatewayBrowserClient | null;
     refreshSessionsAfterChat: Set<string>;
     connect: () => void;
+    handleDemoLogin: () => Promise<void>;
     setTab: (tab: Tab) => void;
     setTheme: (theme: ThemeName, context?: ThemeTransitionContext) => void;
     setThemeMode: (mode: ThemeMode, context?: ThemeTransitionContext) => void;

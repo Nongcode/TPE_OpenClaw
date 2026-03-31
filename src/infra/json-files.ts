@@ -45,7 +45,20 @@ export async function writeTextAtomic(
     } catch {
       // best-effort; ignore on platforms without chmod
     }
-    await fs.rename(tmp, filePath);
+    try {
+      await fs.rename(tmp, filePath);
+    } catch (err) {
+      const code = (err as { code?: string }).code;
+      // Windows can report EPERM/EEXIST when replacing an existing file that was
+      // just touched by another reader, sync client, or antivirus hook. Fall
+      // back to copy-overwrite so runtime state stores (pairing/session files)
+      // remain writable instead of crashing the caller.
+      if (code === "EPERM" || code === "EEXIST") {
+        await fs.copyFile(tmp, filePath);
+      } else {
+        throw err;
+      }
+    }
     try {
       await fs.chmod(filePath, mode);
     } catch {

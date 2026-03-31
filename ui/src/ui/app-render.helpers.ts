@@ -1,5 +1,6 @@
 import { html, nothing } from "lit";
 import { repeat } from "lit/directives/repeat.js";
+import { buildAgentMainSessionKey } from "../../../src/routing/session-key.js";
 import { parseAgentSessionKey } from "../../../src/sessions/session-key-utils.js";
 import { t } from "../i18n/index.ts";
 import { refreshChat } from "./app-chat.ts";
@@ -20,6 +21,11 @@ import { iconForTab, pathForTab, titleForTab, type Tab } from "./navigation.ts";
 import type { ThemeTransitionContext } from "./theme-transition.ts";
 import type { ThemeMode, ThemeName } from "./theme.ts";
 import type { ModelCatalogEntry, SessionsListResult } from "./types.ts";
+import {
+  canAccessControlUiSessionKey,
+  canBrowseMultipleControlUiSessions,
+  shouldShowControlUiTab,
+} from "./control-ui-access.ts";
 
 type SessionDefaultsSnapshot = {
   mainSessionKey?: string;
@@ -27,6 +33,20 @@ type SessionDefaultsSnapshot = {
 };
 
 function resolveSidebarChatSessionKey(state: AppViewState): string {
+  if (state.lockedSessionKey) {
+    return state.lockedSessionKey;
+  }
+  const preferredBootstrapSession = state.bootstrapAccessPolicy?.lockedSessionKey?.trim().toLowerCase();
+  if (preferredBootstrapSession) {
+    return preferredBootstrapSession;
+  }
+  if (state.lockedAgentId) {
+    return buildAgentMainSessionKey({ agentId: state.lockedAgentId });
+  }
+  const preferredBootstrapAgent = state.bootstrapAccessPolicy?.lockedAgentId?.trim();
+  if (preferredBootstrapAgent) {
+    return buildAgentMainSessionKey({ agentId: preferredBootstrapAgent });
+  }
   const snapshot = state.hello?.snapshot as
     | { sessionDefaults?: SessionDefaultsSnapshot }
     | undefined;
@@ -57,6 +77,9 @@ function resetChatStateForSessionSwitch(state: AppViewState, sessionKey: string)
 }
 
 export function renderTab(state: AppViewState, tab: Tab, opts?: { collapsed?: boolean }) {
+  if (!shouldShowControlUiTab(state.bootstrapAccessPolicy, tab)) {
+    return nothing;
+  }
   const href = pathForTab(tab, state.basePath);
   const isActive = state.tab === tab;
   const collapsed = opts?.collapsed ?? state.settings.navCollapsed;
@@ -134,17 +157,27 @@ function renderCronFilterIcon(hiddenCount: number) {
 }
 
 export function renderChatSessionSelect(state: AppViewState) {
-  const sessionGroups = resolveSessionOptionGroups(state, state.sessionKey, state.sessionsResult);
+  const effectiveSessionKey = state.lockedSessionKey ?? state.sessionKey;
+  const sessionGroups = resolveSessionOptionGroups(state, effectiveSessionKey, state.sessionsResult);
+  const selectDisabled =
+    !state.connected ||
+    sessionGroups.length === 0 ||
+    (Boolean(state.lockedSessionKey) && !canBrowseMultipleControlUiSessions(state.bootstrapAccessPolicy));
   const modelSelect = renderChatModelSelect(state);
+  const lockLabel = state.lockedSessionKey
+    ? `Locked to ${resolveSessionDisplayName(effectiveSessionKey, state.sessionsResult?.sessions?.find((row) => row.key === effectiveSessionKey))}`
+    : state.lockedAgentId
+      ? `Locked to ${resolveAgentGroupLabel(state, state.lockedAgentId)}`
+      : null;
   return html`
     <div class="chat-controls__session-row">
       <label class="field chat-controls__session">
         <select
-          .value=${state.sessionKey}
-          ?disabled=${!state.connected || sessionGroups.length === 0}
+          .value=${effectiveSessionKey}
+          ?disabled=${selectDisabled}
           @change=${(e: Event) => {
             const next = (e.target as HTMLSelectElement).value;
-            if (state.sessionKey === next) {
+            if (effectiveSessionKey === next) {
               return;
             }
             switchChatSession(state, next);
@@ -167,6 +200,7 @@ export function renderChatSessionSelect(state: AppViewState) {
           )}
         </select>
       </label>
+      ${lockLabel ? html`<span class="pill">${lockLabel}</span>` : nothing}
       ${modelSelect}
     </div>
   `;
@@ -336,7 +370,8 @@ export function renderChatControls(state: AppViewState) {
  * Hidden on desktop via CSS.
  */
 export function renderChatMobileToggle(state: AppViewState) {
-  const sessionGroups = resolveSessionOptionGroups(state, state.sessionKey, state.sessionsResult);
+  const effectiveSessionKey = state.lockedSessionKey ?? state.sessionKey;
+  const sessionGroups = resolveSessionOptionGroups(state, effectiveSessionKey, state.sessionsResult);
   const disableThinkingToggle = state.onboarding;
   const disableFocusToggle = state.onboarding;
   const showThinking = state.onboarding ? false : state.settings.chatShowThinking;
@@ -410,7 +445,8 @@ export function renderChatMobileToggle(state: AppViewState) {
         <div class="chat-controls">
           <label class="field chat-controls__session">
             <select
-              .value=${state.sessionKey}
+              .value=${effectiveSessionKey}
+              ?disabled=${Boolean(state.lockedSessionKey) && !canBrowseMultipleControlUiSessions(state.bootstrapAccessPolicy)}
               @change=${(e: Event) => {
                 const next = (e.target as HTMLSelectElement).value;
                 switchChatSession(state, next);
@@ -488,6 +524,19 @@ export function renderChatMobileToggle(state: AppViewState) {
 }
 
 function switchChatSession(state: AppViewState, nextSessionKey: string) {
+  if (state.lockedSessionKey && state.lockedSessionKey !== nextSessionKey) {
+    return;
+  }
+  if (
+    state.lockedAgentId &&
+    !canBrowseMultipleControlUiSessions(state.bootstrapAccessPolicy) &&
+    parseAgentSessionKey(nextSessionKey)?.agentId !== state.lockedAgentId
+  ) {
+    return;
+  }
+  if (!canAccessControlUiSessionKey(state.bootstrapAccessPolicy, nextSessionKey)) {
+    return;
+  }
   state.sessionKey = nextSessionKey;
   state.chatMessage = "";
   state.chatStream = null;

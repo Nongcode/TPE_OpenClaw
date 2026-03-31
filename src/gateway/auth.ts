@@ -49,10 +49,9 @@ export type GatewayAuthResult = {
     | "bootstrap-token"
     | "trusted-proxy";
   user?: string;
+  userDisplayName?: string;
   reason?: string;
-  /** Present when the request was blocked by the rate limiter. */
   rateLimited?: boolean;
-  /** Milliseconds the client should wait before retrying (when rate-limited). */
   retryAfterMs?: number;
 };
 
@@ -323,11 +322,11 @@ export function assertGatewayAuthConfigured(
  * Check if the request came from a trusted proxy and extract user identity.
  * Returns the user identity if valid, or null with a reason if not.
  */
-function authorizeTrustedProxy(params: {
+export function authorizeTrustedProxy(params: {
   req?: IncomingMessage;
   trustedProxies?: string[];
   trustedProxyConfig: GatewayTrustedProxyConfig;
-}): { user: string } | { reason: string } {
+}): { user: string; displayName?: string } | { reason: string } {
   const { req, trustedProxies, trustedProxyConfig } = params;
 
   if (!req) {
@@ -353,13 +352,20 @@ function authorizeTrustedProxy(params: {
   }
 
   const user = userHeaderValue.trim();
+  const displayNameHeader =
+    trustedProxyConfig.displayNameHeader?.trim().toLowerCase() || "x-forwarded-name";
+  const displayNameValue = headerValue(req.headers[displayNameHeader]);
+  const displayName =
+    typeof displayNameValue === "string" && displayNameValue.trim()
+      ? displayNameValue.trim()
+      : undefined;
 
   const allowUsers = trustedProxyConfig.allowUsers ?? [];
   if (allowUsers.length > 0 && !allowUsers.includes(user)) {
     return { reason: "trusted_proxy_user_not_allowed" };
   }
 
-  return { user };
+  return displayName ? { user, displayName } : { user };
 }
 
 function shouldAllowTailscaleHeaderAuth(authSurface: GatewayAuthSurface): boolean {
@@ -394,7 +400,12 @@ export async function authorizeGatewayConnect(
     });
 
     if ("user" in result) {
-      return { ok: true, method: "trusted-proxy", user: result.user };
+      return {
+        ok: true,
+        method: "trusted-proxy",
+        user: result.user,
+        userDisplayName: result.displayName,
+      };
     }
     return { ok: false, reason: result.reason };
   }

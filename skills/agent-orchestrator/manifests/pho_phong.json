@@ -1,0 +1,15 @@
+{
+  "id": "pho_phong",
+  "label": "Pho phong",
+  "role": "operations lead",
+  "reportsTo": "truong_phong",
+  "canDelegateTo": ["nv_content", "nv_media"],
+  "requiresReviewBy": "truong_phong",
+  "capabilities": [
+    "workflow",
+    "coordination",
+    "quality-gate",
+    "task-splitting"
+  ],
+  "taskTypes": ["campaign.plan", "campaign.execute"]
+}

@@ -86,6 +86,7 @@ export type CommandPaletteProps = {
   open: boolean;
   query: string;
   activeIndex: number;
+  hiddenActions?: string[];
   onToggle: () => void;
   onQueryChange: (query: string) => void;
   onActiveIndexChange: (index: number) => void;
@@ -93,12 +94,14 @@ export type CommandPaletteProps = {
   onSlashCommand: (command: string) => void;
 };
 
-function filteredItems(query: string): PaletteItem[] {
+function filteredItems(query: string, hiddenActions: readonly string[] = []): PaletteItem[] {
+  const hidden = new Set(hiddenActions);
+  const visibleItems = PALETTE_ITEMS.filter((item) => !hidden.has(item.action));
   if (!query) {
-    return PALETTE_ITEMS;
+    return visibleItems;
   }
   const q = query.toLowerCase();
-  return PALETTE_ITEMS.filter(
+  return visibleItems.filter(
     (item) =>
       item.label.toLowerCase().includes(q) ||
       (item.description?.toLowerCase().includes(q) ?? false),
@@ -193,7 +196,7 @@ export function renderCommandPalette(props: CommandPaletteProps) {
     return nothing;
   }
 
-  const items = filteredItems(props.query);
+  const items = filteredItems(props.query, props.hiddenActions);
   const grouped = groupItems(items);
 
   return html`

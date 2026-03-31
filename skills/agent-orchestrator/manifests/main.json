@@ -1,0 +1,15 @@
+{
+  "id": "main",
+  "label": "Main coordinator",
+  "role": "system owner",
+  "canDelegateTo": ["quan_ly"],
+  "capabilities": [
+    "oversight",
+    "delegation",
+    "approval"
+  ],
+  "taskTypes": [
+    "management.request",
+    "management.delegate"
+  ]
+}

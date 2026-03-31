@@ -3,7 +3,10 @@ import type { IncomingMessage } from "node:http";
 import os from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
-import { CONTROL_UI_BOOTSTRAP_CONFIG_PATH } from "./control-ui-contract.js";
+import {
+  CONTROL_UI_BOOTSTRAP_CONFIG_PATH,
+  CONTROL_UI_LOGIN_PATH,
+} from "./control-ui-contract.js";
 import { handleControlUiAvatarRequest, handleControlUiHttpRequest } from "./control-ui.js";
 import { makeMockHttpResponse } from "./test-http-response.js";
 
@@ -27,6 +30,17 @@ describe("handleControlUiHttpRequest", () => {
       assistantName: string;
       assistantAvatar: string;
       assistantAgentId: string;
+      accessPolicy?: {
+        employeeId?: string;
+        employeeName?: string;
+        lockedAgentId?: string;
+        lockedSessionKey?: string;
+        canViewAllSessions?: boolean;
+        visibleAgentIds?: string[];
+        lockAgent?: boolean;
+        lockSession?: boolean;
+        enforcedByServer?: boolean;
+      };
     };
   }
 
@@ -46,16 +60,58 @@ describe("handleControlUiHttpRequest", () => {
     rootPath: string;
     basePath?: string;
     rootKind?: "resolved" | "bundled";
+    config?: Record<string, unknown>;
+    resolvedAuth?: Record<string, unknown>;
+    trustedProxies?: string[];
+    remoteAddress?: string;
   }) {
     const { res, end } = makeMockHttpResponse();
     const handled = handleControlUiHttpRequest(
-      { url: params.url, method: params.method } as IncomingMessage,
+      {
+        url: params.url,
+        method: params.method,
+        socket: { remoteAddress: params.remoteAddress ?? "127.0.0.1" },
+      } as IncomingMessage,
       res,
       {
         ...(params.basePath ? { basePath: params.basePath } : {}),
+        ...(params.config ? { config: params.config as never } : {}),
+        ...(params.resolvedAuth ? { resolvedAuth: params.resolvedAuth as never } : {}),
+        ...(params.trustedProxies ? { trustedProxies: params.trustedProxies } : {}),
         root: { kind: params.rootKind ?? "resolved", path: params.rootPath },
       },
     );
+    return { res, end, handled };
+  }
+
+  async function runControlUiRequestWithBody(params: {
+    url: string;
+    method: "POST";
+    rootPath: string;
+    body: string;
+    config?: Record<string, unknown>;
+  }) {
+    const req = {
+      url: params.url,
+      method: params.method,
+      socket: { remoteAddress: "127.0.0.1" },
+      on(event: string, handler: (...args: unknown[]) => void) {
+        if (event === "data") {
+          handler(Buffer.from(params.body));
+        }
+        if (event === "end") {
+          handler();
+        }
+        return req;
+      },
+    } as unknown as IncomingMessage;
+    const { res, end } = makeMockHttpResponse();
+    const handled = handleControlUiHttpRequest(req, res, {
+      ...(params.config ? { config: params.config as never } : {}),
+      root: { kind: "resolved", path: params.rootPath },
+    });
+    await Promise.resolve();
+    await Promise.resolve();
     return { res, end, handled };
   }
 
@@ -201,6 +257,362 @@ describe("handleControlUiHttpRequest", () => {
         expect(parsed.assistantName).toBe("Ops");
         expect(parsed.assistantAvatar).toBe("/openclaw/avatar/main");
         expect(parsed.assistantAgentId).toBe("main");
+      },
+    });
+  });
+
+  it("resolves employee access policy from gateway.controlUi.employeeDirectory", async () => {
+    await withControlUiRoot({
+      fn: async (tmp) => {
+        const { res, end } = makeMockHttpResponse();
+        const handled = handleControlUiHttpRequest(
+          {
+            url: `${CONTROL_UI_BOOTSTRAP_CONFIG_PATH}?employeeId=emp-01&agent=nv_media&lockSession=1`,
+            method: "GET",
+          } as IncomingMessage,
+          res,
+          {
+            root: { kind: "resolved", path: tmp },
+            config: {
+              agents: { defaults: { workspace: tmp } },
+              gateway: {
+                controlUi: {
+                  employeeDirectory: [
+                    {
+                      employeeId: "emp-01",
+                      employeeName: "Lan",
+                      lockedAgentId: "nv_content",
+                      lockSession: true,
+                    },
+                  ],
+                },
+              },
+            },
+          },
+        );
+        expect(handled).toBe(true);
+        const parsed = parseBootstrapPayload(end);
+        expect(parsed.accessPolicy).toEqual({
+          employeeId: "emp-01",
+          employeeName: "Lan",
+          lockedAgentId: "nv_content",
+          lockedSessionKey: "agent:nv_content:main",
+          canViewAllSessions: false,
+          visibleAgentIds: ["nv_content"],
+          lockAgent: true,
+          lockSession: true,
+          autoConnect: false,
+          enforcedByServer: true,
+        });
+      },
+    });
+  });
+
+  it("derives employee identity from trusted-proxy auth for bootstrap policy lookup", async () => {
+    await withControlUiRoot({
+      fn: async (tmp) => {
+        const req = {
+          url: `${CONTROL_UI_BOOTSTRAP_CONFIG_PATH}`,
+          method: "GET",
+          socket: { remoteAddress: "127.0.0.1" },
+          headers: {
+            "x-forwarded-user": "lan@example.com",
+            "x-forwarded-proto": "https",
+          },
+        } as IncomingMessage;
+        const { res: res2, end: end2 } = makeMockHttpResponse();
+        const handled2 = handleControlUiHttpRequest(req, res2, {
+          root: { kind: "resolved", path: tmp },
+          trustedProxies: ["127.0.0.1"],
+          resolvedAuth: {
+            mode: "trusted-proxy",
+            allowTailscale: false,
+            trustedProxy: {
+              userHeader: "x-forwarded-user",
+              displayNameHeader: "x-forwarded-name",
+              requiredHeaders: ["x-forwarded-proto"],
+            },
+          },
+          config: {
+            agents: { defaults: { workspace: tmp } },
+            gateway: {
+              controlUi: {
+                employeeDirectory: [
+                  {
+                    employeeId: "lan@example.com",
+                    employeeName: "Lan",
+                    lockedAgentId: "nv_content",
+                    lockSession: true,
+                  },
+                ],
+              },
+            },
+          },
+        });
+
+        expect(handled2).toBe(true);
+        const parsed = parseBootstrapPayload(end2);
+        expect(parsed.accessPolicy).toEqual({
+          employeeId: "lan@example.com",
+          employeeName: "Lan",
+          lockedAgentId: "nv_content",
+          lockedSessionKey: "agent:nv_content:main",
+          canViewAllSessions: false,
+          visibleAgentIds: ["nv_content"],
+          lockAgent: true,
+          lockSession: true,
+          autoConnect: false,
+          enforcedByServer: true,
+        });
+      },
+    });
+  });
+
+  it("uses trusted-proxy display name when directory entry omits employeeName", async () => {
+    await withControlUiRoot({
+      fn: async (tmp) => {
+        const req = {
+          url: `${CONTROL_UI_BOOTSTRAP_CONFIG_PATH}`,
+          method: "GET",
+          socket: { remoteAddress: "127.0.0.1" },
+          headers: {
+            "x-forwarded-user": "minh@example.com",
+            "x-forwarded-name": "Minh Tran",
+            "x-forwarded-proto": "https",
+          },
+        } as IncomingMessage;
+        const { res, end } = makeMockHttpResponse();
+        const handled = handleControlUiHttpRequest(req, res, {
+          root: { kind: "resolved", path: tmp },
+          trustedProxies: ["127.0.0.1"],
+          resolvedAuth: {
+            mode: "trusted-proxy",
+            allowTailscale: false,
+            trustedProxy: {
+              userHeader: "x-forwarded-user",
+              displayNameHeader: "x-forwarded-name",
+              requiredHeaders: ["x-forwarded-proto"],
+            },
+          },
+          config: {
+            agents: { defaults: { workspace: tmp } },
+            gateway: {
+              controlUi: {
+                employeeDirectory: [
+                  {
+                    employeeId: "minh@example.com",
+                    lockedAgentId: "nv_media",
+                    lockSession: true,
+                  },
+                ],
+              },
+            },
+          },
+        });
+
+        expect(handled).toBe(true);
+        const parsed = parseBootstrapPayload(end);
+        expect(parsed.accessPolicy).toEqual({
+          employeeId: "minh@example.com",
+          employeeName: "Minh Tran",
+          lockedAgentId: "nv_media",
+          lockedSessionKey: "agent:nv_media:main",
+          canViewAllSessions: false,
+          visibleAgentIds: ["nv_media"],
+          lockAgent: true,
+          lockSession: true,
+          autoConnect: false,
+          enforcedByServer: true,
+        });
+      },
+    });
+  });
+
+  it("includes manager-wide visibility in bootstrap fallback when employeeDirectory does not match", async () => {
+    await withControlUiRoot({
+      fn: async (tmp) => {
+        const { res, end } = makeMockHttpResponse();
+        const handled = handleControlUiHttpRequest(
+          {
+            url: `${CONTROL_UI_BOOTSTRAP_CONFIG_PATH}?employeeId=sep_long%40example.com&agent=quan_ly&session=agent%3Aquan_ly%3Amain&lockSession=1&lockAgent=1`,
+            method: "GET",
+          } as IncomingMessage,
+          res,
+          {
+            root: { kind: "resolved", path: tmp },
+            config: {
+              agents: { defaults: { workspace: tmp } },
+            },
+          },
+        );
+
+        expect(handled).toBe(true);
+        const parsed = parseBootstrapPayload(end);
+        expect(parsed.accessPolicy).toEqual({
+          employeeId: "sep_long@example.com",
+          lockedAgentId: "quan_ly",
+          lockedSessionKey: "agent:quan_ly:main",
+          canViewAllSessions: true,
+          lockAgent: true,
+          lockSession: true,
+          autoConnect: false,
+          enforcedByServer: false,
+        });
+      },
+    });
+  });
+
+  it("applies default hierarchy visibility for truong_phong without explicit visibleAgentIds", async () => {
+    await withControlUiRoot({
+      fn: async (tmp) => {
+        const { res, end } = makeMockHttpResponse();
+        const handled = handleControlUiHttpRequest(
+          {
+            url: `${CONTROL_UI_BOOTSTRAP_CONFIG_PATH}?employeeId=truong_phong_01`,
+            method: "GET",
+          } as IncomingMessage,
+          res,
+          {
+            root: { kind: "resolved", path: tmp },
+            config: {
+              agents: { defaults: { workspace: tmp } },
+              gateway: {
+                controlUi: {
+                  employeeDirectory: [
+                    {
+                      employeeId: "truong_phong_01",
+                      employeeName: "Truong Phong Marketing",
+                      lockedAgentId: "truong_phong",
+                    },
+                  ],
+                },
+              },
+            },
+          },
+        );
+
+        expect(handled).toBe(true);
+        const parsed = parseBootstrapPayload(end);
+        expect(parsed.accessPolicy).toEqual({
+          employeeId: "truong_phong_01",
+          employeeName: "Truong Phong Marketing",
+          lockedAgentId: "truong_phong",
+          lockedSessionKey: "agent:truong_phong:main",
+          canViewAllSessions: false,
+          visibleAgentIds: ["truong_phong", "pho_phong", "nv_content", "nv_media"],
+          lockAgent: false,
+          lockSession: false,
+          autoConnect: false,
+          enforcedByServer: true,
+        });
+      },
+    });
+  });
+
+  it("applies default hierarchy visibility for pho_phong without explicit visibleAgentIds", async () => {
+    await withControlUiRoot({
+      fn: async (tmp) => {
+        const { res, end } = makeMockHttpResponse();
+        const handled = handleControlUiHttpRequest(
+          {
+            url: `${CONTROL_UI_BOOTSTRAP_CONFIG_PATH}?employeeId=pho_phong_01`,
+            method: "GET",
+          } as IncomingMessage,
+          res,
+          {
+            root: { kind: "resolved", path: tmp },
+            config: {
+              agents: { defaults: { workspace: tmp } },
+              gateway: {
+                controlUi: {
+                  employeeDirectory: [
+                    {
+                      employeeId: "pho_phong_01",
+                      employeeName: "Pho Phong Marketing",
+                      lockedAgentId: "pho_phong",
+                    },
+                  ],
+                },
+              },
+            },
+          },
+        );
+
+        expect(handled).toBe(true);
+        const parsed = parseBootstrapPayload(end);
+        expect(parsed.accessPolicy).toEqual({
+          employeeId: "pho_phong_01",
+          employeeName: "Pho Phong Marketing",
+          lockedAgentId: "pho_phong",
+          lockedSessionKey: "agent:pho_phong:main",
+          canViewAllSessions: false,
+          visibleAgentIds: ["pho_phong", "nv_content", "nv_media"],
+          lockAgent: false,
+          lockSession: false,
+          autoConnect: false,
+          enforcedByServer: true,
+        });
+      },
+    });
+  });
+
+  it("authenticates demo login accounts and returns token plus access policy", async () => {
+    await withControlUiRoot({
+      fn: async (tmp) => {
+        const { res, end, handled } = await runControlUiRequestWithBody({
+          url: CONTROL_UI_LOGIN_PATH,
+          method: "POST",
+          rootPath: tmp,
+          body: JSON.stringify({
+            email: "content@example.com",
+            password: "Demo@123",
+          }),
+          config: {
+            gateway: {
+              auth: { token: "demo-token" },
+              controlUi: {
+                employeeDirectory: [
+                  {
+                    employeeId: "lan_content",
+                    employeeName: "Lan Content",
+                    lockedAgentId: "nv_content",
+                    lockSession: true,
+                  },
+                ],
+                demoLogin: {
+                  enabled: true,
+                  accounts: [
+                    {
+                      email: "content@example.com",
+                      password: "Demo@123",
+                      employeeId: "lan_content",
+                      label: "Nhan vien content",
+                    },
+                  ],
+                },
+              },
+            },
+          },
+        });
+
+        expect(handled).toBe(true);
+        expect(res.statusCode).toBe(200);
+        expect(JSON.parse(String(end.mock.calls[0]?.[0] ?? ""))).toEqual({
+          ok: true,
+          token: "demo-token",
+          accessPolicy: {
+            employeeId: "lan_content",
+            employeeName: "Lan Content",
+            lockedAgentId: "nv_content",
+            lockedSessionKey: "agent:nv_content:main",
+            canViewAllSessions: false,
+            visibleAgentIds: ["nv_content"],
+            lockAgent: true,
+            lockSession: true,
+            autoConnect: false,
+            enforcedByServer: true,
+          },
+        });
       },
     });
   });

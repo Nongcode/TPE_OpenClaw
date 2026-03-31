@@ -534,6 +534,12 @@ export async function connectReq(
     caps?: string[];
     commands?: string[];
     permissions?: Record<string, boolean>;
+    controlUiAccess?: {
+      employeeId?: string;
+      employeeName?: string;
+      lockedAgentId?: string;
+      lockedSessionKey?: string;
+    };
     device?: {
       id: string;
       publicKey: string;
@@ -634,6 +640,7 @@ export async function connectReq(
         caps: opts?.caps ?? [],
         commands: opts?.commands ?? [],
         permissions: opts?.permissions ?? undefined,
+        controlUiAccess: opts?.controlUiAccess,
         role,
         scopes: requestedScopes,
         auth:

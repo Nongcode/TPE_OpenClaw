@@ -90,6 +90,8 @@ export const FIELD_HELP: Record<string, string> = {
     "Login/auth attempt throttling controls to reduce credential brute-force risk at the gateway boundary. Keep enabled in exposed environments and tune thresholds to your traffic baseline.",
   "gateway.auth.trustedProxy":
     "Trusted-proxy auth header mapping for upstream identity providers that inject user claims. Use only with known proxy CIDRs and strict header allowlists to prevent spoofed identity headers.",
+  "gateway.auth.trustedProxy.displayNameHeader":
+    "Optional trusted-proxy header that carries the human-readable display name for the authenticated user. Control UI bootstrap uses this for employee-friendly names and falls back to x-forwarded-name when unset.",
   "gateway.trustedProxies":
     "CIDR/IP allowlist of upstream proxies permitted to provide forwarded client identity headers. Keep this list narrow so untrusted hops cannot impersonate users.",
   "gateway.allowRealIpFallback":
@@ -228,6 +230,8 @@ export const FIELD_HELP: Record<string, string> = {
     "Optional ACP session mode default for this agent (persistent or oneshot).",
   "agents.list[].runtime.acp.cwd":
     "Optional default working directory for this agent's ACP sessions.",
+  "agents.list[].authProfiles":
+    "Optional per-provider auth profile IDs locked to this agent. Use this to pin a role to its own API key/profile even when multiple agents share the same provider.",
   "agents.list[].identity.avatar":
     "Avatar image path (relative to the agent workspace only) or a remote URL/data URL.",
   "agents.defaults.heartbeat.suppressToolErrorWarnings":
@@ -386,8 +390,18 @@ export const FIELD_HELP: Record<string, string> = {
     "Optional filesystem root for Control UI assets (defaults to dist/control-ui).",
   "gateway.controlUi.allowedOrigins":
     "Allowed browser origins for Control UI/WebChat websocket connections (full origins only, e.g. https://control.example.com). Required for non-loopback Control UI deployments unless dangerous Host-header fallback is explicitly enabled.",
+  "gateway.controlUi.employeeDirectory":
+      "Optional employee access directory for the Control UI. Map employee identities to a locked agent/session so each signed-in employee lands in the correct chat lane by default.",
+  "gateway.controlUi.employeeDirectory[].canViewAllSessions":
+      "Grant this employee visibility into every agent session. Use sparingly for top-level supervisor roles such as main or quan_ly.",
+  "gateway.controlUi.employeeDirectory[].visibleAgentIds":
+      "Optional explicit allowlist of agent IDs this employee may view in Sessions and chat history. When omitted, OpenClaw derives a default hierarchy from lockedAgentId.",
+  "gateway.controlUi.demoLogin":
+      "Optional lightweight email/password login screen for Control UI demos. Accounts here map demo users onto employeeDirectory roles and can auto-fill the gateway token after a successful login.",
+  "gateway.controlUi.demoLogin.accounts":
+      "Demo email/password accounts for the Control UI login screen. Prefer using employeeId to bind an account to an employeeDirectory entry; lockedAgentId is available as a fallback for standalone demo roles.",
   "gateway.controlUi.dangerouslyAllowHostHeaderOriginFallback":
-    "DANGEROUS toggle that enables Host-header based origin fallback for Control UI/WebChat websocket checks. This mode is supported when your deployment intentionally relies on Host-header origin policy; explicit gateway.controlUi.allowedOrigins remains the recommended hardened default.",
+      "DANGEROUS toggle that enables Host-header based origin fallback for Control UI/WebChat websocket checks. This mode is supported when your deployment intentionally relies on Host-header origin policy; explicit gateway.controlUi.allowedOrigins remains the recommended hardened default.",
   "gateway.controlUi.allowInsecureAuth":
     "Loosens strict browser auth checks for Control UI when you must run a non-standard setup. Keep this off unless you trust your network and proxy path, because impersonation risk is higher.",
   "gateway.controlUi.dangerouslyDisableDeviceAuth":

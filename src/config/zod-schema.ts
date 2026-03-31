@@ -648,6 +648,45 @@ export const OpenClawSchema = z
             dangerouslyAllowHostHeaderOriginFallback: z.boolean().optional(),
             allowInsecureAuth: z.boolean().optional(),
             dangerouslyDisableDeviceAuth: z.boolean().optional(),
+            employeeDirectory: z
+              .array(
+                z
+                    .object({
+                      employeeId: z.string().optional(),
+                      employeeName: z.string().optional(),
+                      aliases: z.array(z.string()).optional(),
+                      lockedAgentId: z.string(),
+                      lockedSessionKey: z.string().optional(),
+                      canViewAllSessions: z.boolean().optional(),
+                      visibleAgentIds: z.array(z.string()).optional(),
+                      lockAgent: z.boolean().optional(),
+                      lockSession: z.boolean().optional(),
+                      autoConnect: z.boolean().optional(),
+                    })
+                  .strict(),
+              )
+              .optional(),
+            demoLogin: z
+              .object({
+                enabled: z.boolean().optional(),
+                accounts: z
+                  .array(
+                    z
+                      .object({
+                        email: z.string().email(),
+                        password: z.string().min(1),
+                        employeeId: z.string().optional(),
+                        employeeName: z.string().optional(),
+                        lockedAgentId: z.string().optional(),
+                        lockedSessionKey: z.string().optional(),
+                        label: z.string().optional(),
+                      })
+                      .strict(),
+                  )
+                  .optional(),
+              })
+              .strict()
+              .optional(),
           })
           .strict()
           .optional(),
@@ -676,6 +715,7 @@ export const OpenClawSchema = z
             trustedProxy: z
               .object({
                 userHeader: z.string().min(1, "userHeader is required for trusted-proxy mode"),
+                displayNameHeader: z.string().optional(),
                 requiredHeaders: z.array(z.string()).optional(),
                 allowUsers: z.array(z.string()).optional(),
               })

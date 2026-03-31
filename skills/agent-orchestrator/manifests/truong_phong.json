@@ -1,0 +1,15 @@
+{
+  "id": "truong_phong",
+  "label": "Truong phong",
+  "role": "department head",
+  "reportsTo": "quan_ly",
+  "canDelegateTo": ["pho_phong"],
+  "requiresReviewBy": "quan_ly",
+  "capabilities": [
+    "review",
+    "approval",
+    "planning",
+    "publish-decision"
+  ],
+  "taskTypes": ["campaign.review", "campaign.publish"]
+}

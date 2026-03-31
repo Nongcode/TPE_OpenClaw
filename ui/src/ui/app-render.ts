@@ -81,6 +81,12 @@ import "./components/dashboard-header.ts";
 import { buildExternalLinkRel, EXTERNAL_LINK_TARGET } from "./external-link.ts";
 import { icons } from "./icons.ts";
 import { normalizeBasePath, TAB_GROUPS, subtitleForTab, titleForTab } from "./navigation.ts";
+import {
+  canAccessControlUiAgentId,
+  canAccessControlUiSessionKey,
+  canBrowseMultipleControlUiSessions,
+  shouldShowControlUiTab,
+} from "./control-ui-access.ts";
 import { agentLogoUrl } from "./views/agents-utils.ts";
 import {
   resolveAgentConfig,
@@ -320,6 +326,20 @@ export function renderApp(state: AppViewState) {
     state.agentsList?.defaultId ??
     state.agentsList?.agents?.[0]?.id ??
     null;
+  const activeChatAgentId =
+    parseAgentSessionKey(state.lockedSessionKey ?? state.sessionKey)?.agentId ??
+    state.lockedAgentId ??
+    state.agentsList?.defaultId ??
+    "main";
+  const chatAgentsList =
+    !state.agentsList || state.bootstrapAccessPolicy == null || state.bootstrapAccessPolicy.canViewAllSessions
+      ? state.agentsList
+      : {
+          ...state.agentsList,
+          agents: state.agentsList.agents.filter((entry) =>
+            canAccessControlUiAgentId(state.bootstrapAccessPolicy, entry.id),
+          ),
+        };
   const getCurrentConfigValue = () =>
     state.configForm ?? (state.configSnapshot?.config as Record<string, unknown> | null);
   const findAgentIndex = (agentId: string) =>
@@ -352,6 +372,10 @@ export function renderApp(state: AppViewState) {
     ),
   );
   const visibleCronJobs = getVisibleCronJobs(state);
+  const visibleTabGroups = TAB_GROUPS.map((group) => ({
+    ...group,
+    tabs: group.tabs.filter((tab) => shouldShowControlUiTab(state.bootstrapAccessPolicy, tab)),
+  })).filter((group) => group.tabs.length > 0);
   const selectedDeliveryChannel =
     state.cronForm.deliveryChannel && state.cronForm.deliveryChannel.trim()
       ? state.cronForm.deliveryChannel.trim()
@@ -384,6 +408,9 @@ export function renderApp(state: AppViewState) {
       open: state.paletteOpen,
       query: state.paletteQuery,
       activeIndex: state.paletteActiveIndex,
+      hiddenActions: shouldShowControlUiTab(state.bootstrapAccessPolicy, "sessions")
+        ? []
+        : ["nav:sessions"],
       onToggle: () => {
         state.paletteOpen = !state.paletteOpen;
       },
@@ -522,7 +549,7 @@ export function renderApp(state: AppViewState) {
             </div>
             <div class="sidebar-shell__body">
               <nav class="sidebar-nav">
-                ${TAB_GROUPS.map((group) => {
+                ${visibleTabGroups.map((group) => {
                   const isGroupCollapsed = state.settings.navGroupsCollapsed[group.label] ?? false;
                   const hasActiveTab = group.tabs.some((tab) => tab === state.tab);
                   const showItems = navCollapsed || hasActiveTab || !isGroupCollapsed;
@@ -1373,6 +1400,19 @@ export function renderApp(state: AppViewState) {
             ? renderChat({
                 sessionKey: state.sessionKey,
                 onSessionKeyChange: (next) => {
+                  if (state.lockedSessionKey && state.lockedSessionKey !== next) {
+                    return;
+                  }
+                  if (
+                    state.lockedAgentId &&
+                    !canBrowseMultipleControlUiSessions(state.bootstrapAccessPolicy) &&
+                    parseAgentSessionKey(next)?.agentId !== state.lockedAgentId
+                  ) {
+                    return;
+                  }
+                  if (!canAccessControlUiSessionKey(state.bootstrapAccessPolicy, next)) {
+                    return;
+                  }
                   state.sessionKey = next;
                   state.chatMessage = "";
                   state.chatAttachments = [];
@@ -1450,9 +1490,12 @@ export function renderApp(state: AppViewState) {
                     state.lastError = String(err);
                   }
                 },
-                agentsList: state.agentsList,
-                currentAgentId: resolvedAgentId ?? "main",
+                agentsList: chatAgentsList,
+                currentAgentId: activeChatAgentId,
                 onAgentChange: (agentId: string) => {
+                  if (!canAccessControlUiAgentId(state.bootstrapAccessPolicy, agentId)) {
+                    return;
+                  }
                   state.sessionKey = buildAgentMainSessionKey({ agentId });
                   state.chatMessages = [];
                   state.chatStream = null;
@@ -1470,10 +1513,20 @@ export function renderApp(state: AppViewState) {
                   state.setTab("agents" as import("./navigation.ts").Tab);
                 },
                 onSessionSelect: (key: string) => {
+                  if (state.lockedSessionKey && state.lockedSessionKey !== key) {
+                    return;
+                  }
+                  if (
+                    state.lockedAgentId &&
+                    !canBrowseMultipleControlUiSessions(state.bootstrapAccessPolicy) &&
+                    parseAgentSessionKey(key)?.agentId !== state.lockedAgentId
+                  ) {
+                    return;
+                  }
+                  if (!canAccessControlUiSessionKey(state.bootstrapAccessPolicy, key)) {
+                    return;
+                  }
                   state.setSessionKey(key);
-                  state.chatMessages = [];
-                  void loadChatHistory(state);
-                  void state.loadAssistantIdentity();
                 },
                 showNewMessages: state.chatNewMessagesBelow && !state.chatManualRefreshInFlight,
                 onScrollToBottom: () => state.scrollToBottom(),

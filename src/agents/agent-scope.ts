@@ -11,6 +11,7 @@ import {
   resolveAgentIdFromSessionKey,
 } from "../routing/session-key.js";
 import { resolveUserPath } from "../utils.js";
+import { findNormalizedProviderValue } from "./provider-id.js";
 import { normalizeSkillFilter } from "./skills/filter.js";
 import { resolveDefaultAgentWorkspaceDir } from "./workspace.js";
 const log = createSubsystemLogger("agent-scope");
@@ -30,6 +31,7 @@ type ResolvedAgentConfig = {
   workspace?: string;
   agentDir?: string;
   model?: AgentEntry["model"];
+  authProfiles?: Record<string, string>;
   skills?: AgentEntry["skills"];
   memorySearch?: AgentEntry["memorySearch"];
   humanDelay?: AgentEntry["humanDelay"];
@@ -132,6 +134,8 @@ export function resolveAgentConfig(
       typeof entry.model === "string" || (entry.model && typeof entry.model === "object")
         ? entry.model
         : undefined,
+    authProfiles:
+      entry.authProfiles && typeof entry.authProfiles === "object" ? entry.authProfiles : undefined,
     skills: Array.isArray(entry.skills) ? entry.skills : undefined,
     memorySearch: entry.memorySearch,
     humanDelay: entry.humanDelay,
@@ -149,6 +153,20 @@ export function resolveAgentSkillsFilter(
   agentId: string,
 ): string[] | undefined {
   return normalizeSkillFilter(resolveAgentConfig(cfg, agentId)?.skills);
+}
+
+export function resolveAgentAuthProfile(
+  cfg: OpenClawConfig,
+  agentId: string,
+  provider: string,
+): string | undefined {
+  const authProfiles = resolveAgentConfig(cfg, agentId)?.authProfiles;
+  const profileId = findNormalizedProviderValue(authProfiles, provider);
+  if (typeof profileId !== "string") {
+    return undefined;
+  }
+  const trimmed = profileId.trim();
+  return trimmed || undefined;
 }
 
 function resolveModelPrimary(raw: unknown): string | undefined {

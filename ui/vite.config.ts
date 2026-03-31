@@ -51,6 +51,7 @@ export default defineConfig(() => {
                 assistantName: "",
                 assistantAvatar: "",
                 assistantAgentId: "",
+                accessPolicy: null,
               }),
             );
           });

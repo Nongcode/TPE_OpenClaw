@@ -1,7 +1,13 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const { applySettingsFromUrlMock, connectGatewayMock, loadBootstrapMock } = vi.hoisted(() => ({
+const {
+  applySettingsFromUrlMock,
+  applyBootstrapAccessPolicyMock,
+  connectGatewayMock,
+  loadBootstrapMock,
+} = vi.hoisted(() => ({
   applySettingsFromUrlMock: vi.fn(),
+  applyBootstrapAccessPolicyMock: vi.fn(),
   connectGatewayMock: vi.fn(),
   loadBootstrapMock: vi.fn(),
 }));
@@ -15,6 +21,7 @@ vi.mock("./controllers/control-ui-bootstrap.ts", () => ({
 }));
 
 vi.mock("./app-settings.ts", () => ({
+  applyBootstrapAccessPolicy: applyBootstrapAccessPolicyMock,
   applySettingsFromUrl: applySettingsFromUrlMock,
   attachThemeListener: vi.fn(),
   detachThemeListener: vi.fn(),
@@ -46,11 +53,14 @@ function createHost() {
     client: null,
     connectGeneration: 0,
     connected: false,
+    settings: { token: "" },
+    pendingGatewayToken: null,
     tab: "chat",
     assistantName: "OpenClaw",
     assistantAvatar: null,
     assistantAgentId: null,
     serverVersion: null,
+    demoLoginConfig: null,
     chatHasAutoScrolled: false,
     chatManualRefreshInFlight: false,
     chatLoading: false,
@@ -68,6 +78,7 @@ function createHost() {
 describe("handleConnected", () => {
   beforeEach(() => {
     applySettingsFromUrlMock.mockReset();
+    applyBootstrapAccessPolicyMock.mockReset();
     connectGatewayMock.mockReset();
     loadBootstrapMock.mockReset();
   });
@@ -87,6 +98,7 @@ describe("handleConnected", () => {
 
     resolveBootstrap();
     await Promise.resolve();
+    expect(applyBootstrapAccessPolicyMock).toHaveBeenCalledTimes(1);
     expect(connectGatewayMock).toHaveBeenCalledTimes(1);
   });
 
@@ -121,5 +133,17 @@ describe("handleConnected", () => {
     expect(applySettingsFromUrlMock.mock.invocationCallOrder[0]).toBeLessThan(
       loadBootstrapMock.mock.invocationCallOrder[0],
     );
+  });
+
+  it("does not auto-connect while demo login is enabled without a token", async () => {
+    loadBootstrapMock.mockImplementationOnce(async (host: { demoLoginConfig?: unknown }) => {
+      host.demoLoginConfig = { enabled: true, accounts: [] };
+    });
+    const host = createHost();
+
+    handleConnected(host as never);
+    await Promise.resolve();
+
+    expect(connectGatewayMock).not.toHaveBeenCalled();
   });
 });
