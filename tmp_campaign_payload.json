@@ -1,0 +1,16 @@
+{
+  "product_name": "Máy ra vào lốp tự động Tân Phát Etek",
+  "product_description": "Hỗ trợ tháo lắp lốp ô tô nhanh chóng và chính xác. Mâm kẹp chắc chắn, vận hành ổn định. Phù hợp cho gara sửa chữa và chăm sóc xe chuyên nghiệp. Giúp tiết kiệm thời gian, công sức cho kỹ thuật viên. Thiết kế bền bỉ, dễ sử dụng. Hoạt động ổn định, an toàn cao. Phù hợp với nhu cầu đầu tư lâu dài cho gara. Tăng năng suất làm việc và nâng cao chất lượng dịch vụ.",
+  "selling_points": [
+    "Tháo lắp lốp nhanh chóng và chính xác",
+    "Mâm kẹp chắc chắn, vận hành ổn định",
+    "Phù hợp cho gara sửa chữa và chăm sóc xe chuyên nghiệp",
+    "Tiết kiệm thời gian và công sức cho kỹ thuật viên",
+    "Thiết kế bền bỉ, dễ sử dụng, an toàn cao",
+    "Gia tăng năng suất và chất lượng dịch vụ cho gara"
+  ],
+  "facebook_publish_mode": "confirm_only",
+  "publish_image_post": true,
+  "publish_video_post": true,
+  "allow_text_only_fallback": false
+}

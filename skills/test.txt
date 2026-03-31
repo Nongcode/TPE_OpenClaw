@@ -1,0 +1,14 @@
+product_name: Cầu nâng 2 trụ
+product_description: Thiết bị nâng xe dùng trong gara ô tô, vận hành ổn định, phù hợp gara sửa chữa ô tô.
+specifications:
+- Tải trọng 4 tấn
+- Dùng cho gara ô tô
+- Khung chắc chắn
+selling_points:
+- Phù hợp gara vừa và lớn
+- Hoạt động ổn định
+- Dễ sử dụng
+price_reference: Liên hệ
+image_paths:
+- D:\duong-dan-anh-1.jpg
+- D:\duong-dan-anh-2.jpg
