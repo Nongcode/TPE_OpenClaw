@@ -180,6 +180,7 @@ function buildHierarchyPlan(registry, fromAgentId, message, taskType) {
 
   const steps = [];
   let currentOwner = fromAgentId;
+  const userDirectToDeputy = fromAgentId === "pho_phong";
 
   if (wantsExplicitPublish) {
     return {
@@ -244,13 +245,33 @@ function buildHierarchyPlan(registry, fromAgentId, message, taskType) {
   }
   if (wantsContent && registry.byId[currentOwner]?.canDelegateTo?.includes("nv_content")) {
     handoff("nv_content", "produce");
-    handoff("pho_phong", "content_review");
+    steps.push({
+      type: "content_review",
+      from: "nv_content",
+      to: "pho_phong",
+      taskType,
+      message,
+      requiresExecutiveApproval,
+      requiresReviewBy: userDirectToDeputy ? null : "truong_phong",
+      deliverToUser: userDirectToDeputy && !wantsMedia,
+    });
+    currentOwner = "pho_phong";
   }
   if (wantsMedia && registry.byId[currentOwner]?.canDelegateTo?.includes("nv_media")) {
     handoff("nv_media", "produce");
-    handoff("pho_phong", "media_review");
+    steps.push({
+      type: "media_review",
+      from: "nv_media",
+      to: "pho_phong",
+      taskType,
+      message,
+      requiresExecutiveApproval,
+      requiresReviewBy: userDirectToDeputy ? null : "truong_phong",
+      deliverToUser: userDirectToDeputy,
+    });
+    currentOwner = "pho_phong";
   }
-  if (registry.byId[currentOwner]?.reportsTo === "truong_phong") {
+  if (!userDirectToDeputy && registry.byId[currentOwner]?.reportsTo === "truong_phong") {
     handoff("truong_phong", "final_review");
   }
   if (requiresExecutiveApproval && registry.byId[currentOwner]?.reportsTo === "quan_ly") {
