@@ -1,5 +1,114 @@
 const { normalizeText } = require("./common");
 
+function messageMentionsAny(normalized, patterns) {
+  return patterns.some((pattern) => normalized.includes(pattern));
+}
+
+function classifyApprovalPolicy(message, fromAgentId) {
+  const normalized = normalizeText(message);
+  const hasExecutiveRisk = messageMentionsAny(normalized, [
+    "ngan sach",
+    "chi phi",
+    "bao gia",
+    "gia ban",
+    "khuyen mai",
+    "uu dai",
+    "phap ly",
+    "thuong hieu",
+    "khung hoang",
+    "truyen thong",
+    "lien phong",
+    "lien phong ban",
+    "lien bo phan",
+    "chinh sach",
+    "dinh huong",
+  ]);
+  const hasExecutiveApprovalRequest =
+    messageMentionsAny(normalized, [
+      "phe duyet cap quan ly",
+      "xin duyet quan ly",
+      "xin duyet sep",
+      "xin duyet giam doc",
+      "trinh quan ly duyet",
+      "trinh sep duyet",
+      "trinh giam doc duyet",
+      "ban giam doc",
+      "giam doc",
+      "quan ly cap cao",
+    ]) &&
+    !messageMentionsAny(normalized, [
+      "truong phong duyet",
+      "trinh truong phong duyet",
+      "ke hoach chi tiet de trinh truong phong duyet",
+      "chi trinh lai ban ke hoach chi tiet de truong_phong duyet",
+    ]);
+  const requiresExecutiveApproval = hasExecutiveRisk || hasExecutiveApprovalRequest;
+  const reportBackToOrigin =
+    fromAgentId === "main" || fromAgentId === "quan_ly" || requiresExecutiveApproval;
+
+  return {
+    normalized,
+    requiresExecutiveApproval,
+    reportBackToOrigin,
+  };
+}
+
+function classifyWorkflow(normalized, fromAgentId) {
+  const wantsExplicitPublish =
+    fromAgentId === "truong_phong" &&
+    messageMentionsAny(normalized, [
+      "xac nhan dang bai",
+      "xac nhan dang facebook",
+      "dang bai di",
+      "dang facebook di",
+      "cho dang bai",
+      "duoc dang bai",
+      "duoc dang facebook",
+      "hay dang bai",
+      "hay dang facebook",
+    ]);
+  const wantsPlanOnly =
+    (fromAgentId === "truong_phong" || fromAgentId === "quan_ly") &&
+    messageMentionsAny(normalized, [
+      "lap ke hoach",
+      "ke hoach",
+      "chien dich",
+      "ban hang",
+    ]) &&
+    !messageMentionsAny(normalized, [
+      "da duyet",
+      "duoc duyet",
+      "trien khai",
+      "thuc hien",
+      "viet bai",
+      "tao bai",
+      "dang facebook",
+      "dang bai",
+      "san xuat",
+    ]);
+
+  const wantsCampaign =
+    messageMentionsAny(normalized, ["chien dich", "ke hoach", "ban hang", "trien khai"]) ||
+    messageMentionsAny(normalized, ["viet bai", "facebook", "dang bai", "dang facebook"]);
+  const wantsContent =
+    wantsCampaign ||
+    messageMentionsAny(normalized, ["viet", "content", "facebook", "bai", "caption", "copy"]);
+  const wantsMedia =
+    wantsCampaign ||
+    messageMentionsAny(normalized, ["image", "anh", "banner", "media", "video", "visual"]);
+  const wantsPublish =
+    messageMentionsAny(normalized, ["dang bai", "dang facebook", "facebook", "post", "xuat ban"]);
+
+  return {
+    wantsExplicitPublish,
+    wantsPlanOnly,
+    wantsCampaign,
+    wantsContent,
+    wantsMedia,
+    wantsPublish,
+  };
+}
+
 function scoreAgent(agent, taskText, taskType) {
   const haystack = normalizeText(`${taskType || ""} ${taskText}`);
   let score = 0;
@@ -56,25 +165,42 @@ function buildHierarchyPlan(registry, fromAgentId, message, taskType) {
     throw new Error(`Unknown source agent: ${fromAgentId}`);
   }
 
-  const normalized = normalizeText(message);
-  const wantsContent =
-    normalized.includes("viet") ||
-    normalized.includes("content") ||
-    normalized.includes("facebook") ||
-    normalized.includes("bai");
-  const wantsMedia =
-    normalized.includes("image") ||
-    normalized.includes("anh") ||
-    normalized.includes("banner") ||
-    normalized.includes("media");
-  const wantsPublish =
-    normalized.includes("dang bai") ||
-    normalized.includes("dang facebook") ||
-    normalized.includes("facebook") ||
-    normalized.includes("post");
+  const { normalized, requiresExecutiveApproval, reportBackToOrigin } = classifyApprovalPolicy(
+    message,
+    fromAgentId,
+  );
+  const {
+    wantsExplicitPublish,
+    wantsPlanOnly,
+    wantsCampaign,
+    wantsContent,
+    wantsMedia,
+    wantsPublish,
+  } = classifyWorkflow(normalized, fromAgentId);
 
   const steps = [];
   let currentOwner = fromAgentId;
+
+  if (wantsExplicitPublish) {
+    return {
+      mode: "hierarchy",
+      from: fromAgentId,
+      taskType,
+      message,
+      requiresExecutiveApproval,
+      reportBackToOrigin,
+      steps: [
+        {
+          type: "publish",
+          from: "truong_phong",
+          to: "truong_phong",
+          taskType,
+          message,
+          requiresExecutiveApproval,
+        },
+      ],
+    };
+  }
 
   const handoff = (to, kind) => {
     steps.push({
@@ -83,6 +209,7 @@ function buildHierarchyPlan(registry, fromAgentId, message, taskType) {
       to,
       taskType,
       message,
+      requiresExecutiveApproval,
     });
     currentOwner = to;
   };
@@ -90,40 +217,67 @@ function buildHierarchyPlan(registry, fromAgentId, message, taskType) {
   if (fromAgent.canDelegateTo?.includes("quan_ly")) {
     handoff("quan_ly", "delegate");
   }
+  if (wantsPlanOnly && fromAgentId === "truong_phong") {
+    steps.push({
+      type: "propose",
+      from: "truong_phong",
+      to: "truong_phong",
+      taskType,
+      message,
+      requiresExecutiveApproval,
+    });
+    return {
+      mode: "hierarchy",
+      from: fromAgentId,
+      taskType,
+      message,
+      requiresExecutiveApproval,
+      reportBackToOrigin,
+      steps,
+    };
+  }
   if (registry.byId[currentOwner]?.canDelegateTo?.includes("truong_phong")) {
     handoff("truong_phong", "delegate");
   }
   if (registry.byId[currentOwner]?.canDelegateTo?.includes("pho_phong")) {
-    handoff("pho_phong", "delegate");
+    handoff("pho_phong", wantsCampaign ? "plan_execute" : "delegate");
   }
   if (wantsContent && registry.byId[currentOwner]?.canDelegateTo?.includes("nv_content")) {
     handoff("nv_content", "produce");
-    handoff("pho_phong", "review");
+    handoff("pho_phong", "content_review");
   }
   if (wantsMedia && registry.byId[currentOwner]?.canDelegateTo?.includes("nv_media")) {
     handoff("nv_media", "produce");
-    handoff("pho_phong", "review");
+    handoff("pho_phong", "media_review");
   }
   if (registry.byId[currentOwner]?.reportsTo === "truong_phong") {
-    handoff("truong_phong", "review");
+    handoff("truong_phong", "final_review");
   }
-  if (wantsPublish && currentOwner === "truong_phong") {
-    handoff("truong_phong", "publish");
-  }
-  if (registry.byId[currentOwner]?.reportsTo === "quan_ly") {
-    handoff("quan_ly", wantsPublish ? "report" : "approve");
+  if (requiresExecutiveApproval && registry.byId[currentOwner]?.reportsTo === "quan_ly") {
+    handoff("quan_ly", "approve");
+    if (fromAgentId === "main" && currentOwner === "quan_ly") {
+      handoff("main", "report");
+    }
+  } else if (reportBackToOrigin && currentOwner === "truong_phong" && fromAgentId === "quan_ly") {
+    handoff("quan_ly", "report");
+  } else if (reportBackToOrigin && currentOwner === "quan_ly" && fromAgentId === "main") {
+    handoff("main", "report");
+  } else if (reportBackToOrigin && currentOwner === "truong_phong" && fromAgentId === "main") {
+    handoff("quan_ly", "report");
+    handoff("main", "report");
   }
 
   if (steps.length === 0) {
     const best = chooseBestAllowedChild(registry, fromAgentId, message, taskType);
-    steps.push({
-      type: "delegate",
-      from: fromAgentId,
-      to: best.agent.id,
-      taskType,
-      message,
-      score: best.score,
-    });
+      steps.push({
+        type: "delegate",
+        from: fromAgentId,
+        to: best.agent.id,
+        taskType,
+        message,
+        score: best.score,
+        requiresExecutiveApproval,
+      });
   }
 
   return {
@@ -131,6 +285,8 @@ function buildHierarchyPlan(registry, fromAgentId, message, taskType) {
     from: fromAgentId,
     taskType,
     message,
+    requiresExecutiveApproval,
+    reportBackToOrigin,
     steps,
   };
 }

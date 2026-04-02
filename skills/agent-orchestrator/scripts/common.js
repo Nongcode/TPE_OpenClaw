@@ -36,8 +36,28 @@ function listDirectories(dirPath) {
   }
 }
 
+function tryRepairMojibake(value) {
+  const input = String(value || "");
+  if (!/[ÃÂÄÅÆÇÈÉÊËÌÍÎÏÐÑÒÓÔÕÖØÙÚÛÜÝÞßáº]/.test(input)) {
+    return input;
+  }
+  try {
+    const repaired = Buffer.from(input, "latin1").toString("utf8");
+    return repaired.includes("\uFFFD") ? input : repaired;
+  } catch {
+    return input;
+  }
+}
+
 function normalizeText(value) {
-  return String(value || "").toLowerCase();
+  const repaired = tryRepairMojibake(value);
+  return repaired
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[đĐ]/g, "d")
+    .toLowerCase()
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
 function unique(values) {

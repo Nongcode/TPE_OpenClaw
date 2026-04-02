@@ -4,9 +4,9 @@ import { chromium } from "playwright-core";
 
 const DEFAULTS = {
   browser_path: "C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe",
-  user_data_dir: "C:/Users/Administrator/AppData/Local/Microsoft/Edge/User Data",
+  user_data_dir: "C:/Users/PHAMDUCLONG/AppData/Local/Microsoft/Edge/User Data",
   profile_name: "Default",
-  target_gemini_url: "https://gemini.google.com/u/1/app/abde3c4a15e8bbfa",
+  target_gemini_url: "https://gemini.google.com/app/5674ef324b03c392",
   image_paths: [],
   timeout_ms: 120000,
   retry_count: 2,
@@ -475,13 +475,31 @@ async function downloadFromSpecificBlock(page, freshTarget, outputDir, logs) {
     artifacts.push({ type: 'screenshot_after', path: path.relative(process.cwd(), screenshotAfter).replace(/\\/g, '/') });
 
     logs.push('[step8] Flow completed, returning artifacts and logs');
+    
+    // 1. Lấy đường dẫn file chuẩn
+    const relativePath = path.relative(process.cwd(), downloadedImagePath).replace(/\\/g, '/');
+    
+    // 2. TỐI THƯỢNG: Đọc file ảnh và mã hóa thành Base64
+    const { readFile } = await import("node:fs/promises");
+    const imageBuffer = await readFile(downloadedImagePath);
+    const base64Image = imageBuffer.toString('base64');
+    
+    // Xác định định dạng ảnh (png, jpg, webp)
+    let ext = path.extname(downloadedImagePath).substring(1).toLowerCase() || 'png';
+    if (ext === 'jpg') ext = 'jpeg';
+    
+    // 3. Tạo chuỗi Data URI thần thánh
+    const base64DataUri = `data:image/${ext};base64,${base64Image}`;
+
     printResult(buildResult({
       success: true,
       message: 'Gemini image generation flow completed',
       data: {
         target_gemini_url: targetGeminiUrl,
         image_prompt: imagePrompt,
-        downloaded_image_path: path.relative(process.cwd(), downloadedImagePath).replace(/\\/g, '/'),
+        downloaded_image_path: relativePath,
+        // Cấp sẵn luôn 1 cục Markdown chứa Base64 cho AI
+        markdown_display: `![Ảnh thành phẩm](${base64DataUri})` 
       },
       artifacts,
       logs,
