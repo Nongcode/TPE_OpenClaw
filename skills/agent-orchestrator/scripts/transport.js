@@ -24,7 +24,11 @@ function buildTaskEnvelope(step, registry, index, total, context = {}) {
     handoffContext: context.handoffContext || null,
     completedSteps: context.completedSteps || [],
     reportsTo: target?.reportsTo || null,
-    requiresReviewBy: target?.requiresReviewBy || null,
+    requiresReviewBy:
+      Object.prototype.hasOwnProperty.call(step, "requiresReviewBy")
+        ? step.requiresReviewBy
+        : target?.requiresReviewBy || null,
+    deliverToUser: Boolean(step.deliverToUser),
     requiresExecutiveApproval: Boolean(step.requiresExecutiveApproval),
     rules: [
       "Respect your role and permission boundaries.",
@@ -63,6 +67,9 @@ function buildTaskPrompt(envelope, registry) {
   }
   if (envelope.requiresReviewBy) {
     lines.push(`- Ket qua can duoc review boi: ${envelope.requiresReviewBy}`);
+  }
+  if (envelope.deliverToUser) {
+    lines.push("- Sau khi buoc nay dat, ban phai tong hop ket qua va tra thang cho nguoi dung trong chinh khung chat nay.");
   }
   if (envelope.reportsTo) {
     lines.push(`- Cap tren truc tiep cua ban: ${envelope.reportsTo}`);
@@ -107,11 +114,21 @@ function buildTaskPrompt(envelope, registry) {
     lines.push(
       "- Day la buoc duyet noi dung. Neu content chua dat, yeu cau lam lai dung vao phan noi dung, chua chuyen sang media. Neu content da dat, luc do moi duoc brief media.",
     );
+    if (envelope.deliverToUser) {
+      lines.push(
+        "- Day la diem ket thuc workflow cho yeu cau chi can content. Neu content dat, tra truc tiep ban content final cho nguoi dung, khong trinh truong_phong.",
+      );
+    }
   }
   if (envelope.type === "media_review") {
     lines.push(
       "- Day la buoc duyet media. Chi xac nhan dat khi media khop voi content da duoc duyet.",
     );
+    if (envelope.deliverToUser) {
+      lines.push(
+        "- Day la diem ket thuc workflow cho yeu cau nguoi dung giao truc tiep cho pho_phong. Neu media dat, tra truc tiep goi ket qua gom content va anh cho nguoi dung, khong trinh truong_phong.",
+      );
+    }
   }
   if (envelope.type === "final_review") {
     lines.push(

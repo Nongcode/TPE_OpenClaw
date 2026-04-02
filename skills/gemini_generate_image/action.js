@@ -7,7 +7,7 @@ const DEFAULTS = {
   browser_path: "C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe",
   user_data_dir: "C:/Users/PHAMDUCLONG/AppData/Local/Microsoft/Edge/User Data",
   profile_name: "Default",
-  target_gemini_url: "https://gemini.google.com/app/5674ef324b03c392",
+  target_gemini_url: "https://gemini.google.com/app/6db6710e653d9645",
   image_paths: [],
   timeout_ms: 120000,
   retry_count: 2,
@@ -469,9 +469,9 @@ async function downloadFromSpecificBlock(page, freshTarget, outputDir, logs) {
       return await downloadFromSpecificBlock(page, freshTarget, artifactsDir, logs);
     });
 
-    const relativeDownloadedImagePath = path
-      .relative(process.cwd(), downloadedImagePath)
-      .replace(/\\/g, '/');
+    const relativeDownloadedImagePath = path.relative(process.cwd(), downloadedImagePath).replace(/\\/g, '/');
+    
+    // GỌI HÀM XÂY DỰNG DATA MARKDOWN Ở ĐÂY
     const chatReply = buildChatImageReplyPayload({
       imagePath: downloadedImagePath,
       data: {
@@ -493,32 +493,16 @@ async function downloadFromSpecificBlock(page, freshTarget, outputDir, logs) {
 
     logs.push('[step8] Flow completed, returning artifacts and logs');
     
-    // 1. Lấy đường dẫn file chuẩn
-    const relativePath = path.relative(process.cwd(), downloadedImagePath).replace(/\\/g, '/');
-    
-    // 2. TỐI THƯỢNG: Đọc file ảnh và mã hóa thành Base64
-    const { readFile } = await import("node:fs/promises");
-    const imageBuffer = await readFile(downloadedImagePath);
-    const base64Image = imageBuffer.toString('base64');
-    
-    // Xác định định dạng ảnh (png, jpg, webp)
-    let ext = path.extname(downloadedImagePath).substring(1).toLowerCase() || 'png';
-    if (ext === 'jpg') ext = 'jpeg';
-    
-    // 3. Tạo chuỗi Data URI thần thánh
-    const base64DataUri = `data:image/${ext};base64,${base64Image}`;
-
+    // TRẢ KẾT QUẢ SẠCH SẼ, KHÔNG BỊ TRÙNG LẶP KEY
     printResult(buildResult({
       success: true,
       message: chatReply.assistantText,
       data: {
-        ...chatReply.data,
-        generation_status_message: 'Gemini image generation flow completed',
         target_gemini_url: targetGeminiUrl,
         image_prompt: imagePrompt,
-        downloaded_image_path: relativePath,
-        // Cấp sẵn luôn 1 cục Markdown chứa Base64 cho AI
-        markdown_display: `![Ảnh thành phẩm](${base64DataUri})` 
+        downloaded_image_path: relativeDownloadedImagePath,
+        ...chatReply.data,
+        generation_status_message: 'Gemini image generation flow completed',
       },
       artifacts: [...artifacts, ...chatReply.artifacts],
       logs,
