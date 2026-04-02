@@ -1,10 +1,156 @@
 import OpenClawKit
 import Foundation
+import OSLog
 import SwiftUI
+#if canImport(AVFoundation)
+import AVFoundation
+#endif
+#if canImport(AVKit)
+import AVKit
+#endif
 
 private enum ChatUIConstants {
     static let bubbleMaxWidth: CGFloat = 560
     static let bubbleCorner: CGFloat = 18
+}
+
+private let chatUIMediaLogger = Logger(subsystem: "ai.openclaw", category: "OpenClawChatUI.media")
+
+private enum ChatImageLoadSource {
+    case dataURL(String)
+    case file(URL)
+    case remote(URL)
+}
+
+private struct ChatResolvedImageSource {
+    let displaySource: String
+    let loadSource: ChatImageLoadSource
+}
+
+private enum ChatVideoLoadSource {
+    case file(URL)
+    case remote(URL)
+}
+
+private struct ChatResolvedVideoSource {
+    let displaySource: String
+    let loadSource: ChatVideoLoadSource
+}
+
+private enum ChatImageDecodeError: Error {
+    case unsupportedSource
+    case invalidDataURL
+    case decodeFailed
+}
+
+private func decodeDataURLImage(_ source: String) throws -> OpenClawPlatformImage {
+    guard let comma = source.firstIndex(of: ",") else {
+        throw ChatImageDecodeError.invalidDataURL
+    }
+    let payload = String(source[source.index(after: comma)...])
+    guard let data = Data(base64Encoded: payload),
+          let image = OpenClawPlatformImage(data: data)
+    else {
+        throw ChatImageDecodeError.decodeFailed
+    }
+    return image
+}
+
+private func resolveChatImageSource(_ content: OpenClawChatMessageContent) -> ChatResolvedImageSource? {
+    let trimmedFilePath = content.filePath?
+        .trimmingCharacters(in: .whitespacesAndNewlines)
+    if let filePath = trimmedFilePath, !filePath.isEmpty {
+        let fileURL = URL(fileURLWithPath: filePath)
+        if FileManager.default.fileExists(atPath: fileURL.path) {
+            let displaySource = fileURL.absoluteString
+            chatUIMediaLogger.debug(
+                "chat image source selected filePath=\(filePath, privacy: .public) final=\(displaySource, privacy: .public)")
+            return ChatResolvedImageSource(displaySource: displaySource, loadSource: .file(fileURL))
+        }
+    }
+
+    let trimmedImageURL = content.imageURL?
+        .trimmingCharacters(in: .whitespacesAndNewlines)
+    guard let imageURL = trimmedImageURL, !imageURL.isEmpty else {
+        return nil
+    }
+
+    if imageURL.lowercased().hasPrefix("data:image/") {
+        chatUIMediaLogger.debug("chat image source selected data-url final=data:image/... ")
+        return ChatResolvedImageSource(displaySource: "data:image/...", loadSource: .dataURL(imageURL))
+    }
+
+    if let remoteURL = URL(string: imageURL),
+       let scheme = remoteURL.scheme?.lowercased(),
+       ["http", "https"].contains(scheme)
+    {
+        chatUIMediaLogger.debug(
+            "chat image source selected imageURL=\(imageURL, privacy: .public) final=\(imageURL, privacy: .public)")
+        return ChatResolvedImageSource(displaySource: imageURL, loadSource: .remote(remoteURL))
+    }
+
+    let fileURL: URL
+    if imageURL.lowercased().hasPrefix("file://"), let parsedFileURL = URL(string: imageURL) {
+        fileURL = parsedFileURL
+    } else {
+        fileURL = URL(fileURLWithPath: imageURL)
+    }
+    if FileManager.default.fileExists(atPath: fileURL.path) {
+        let displaySource = fileURL.absoluteString
+        chatUIMediaLogger.debug(
+            "chat image source selected imageURL=\(imageURL, privacy: .public) final=\(displaySource, privacy: .public)")
+        return ChatResolvedImageSource(displaySource: displaySource, loadSource: .file(fileURL))
+    }
+
+    chatUIMediaLogger.debug(
+        "chat image source unavailable filePath=\(trimmedFilePath ?? "", privacy: .public) imageURL=\(imageURL, privacy: .public)")
+    return nil
+}
+
+private func resolveChatVideoSource(_ content: OpenClawChatMessageContent) -> ChatResolvedVideoSource? {
+    let trimmedFilePath = content.filePath?
+        .trimmingCharacters(in: .whitespacesAndNewlines)
+    if let filePath = trimmedFilePath, !filePath.isEmpty {
+        let fileURL = URL(fileURLWithPath: filePath)
+        if FileManager.default.fileExists(atPath: fileURL.path) {
+            let displaySource = fileURL.absoluteString
+            chatUIMediaLogger.debug(
+                "chat video source selected filePath=\(filePath, privacy: .public) final=\(displaySource, privacy: .public)")
+            return ChatResolvedVideoSource(displaySource: displaySource, loadSource: .file(fileURL))
+        }
+    }
+
+    let trimmedVideoURL = content.videoURL?
+        .trimmingCharacters(in: .whitespacesAndNewlines)
+    guard let videoURL = trimmedVideoURL, !videoURL.isEmpty else {
+        return nil
+    }
+
+    if let remoteURL = URL(string: videoURL),
+       let scheme = remoteURL.scheme?.lowercased(),
+       ["http", "https"].contains(scheme)
+    {
+        chatUIMediaLogger.debug(
+            "chat video source selected videoURL=\(videoURL, privacy: .public) final=\(videoURL, privacy: .public)")
+        return ChatResolvedVideoSource(displaySource: videoURL, loadSource: .remote(remoteURL))
+    }
+
+    let fileURL: URL
+    if videoURL.lowercased().hasPrefix("file://"), let parsedFileURL = URL(string: videoURL) {
+        fileURL = parsedFileURL
+    } else {
+        fileURL = URL(fileURLWithPath: videoURL)
+    }
+    if FileManager.default.fileExists(atPath: fileURL.path) {
+        let displaySource = fileURL.absoluteString
+        chatUIMediaLogger.debug(
+            "chat video source selected videoURL=\(videoURL, privacy: .public) final=\(displaySource, privacy: .public)")
+        return ChatResolvedVideoSource(displaySource: displaySource, loadSource: .file(fileURL))
+    }
+
+    chatUIMediaLogger.debug(
+        "chat video source unavailable filePath=\(trimmedFilePath ?? "", privacy: .public) videoURL=\(videoURL, privacy: .public)")
+    return nil
 }
 
 private struct ChatBubbleShape: InsettableShape {
@@ -197,6 +343,18 @@ private struct ChatMessageBody: View {
                     includesThinking: self.showsAssistantTrace)
             }
 
+            if !self.inlineImages.isEmpty {
+                ForEach(self.inlineImages.indices, id: \.self) { idx in
+                    ChatInlineImageRow(content: self.inlineImages[idx])
+                }
+            }
+
+            if !self.inlineVideos.isEmpty {
+                ForEach(self.inlineVideos.indices, id: \.self) { idx in
+                    ChatInlineVideoRow(content: self.inlineVideos[idx])
+                }
+            }
+
             if !self.inlineAttachments.isEmpty {
                 ForEach(self.inlineAttachments.indices, id: \.self) { idx in
                     AttachmentRow(att: self.inlineAttachments[idx], isUser: self.isUser)
@@ -252,6 +410,20 @@ private struct ChatMessageBody: View {
             default:
                 false
             }
+        }
+    }
+
+    private var inlineImages: [OpenClawChatMessageContent] {
+        self.message.content.filter { content in
+            let kind = (content.type ?? "").lowercased()
+            return kind == "image" || kind == "image_url"
+        }
+    }
+
+    private var inlineVideos: [OpenClawChatMessageContent] {
+        self.message.content.filter { content in
+            let kind = (content.type ?? "").lowercased()
+            return kind == "video" || kind == "video_url"
         }
     }
 
@@ -368,6 +540,156 @@ private struct AttachmentRow: View {
         .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
     }
 }
+
+@MainActor
+private struct ChatInlineImageRow: View {
+    let content: OpenClawChatMessageContent
+
+    @State private var image: OpenClawPlatformImage?
+    @State private var errorText: String?
+
+    var body: some View {
+        Group {
+            if let image = self.image {
+                OpenClawChatTheme.image(image)
+                    .resizable()
+                    .scaledToFit()
+                    .frame(maxWidth: 320, maxHeight: 320)
+                    .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+            } else if let errorText {
+                Text(errorText)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            } else {
+                ProgressView()
+                    .frame(maxWidth: 320, minHeight: 80)
+            }
+        }
+        .task(id: self.sourceIdentity) {
+            await self.loadImage()
+        }
+    }
+
+    private var sourceIdentity: String {
+        [
+            self.content.filePath ?? "",
+            self.content.imageURL ?? "",
+        ].joined(separator: "|")
+    }
+
+    private func loadImage() async {
+        guard let resolved = resolveChatImageSource(self.content) else {
+            self.image = nil
+            self.errorText = "Image source unavailable"
+            return
+        }
+
+        do {
+            let loadedImage = try await Self.loadPlatformImage(from: resolved.loadSource)
+            self.image = loadedImage
+            self.errorText = nil
+        } catch {
+            self.image = nil
+            self.errorText = "Failed to load image"
+            chatUIMediaLogger.error(
+                "chat image load failed source=\(resolved.displaySource, privacy: .public) error=\(error.localizedDescription, privacy: .public)")
+        }
+    }
+
+    private static func loadPlatformImage(from source: ChatImageLoadSource) async throws -> OpenClawPlatformImage {
+        switch source {
+        case let .dataURL(dataURL):
+            return try decodeDataURLImage(dataURL)
+        case let .file(fileURL):
+            let data = try await Task.detached(priority: .userInitiated) {
+                try Data(contentsOf: fileURL)
+            }.value
+            guard let image = OpenClawPlatformImage(data: data) else {
+                throw ChatImageDecodeError.decodeFailed
+            }
+            return image
+        case let .remote(remoteURL):
+            let (data, _) = try await URLSession.shared.data(from: remoteURL)
+            guard let image = OpenClawPlatformImage(data: data) else {
+                throw ChatImageDecodeError.decodeFailed
+            }
+            return image
+        }
+    }
+}
+
+#if canImport(AVKit) && canImport(AVFoundation)
+@MainActor
+private struct ChatInlineVideoRow: View {
+    let content: OpenClawChatMessageContent
+
+    @State private var player: AVPlayer?
+    @State private var errorText: String?
+
+    var body: some View {
+        Group {
+            if let player = self.player {
+                VideoPlayer(player: player)
+                    .frame(maxWidth: 360, minHeight: 180, maxHeight: 280)
+                    .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+            } else if let errorText {
+                Text(errorText)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            } else {
+                ProgressView()
+                    .frame(maxWidth: 360, minHeight: 120)
+            }
+        }
+        .task(id: self.sourceIdentity) {
+            await self.loadPlayer()
+        }
+        .onDisappear {
+            self.player?.pause()
+        }
+    }
+
+    private var sourceIdentity: String {
+        [
+            self.content.filePath ?? "",
+            self.content.videoURL ?? "",
+        ].joined(separator: "|")
+    }
+
+    private func loadPlayer() async {
+        guard let resolved = resolveChatVideoSource(self.content) else {
+            self.player?.pause()
+            self.player = nil
+            self.errorText = "Video source unavailable"
+            return
+        }
+
+        let playerURL: URL
+        switch resolved.loadSource {
+        case let .file(fileURL):
+            playerURL = fileURL
+        case let .remote(remoteURL):
+            playerURL = remoteURL
+        }
+        self.player?.pause()
+        self.player = AVPlayer(url: playerURL)
+        self.errorText = nil
+        chatUIMediaLogger.debug(
+            "chat video player ready source=\(resolved.displaySource, privacy: .public)")
+    }
+}
+#else
+@MainActor
+private struct ChatInlineVideoRow: View {
+    let content: OpenClawChatMessageContent
+
+    var body: some View {
+        Text("Video preview unavailable on this platform")
+            .font(.caption)
+            .foregroundStyle(.secondary)
+    }
+}
+#endif
 
 private struct ToolCallCard: View {
     let content: OpenClawChatMessageContent

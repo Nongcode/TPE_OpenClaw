@@ -1,5 +1,6 @@
 export const CONTROL_UI_BOOTSTRAP_CONFIG_PATH = "/__openclaw/control-ui-config.json";
 export const CONTROL_UI_LOGIN_PATH = "/__openclaw/control-ui-login";
+export const CONTROL_UI_CHAT_ARTIFACT_PATH = "/__openclaw/chat-artifact";
 
 export type ControlUiBootstrapAccessPolicy = {
   employeeId?: string;

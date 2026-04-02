@@ -612,6 +612,54 @@ describe("agent event handler", () => {
     resetAgentRunContextForTest();
   });
 
+  it("preserves minimal media artifact summaries when verbose is on", () => {
+    const { broadcastToConnIds, toolEventRecipients, handler } = createHarness({
+      resolveSessionKeyForRun: () => "session-1",
+    });
+
+    registerAgentRunContext("run-tool-media", { sessionKey: "session-1", verboseLevel: "on" });
+    toolEventRecipients.add("run-tool-media", "conn-1");
+
+    handler({
+      runId: "run-tool-media",
+      seq: 1,
+      stream: "tool",
+      ts: Date.now(),
+      data: {
+        phase: "result",
+        name: "generate_video",
+        toolCallId: "t-media",
+        result: {
+          success: true,
+          artifacts: [
+            {
+              type: "chat_video",
+              path: "artifacts/videos/generated.mp4",
+            },
+          ],
+          data: {
+            absolute_video_path: "C:/workspace/artifacts/videos/generated.mp4",
+          },
+        },
+      },
+    });
+
+    expect(broadcastToConnIds).toHaveBeenCalledTimes(1);
+    const payload = broadcastToConnIds.mock.calls[0]?.[1] as { data?: Record<string, unknown> };
+    expect(payload.data?.result).toEqual({
+      artifacts: [
+        {
+          type: "chat_video",
+          path: "artifacts/videos/generated.mp4",
+        },
+      ],
+      data: {
+        absolute_video_path: "C:/workspace/artifacts/videos/generated.mp4",
+      },
+    });
+    resetAgentRunContextForTest();
+  });
+
   it("keeps tool output when verbose is full", () => {
     const { broadcastToConnIds, toolEventRecipients, handler } = createHarness({
       resolveSessionKeyForRun: () => "session-1",

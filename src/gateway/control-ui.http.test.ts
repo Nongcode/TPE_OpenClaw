@@ -5,6 +5,7 @@ import path from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   CONTROL_UI_BOOTSTRAP_CONFIG_PATH,
+  CONTROL_UI_CHAT_ARTIFACT_PATH,
   CONTROL_UI_LOGIN_PATH,
 } from "./control-ui-contract.js";
 import { handleControlUiAvatarRequest, handleControlUiHttpRequest } from "./control-ui.js";
@@ -65,7 +66,7 @@ describe("handleControlUiHttpRequest", () => {
     trustedProxies?: string[];
     remoteAddress?: string;
   }) {
-    const { res, end } = makeMockHttpResponse();
+    const { res, end, setHeader } = makeMockHttpResponse();
     const handled = handleControlUiHttpRequest(
       {
         url: params.url,
@@ -81,7 +82,7 @@ describe("handleControlUiHttpRequest", () => {
         root: { kind: params.rootKind ?? "resolved", path: params.rootPath },
       },
     );
-    return { res, end, handled };
+    return { res, end, handled, setHeader };
   }
 
   async function runControlUiRequestWithBody(params: {
@@ -657,6 +658,134 @@ describe("handleControlUiHttpRequest", () => {
       await fs.rm(tmp, { recursive: true, force: true });
       await fs.rm(outside, { recursive: true, force: true });
     }
+  });
+
+  it("serves chat artifacts from the repo artifacts directory", async () => {
+    await withControlUiRoot({
+      fn: async (tmp) => {
+        const relativeArtifactPath = path.join("images", "control-ui-chat-artifact-test.png");
+        const artifactsRoot = path.join(process.cwd(), "artifacts");
+        const absoluteArtifactPath = path.join(artifactsRoot, relativeArtifactPath);
+        await fs.mkdir(path.dirname(absoluteArtifactPath), { recursive: true });
+        await fs.writeFile(absoluteArtifactPath, "artifact-bytes\n");
+        try {
+          const { res, end, handled } = runControlUiRequest({
+            url: `${CONTROL_UI_CHAT_ARTIFACT_PATH}?path=${encodeURIComponent(relativeArtifactPath.replace(/\\/g, "/"))}`,
+            method: "GET",
+            rootPath: tmp,
+          });
+
+          expect(handled).toBe(true);
+          expect(res.statusCode).toBe(200);
+          expect(String(end.mock.calls[0]?.[0] ?? "")).toBe("artifact-bytes\n");
+        } finally {
+          await fs.rm(absoluteArtifactPath, { force: true });
+        }
+      },
+    });
+  });
+
+  it("serves chat artifacts from an absolute artifact path outside the repo root", async () => {
+    await withControlUiRoot({
+      fn: async (tmp) => {
+        const externalRoot = await fs.mkdtemp(path.join(os.tmpdir(), "openclaw-chat-artifacts-"));
+        try {
+          const artifactsRoot = path.join(externalRoot, "artifacts");
+          const absoluteArtifactPath = path.join(
+            artifactsRoot,
+            "images",
+            "control-ui-chat-artifact-absolute.png",
+          );
+          await fs.mkdir(path.dirname(absoluteArtifactPath), { recursive: true });
+          await fs.writeFile(absoluteArtifactPath, "absolute-artifact-bytes\n");
+
+          const { res, end, handled } = runControlUiRequest({
+            url: `${CONTROL_UI_CHAT_ARTIFACT_PATH}?absolute_path=${encodeURIComponent(
+              absoluteArtifactPath.replace(/\\/g, "/"),
+            )}`,
+            method: "GET",
+            rootPath: tmp,
+          });
+
+          expect(handled).toBe(true);
+          expect(res.statusCode).toBe(200);
+          expect(String(end.mock.calls[0]?.[0] ?? "")).toBe("absolute-artifact-bytes\n");
+        } finally {
+          await fs.rm(externalRoot, { recursive: true, force: true });
+        }
+      },
+    });
+  });
+
+  it("serves video chat artifacts with a playable content type", async () => {
+    await withControlUiRoot({
+      fn: async (tmp) => {
+        const externalRoot = await fs.mkdtemp(path.join(os.tmpdir(), "openclaw-chat-video-"));
+        try {
+          const artifactsRoot = path.join(externalRoot, "artifacts");
+          const absoluteArtifactPath = path.join(
+            artifactsRoot,
+            "videos",
+            "control-ui-chat-artifact-video.mp4",
+          );
+          await fs.mkdir(path.dirname(absoluteArtifactPath), { recursive: true });
+          await fs.writeFile(absoluteArtifactPath, "video-bytes\n");
+
+          const { res, end, handled, setHeader } = runControlUiRequest({
+            url: `${CONTROL_UI_CHAT_ARTIFACT_PATH}?absolute_path=${encodeURIComponent(
+              absoluteArtifactPath.replace(/\\/g, "/"),
+            )}`,
+            method: "GET",
+            rootPath: tmp,
+          });
+
+          expect(handled).toBe(true);
+          expect(res.statusCode).toBe(200);
+          expect(String(end.mock.calls[0]?.[0] ?? "")).toBe("video-bytes\n");
+          expect(setHeader).toHaveBeenCalledWith("Content-Type", "video/mp4");
+        } finally {
+          await fs.rm(externalRoot, { recursive: true, force: true });
+        }
+      },
+    });
+  });
+
+  it("rejects chat artifact escape attempts outside the artifacts root", async () => {
+    await withControlUiRoot({
+      fn: async (tmp) => {
+        const { res, end, handled } = runControlUiRequest({
+          url: `${CONTROL_UI_CHAT_ARTIFACT_PATH}?path=${encodeURIComponent("../secret.txt")}`,
+          method: "GET",
+          rootPath: tmp,
+        });
+
+        expectNotFoundResponse({ handled, res, end });
+      },
+    });
+  });
+
+  it("rejects absolute chat artifact paths outside any artifacts directory", async () => {
+    await withControlUiRoot({
+      fn: async (tmp) => {
+        const outsideRoot = await fs.mkdtemp(path.join(os.tmpdir(), "openclaw-chat-outside-"));
+        try {
+          const outsideFile = path.join(outsideRoot, "not-artifacts.png");
+          await fs.writeFile(outsideFile, "nope\n");
+
+          const { res, end, handled } = runControlUiRequest({
+            url: `${CONTROL_UI_CHAT_ARTIFACT_PATH}?absolute_path=${encodeURIComponent(
+              outsideFile.replace(/\\/g, "/"),
+            )}`,
+            method: "GET",
+            rootPath: tmp,
+          });
+
+          expectNotFoundResponse({ handled, res, end });
+        } finally {
+          await fs.rm(outsideRoot, { recursive: true, force: true });
+        }
+      },
+    });
   });
 
   it("rejects symlinked assets that resolve outside control-ui root", async () => {

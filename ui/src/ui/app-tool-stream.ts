@@ -1,4 +1,5 @@
 import { truncateText } from "./format.ts";
+import { collectChatImageBlocksFromValue } from "./chat/image-artifacts.ts";
 
 const TOOL_STREAM_LIMIT = 50;
 const TOOL_STREAM_THROTTLE_MS = 80;
@@ -35,6 +36,7 @@ type ToolStreamHost = {
   toolStreamOrder: string[];
   chatToolMessages: Record<string, unknown>[];
   toolStreamSyncTimer: number | null;
+  basePath?: string;
 };
 
 function toTrimmedString(value: unknown): string | null {
@@ -171,7 +173,7 @@ function formatToolOutput(value: unknown): string | null {
   return `${truncated.text}\n\n… truncated (${truncated.total} chars, showing first ${truncated.text.length}).`;
 }
 
-function buildToolStreamMessage(entry: ToolStreamEntry): Record<string, unknown> {
+function buildToolStreamMessage(entry: ToolStreamEntry, basePath?: string): Record<string, unknown> {
   const content: Array<Record<string, unknown>> = [];
   content.push({
     type: "toolcall",
@@ -184,6 +186,7 @@ function buildToolStreamMessage(entry: ToolStreamEntry): Record<string, unknown>
       name: entry.name,
       text: entry.output,
     });
+    content.push(...collectChatImageBlocksFromValue(entry.output, basePath));
   }
   return {
     role: "assistant",
@@ -466,7 +469,7 @@ export function handleAgentEvent(host: ToolStreamHost, payload?: AgentEventPaylo
     entry.updatedAt = now;
   }
 
-  entry.message = buildToolStreamMessage(entry);
+  entry.message = buildToolStreamMessage(entry, host.basePath);
   trimToolStream(host);
   scheduleToolStreamSync(host, phase === "result");
 }

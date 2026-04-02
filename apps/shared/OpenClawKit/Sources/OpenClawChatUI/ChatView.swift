@@ -348,9 +348,53 @@ public struct OpenClawChatView: View {
     private func mergeToolResults(in messages: [OpenClawChatMessage]) -> [OpenClawChatMessage] {
         var result: [OpenClawChatMessage] = []
         result.reserveCapacity(messages.count)
+        var pendingToolResultMedia: [OpenClawChatMessageContent] = []
+        var pendingToolResultMessage: OpenClawChatMessage?
+
+        func clearPendingToolResultMedia() {
+            pendingToolResultMedia.removeAll(keepingCapacity: true)
+            pendingToolResultMessage = nil
+        }
+
+        func appendPendingToolResultMedia(to message: OpenClawChatMessage) -> OpenClawChatMessage {
+            guard !pendingToolResultMedia.isEmpty else { return message }
+            let updated = OpenClawChatMessage(
+                id: message.id,
+                role: message.role,
+                content: message.content + pendingToolResultMedia,
+                timestamp: message.timestamp,
+                toolCallId: message.toolCallId,
+                toolName: message.toolName,
+                usage: message.usage,
+                stopReason: message.stopReason)
+            clearPendingToolResultMedia()
+            return updated
+        }
+
+        func flushPendingToolResultMediaAsStandalone() {
+            guard !pendingToolResultMedia.isEmpty else { return }
+            let source = pendingToolResultMessage
+            result.append(
+                OpenClawChatMessage(
+                    role: source?.role ?? "assistant",
+                    content: pendingToolResultMedia,
+                    timestamp: source?.timestamp,
+                    toolCallId: source?.toolCallId,
+                    toolName: source?.toolName,
+                    usage: nil,
+                    stopReason: nil))
+            clearPendingToolResultMedia()
+        }
 
         for message in messages {
             guard self.isToolResultMessage(message) else {
+                if !pendingToolResultMedia.isEmpty {
+                    if message.role.lowercased() == "assistant" {
+                        result.append(appendPendingToolResultMedia(to: message))
+                        continue
+                    }
+                    flushPendingToolResultMediaAsStandalone()
+                }
                 result.append(message)
                 continue
             }
@@ -359,11 +403,43 @@ public struct OpenClawChatView: View {
                   let last = result.last,
                   self.toolCallIds(in: last).contains(toolCallId)
             else {
+                let toolMedia = self.inlineMedia(in: message)
+                if !toolMedia.isEmpty {
+                    pendingToolResultMedia.append(contentsOf: toolMedia)
+                    pendingToolResultMessage = message
+                    let toolText = self.toolResultText(from: message)
+                    if toolText.isEmpty {
+                        continue
+                    }
+                    let strippedContent = message.content.filter { content in
+                        let kind = (content.type ?? "").lowercased()
+                        return kind != "image" &&
+                            kind != "image_url" &&
+                            kind != "video" &&
+                            kind != "video_url"
+                    }
+                    result.append(
+                        OpenClawChatMessage(
+                            id: message.id,
+                            role: message.role,
+                            content: strippedContent,
+                            timestamp: message.timestamp,
+                            toolCallId: message.toolCallId,
+                            toolName: message.toolName,
+                            usage: message.usage,
+                            stopReason: message.stopReason))
+                    continue
+                }
                 result.append(message)
                 continue
             }
 
             let toolText = self.toolResultText(from: message)
+            let toolMedia = self.inlineMedia(in: message)
+            if !toolMedia.isEmpty {
+                pendingToolResultMedia.append(contentsOf: toolMedia)
+                pendingToolResultMessage = message
+            }
             if toolText.isEmpty {
                 continue
             }
@@ -394,6 +470,10 @@ public struct OpenClawChatView: View {
             result[result.count - 1] = merged
         }
 
+        if !pendingToolResultMedia.isEmpty {
+            flushPendingToolResultMediaAsStandalone()
+        }
+
         return result
     }
 
@@ -403,6 +483,10 @@ public struct OpenClawChatView: View {
     }
 
     private func shouldDisplayMessage(_ message: OpenClawChatMessage) -> Bool {
+        if self.hasInlineMedia(in: message) {
+            return true
+        }
+
         if self.hasInlineAttachments(in: message) {
             return true
         }
@@ -448,6 +532,10 @@ public struct OpenClawChatView: View {
         }
     }
 
+    private func hasInlineMedia(in message: OpenClawChatMessage) -> Bool {
+        !self.inlineMedia(in: message).isEmpty
+    }
+
     private func toolCalls(in message: OpenClawChatMessage) -> [OpenClawChatMessageContent] {
         message.content.filter { content in
             let kind = (content.type ?? "").lowercased()
@@ -462,6 +550,16 @@ public struct OpenClawChatView: View {
         message.content.filter { content in
             let kind = (content.type ?? "").lowercased()
             return kind == "toolresult" || kind == "tool_result"
+        }
+    }
+
+    private func inlineMedia(in message: OpenClawChatMessage) -> [OpenClawChatMessageContent] {
+        message.content.filter { content in
+            let kind = (content.type ?? "").lowercased()
+            return kind == "image" ||
+                kind == "image_url" ||
+                kind == "video" ||
+                kind == "video_url"
         }
     }
 

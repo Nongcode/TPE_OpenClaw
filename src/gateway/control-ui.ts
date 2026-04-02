@@ -22,6 +22,7 @@ import {
 } from "./control-ui-access.js";
 import {
   CONTROL_UI_BOOTSTRAP_CONFIG_PATH,
+  CONTROL_UI_CHAT_ARTIFACT_PATH,
   CONTROL_UI_LOGIN_PATH,
   type ControlUiDemoLoginConfig,
   type ControlUiBootstrapAccessPolicy,
@@ -89,6 +90,12 @@ function contentTypeForExt(ext: string): string {
       return "image/gif";
     case ".webp":
       return "image/webp";
+    case ".mp4":
+      return "video/mp4";
+    case ".webm":
+      return "video/webm";
+    case ".mov":
+      return "video/quicktime";
     case ".ico":
       return "image/x-icon";
     case ".txt":
@@ -448,6 +455,63 @@ function resolveSafeAvatarFile(filePath: string): { path: string; fd: number } |
   return { path: opened.path, fd: opened.fd };
 }
 
+function resolveSafeChatArtifactFile(relativeArtifactPath: string): { path: string; fd: number } | null {
+  const artifactsRoot = path.resolve(process.cwd(), "artifacts");
+  const targetPath = path.resolve(artifactsRoot, relativeArtifactPath);
+  if (!isWithinDir(artifactsRoot, targetPath)) {
+    return null;
+  }
+  const opened = openVerifiedFileSync({
+    filePath: targetPath,
+    rejectPathSymlink: true,
+  });
+  if (!opened.ok) {
+    return null;
+  }
+  if (!isWithinDir(artifactsRoot, opened.path)) {
+    fs.closeSync(opened.fd);
+    return null;
+  }
+  return { path: opened.path, fd: opened.fd };
+}
+
+function resolveArtifactsRootFromAbsolutePath(filePath: string): string | null {
+  let current = path.dirname(path.resolve(filePath));
+  while (true) {
+    if (path.basename(current).toLowerCase() === "artifacts") {
+      return current;
+    }
+    const parent = path.dirname(current);
+    if (parent === current) {
+      return null;
+    }
+    current = parent;
+  }
+}
+
+function resolveSafeAbsoluteChatArtifactFile(absoluteArtifactPath: string): { path: string; fd: number } | null {
+  if (!path.isAbsolute(absoluteArtifactPath)) {
+    return null;
+  }
+  const targetPath = path.resolve(absoluteArtifactPath);
+  const artifactsRoot = resolveArtifactsRootFromAbsolutePath(targetPath);
+  if (!artifactsRoot || !isWithinDir(artifactsRoot, targetPath)) {
+    return null;
+  }
+  const opened = openVerifiedFileSync({
+    filePath: targetPath,
+    rejectPathSymlink: true,
+  });
+  if (!opened.ok) {
+    return null;
+  }
+  if (!isWithinDir(artifactsRoot, opened.path)) {
+    fs.closeSync(opened.fd);
+    return null;
+  }
+  return { path: opened.path, fd: opened.fd };
+}
+
 function resolveSafeControlUiFile(
   rootReal: string,
   filePath: string,
@@ -526,6 +590,9 @@ export function handleControlUiHttpRequest(
   const bootstrapConfigPath = basePath
     ? `${basePath}${CONTROL_UI_BOOTSTRAP_CONFIG_PATH}`
     : CONTROL_UI_BOOTSTRAP_CONFIG_PATH;
+  const chatArtifactPath = basePath
+    ? `${basePath}${CONTROL_UI_CHAT_ARTIFACT_PATH}`
+    : CONTROL_UI_CHAT_ARTIFACT_PATH;
   const loginPath = basePath ? `${basePath}${CONTROL_UI_LOGIN_PATH}` : CONTROL_UI_LOGIN_PATH;
   if (pathname === bootstrapConfigPath) {
     const config = opts?.config;
@@ -600,6 +667,30 @@ export function handleControlUiHttpRequest(
       }
     });
     return true;
+  }
+
+  if (pathname === chatArtifactPath) {
+    const relativeArtifactPath = url.searchParams.get("path")?.trim() ?? "";
+    const absoluteArtifactPath = url.searchParams.get("absolute_path")?.trim() ?? "";
+    const safeArtifact =
+      relativeArtifactPath && isSafeRelativePath(relativeArtifactPath)
+        ? resolveSafeChatArtifactFile(relativeArtifactPath)
+        : absoluteArtifactPath
+          ? resolveSafeAbsoluteChatArtifactFile(absoluteArtifactPath)
+          : null;
+    if (!safeArtifact) {
+      respondControlUiNotFound(res);
+      return true;
+    }
+    try {
+      if (respondHeadForFile(req, res, safeArtifact.path)) {
+        return true;
+      }
+      serveResolvedFile(res, safeArtifact.path, fs.readFileSync(safeArtifact.fd));
+      return true;
+    } finally {
+      fs.closeSync(safeArtifact.fd);
+    }
   }
 
   const rootState = opts?.root;

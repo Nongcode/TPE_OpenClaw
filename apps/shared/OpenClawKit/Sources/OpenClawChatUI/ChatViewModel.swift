@@ -270,6 +270,9 @@ public final class OpenClawChatViewModel {
                 text: cleaned,
                 thinking: content.thinking,
                 thinkingSignature: content.thinkingSignature,
+                imageURL: content.imageURL,
+                videoURL: content.videoURL,
+                filePath: content.filePath,
                 mimeType: content.mimeType,
                 fileName: content.fileName,
                 content: content.content,
@@ -304,7 +307,10 @@ public final class OpenClawChatViewModel {
             let id = (item.id ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
             let name = (item.name ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
             let fileName = (item.fileName ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-            return [type, text, id, name, fileName].joined(separator: "\\u{001F}")
+            let imageURL = (item.imageURL ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            let videoURL = (item.videoURL ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            let filePath = (item.filePath ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            return [type, text, id, name, fileName, imageURL, videoURL, filePath].joined(separator: "\\u{001F}")
         }.joined(separator: "\\u{001E}")
 
         let toolCallId = (message.toolCallId ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
