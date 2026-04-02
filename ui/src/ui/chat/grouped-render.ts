@@ -18,15 +18,16 @@ import { isToolResultMessage, normalizeRoleForGrouping } from "./message-normali
 import { isTtsSupported, speakText, stopTts, isTtsSpeaking } from "./speech.ts";
 import { extractToolCards, renderToolCardSidebar } from "./tool-cards.ts";
 
-type ImageBlock = {
+type MediaBlock = {
+  kind: "image" | "video";
   url: string;
   alt?: string;
 };
 
-function extractImages(message: unknown): ImageBlock[] {
+function extractImages(message: unknown): MediaBlock[] {
   const m = message as Record<string, unknown>;
   const content = m.content;
-  const images: ImageBlock[] = [];
+  const images: MediaBlock[] = [];
 
   if (Array.isArray(content)) {
     for (const block of content) {
@@ -43,15 +44,30 @@ function extractImages(message: unknown): ImageBlock[] {
           const mediaType = (source.media_type as string) || "image/png";
           // If data is already a data URL, use it directly
           const url = data.startsWith("data:") ? data : `data:${mediaType};base64,${data}`;
-          images.push({ url });
+          images.push({ kind: "image", url });
         } else if (typeof b.url === "string") {
-          images.push({ url: b.url });
+          images.push({ kind: "image", url: b.url });
         }
       } else if (b.type === "image_url") {
         // OpenAI format
         const imageUrl = b.image_url as Record<string, unknown> | undefined;
         if (typeof imageUrl?.url === "string") {
-          images.push({ url: imageUrl.url });
+          images.push({ kind: "image", url: imageUrl.url });
+        }
+      } else if (b.type === "video") {
+        const source = b.source as Record<string, unknown> | undefined;
+        if (source?.type === "base64" && typeof source.data === "string") {
+          const data = source.data;
+          const mediaType = (source.media_type as string) || "video/mp4";
+          const url = data.startsWith("data:") ? data : `data:${mediaType};base64,${data}`;
+          images.push({ kind: "video", url });
+        } else if (typeof b.url === "string") {
+          images.push({ kind: "video", url: b.url });
+        }
+      } else if (b.type === "video_url") {
+        const videoUrl = b.video_url as Record<string, unknown> | undefined;
+        if (typeof videoUrl?.url === "string") {
+          images.push({ kind: "video", url: videoUrl.url });
         }
       }
     }
@@ -522,7 +538,7 @@ function isAvatarUrl(value: string): boolean {
   );
 }
 
-function renderMessageImages(images: ImageBlock[]) {
+function renderMessageImages(images: MediaBlock[]) {
   if (images.length === 0) {
     return nothing;
   }
@@ -530,17 +546,41 @@ function renderMessageImages(images: ImageBlock[]) {
   const openImage = (url: string) => {
     openExternalUrlSafe(url, { allowDataImage: true });
   };
+  const logImageRender = (url: string) => {
+    try {
+      console.debug("[openclaw chat media]", "render", { src: url });
+    } catch {
+      // Ignore logging failures in constrained runtimes.
+    }
+  };
 
   return html`
     <div class="chat-message-images">
       ${images.map(
         (img) => html`
-          <img
-            src=${img.url}
-            alt=${img.alt ?? "Attached image"}
-            class="chat-message-image"
-            @click=${() => openImage(img.url)}
-          />
+          ${
+            img.kind === "video"
+              ? html`
+                  <video
+                    class="chat-message-video"
+                    controls
+                    playsinline
+                    preload="metadata"
+                    @loadeddata=${() => logImageRender(img.url)}
+                  >
+                    <source src=${img.url} />
+                  </video>
+                `
+              : html`
+                  <img
+                    src=${img.url}
+                    alt=${img.alt ?? "Attached image"}
+                    class="chat-message-image"
+                    @load=${() => logImageRender(img.url)}
+                    @click=${() => openImage(img.url)}
+                  />
+                `
+          }
         `,
       )}
     </div>

@@ -3,6 +3,7 @@ import {
   isAvatarImageDataUrl,
   looksLikeAvatarPath,
 } from "../shared/avatar-policy.js";
+import { CONTROL_UI_CHAT_ARTIFACT_PATH } from "./control-ui-contract.js";
 
 const CONTROL_UI_AVATAR_PREFIX = "/avatar";
 
@@ -30,6 +31,20 @@ export function buildControlUiAvatarUrl(basePath: string, agentId: string): stri
   return basePath
     ? `${basePath}${CONTROL_UI_AVATAR_PREFIX}/${agentId}`
     : `${CONTROL_UI_AVATAR_PREFIX}/${agentId}`;
+}
+
+export function buildControlUiChatArtifactUrl(
+  basePath: string,
+  artifactPath: string,
+  options?: { absolute?: boolean },
+): string {
+  const normalizedBasePath = normalizeControlUiBasePath(basePath);
+  const trimmedArtifactPath = artifactPath.trim().replace(/\\/g, "/");
+  const encodedPath = encodeURIComponent(trimmedArtifactPath);
+  const queryKey = options?.absolute ? "absolute_path" : "path";
+  return normalizedBasePath
+    ? `${normalizedBasePath}${CONTROL_UI_CHAT_ARTIFACT_PATH}?${queryKey}=${encodedPath}`
+    : `${CONTROL_UI_CHAT_ARTIFACT_PATH}?${queryKey}=${encodedPath}`;
 }
 
 export function resolveAssistantAvatarUrl(params: {

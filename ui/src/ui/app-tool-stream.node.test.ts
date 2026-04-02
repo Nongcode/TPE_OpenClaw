@@ -139,4 +139,83 @@ describe("app-tool-stream fallback lifecycle handling", () => {
     expect(host.fallbackStatus?.previous).toBe("deepinfra/moonshotai/Kimi-K2.5");
     vi.useRealTimers();
   });
+
+  it("adds image_url blocks for chat image artifacts in tool output JSON", () => {
+    const host = createHost({ basePath: "/openclaw" });
+
+    handleAgentEvent(host, {
+      runId: "run-1",
+      seq: 1,
+      stream: "tool",
+      ts: Date.now(),
+      sessionKey: "main",
+      data: {
+        phase: "result",
+        toolCallId: "tool-1",
+        name: "show_generated_image_in_chat",
+        result: JSON.stringify({
+          success: true,
+          artifacts: [
+            {
+              type: "chat_image",
+              path: "artifacts/images/generated.png",
+            },
+          ],
+          data: {
+            absolute_image_path: "C:/Users/Administrator/.openclaw/workspace/artifacts/images/generated.png",
+          },
+        }),
+      },
+    });
+
+    expect(host.chatToolMessages).toHaveLength(1);
+    const message = host.chatToolMessages[0] as { content?: Array<Record<string, unknown>> };
+    const imageBlock = message.content?.find((item) => item.type === "image_url");
+    expect(imageBlock).toEqual({
+      type: "image_url",
+      image_url: {
+        url: "/openclaw/__openclaw/chat-artifact?absolute_path=C%3A%2FUsers%2FAdministrator%2F.openclaw%2Fworkspace%2Fartifacts%2Fimages%2Fgenerated.png",
+      },
+    });
+  });
+
+  it("adds video_url blocks for chat video artifacts in tool output JSON", () => {
+    const host = createHost({ basePath: "/openclaw" });
+
+    handleAgentEvent(host, {
+      runId: "run-1",
+      seq: 1,
+      stream: "tool",
+      ts: Date.now(),
+      sessionKey: "main",
+      data: {
+        phase: "result",
+        toolCallId: "tool-2",
+        name: "show_generated_video_in_chat",
+        result: JSON.stringify({
+          success: true,
+          artifacts: [
+            {
+              type: "chat_video",
+              path: "artifacts/videos/generated.mp4",
+            },
+          ],
+          data: {
+            absolute_video_path:
+              "C:/Users/Administrator/.openclaw/workspace/artifacts/videos/generated.mp4",
+          },
+        }),
+      },
+    });
+
+    expect(host.chatToolMessages).toHaveLength(1);
+    const message = host.chatToolMessages[0] as { content?: Array<Record<string, unknown>> };
+    const videoBlock = message.content?.find((item) => item.type === "video_url");
+    expect(videoBlock).toEqual({
+      type: "video_url",
+      video_url: {
+        url: "/openclaw/__openclaw/chat-artifact?absolute_path=C%3A%2FUsers%2FAdministrator%2F.openclaw%2Fworkspace%2Fartifacts%2Fvideos%2Fgenerated.mp4",
+      },
+    });
+  });
 });

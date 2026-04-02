@@ -295,6 +295,14 @@
   transform: scale(1.02);
 }
 
+.chat-message-video {
+  max-width: 300px;
+  max-height: 240px;
+  border-radius: 8px;
+  background: #000;
+  display: block;
+}
+
 /* User message images align right */
 .chat-group.user .chat-message-images {
   justify-content: flex-end;

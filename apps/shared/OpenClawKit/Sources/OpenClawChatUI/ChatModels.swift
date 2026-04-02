@@ -67,6 +67,9 @@ public struct OpenClawChatMessageContent: Codable, Hashable, Sendable {
     public let text: String?
     public let thinking: String?
     public let thinkingSignature: String?
+    public let imageURL: String?
+    public let videoURL: String?
+    public let filePath: String?
     public let mimeType: String?
     public let fileName: String?
     public let content: AnyCodable?
@@ -81,6 +84,9 @@ public struct OpenClawChatMessageContent: Codable, Hashable, Sendable {
         text: String?,
         thinking: String? = nil,
         thinkingSignature: String? = nil,
+        imageURL: String? = nil,
+        videoURL: String? = nil,
+        filePath: String? = nil,
         mimeType: String?,
         fileName: String?,
         content: AnyCodable?,
@@ -92,6 +98,9 @@ public struct OpenClawChatMessageContent: Codable, Hashable, Sendable {
         self.text = text
         self.thinking = thinking
         self.thinkingSignature = thinkingSignature
+        self.imageURL = imageURL
+        self.videoURL = videoURL
+        self.filePath = filePath
         self.mimeType = mimeType
         self.fileName = fileName
         self.content = content
@@ -105,6 +114,11 @@ public struct OpenClawChatMessageContent: Codable, Hashable, Sendable {
         case text
         case thinking
         case thinkingSignature
+        case imageUrl = "image_url"
+        case videoUrl = "video_url"
+        case url
+        case path
+        case filePath
         case mimeType
         case fileName
         case content
@@ -113,12 +127,46 @@ public struct OpenClawChatMessageContent: Codable, Hashable, Sendable {
         case arguments
     }
 
+    enum ImageURLCodingKeys: String, CodingKey {
+        case url
+    }
+
+    enum VideoURLCodingKeys: String, CodingKey {
+        case url
+    }
+
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         self.type = try container.decodeIfPresent(String.self, forKey: .type)
         self.text = try container.decodeIfPresent(String.self, forKey: .text)
         self.thinking = try container.decodeIfPresent(String.self, forKey: .thinking)
         self.thinkingSignature = try container.decodeIfPresent(String.self, forKey: .thinkingSignature)
+        let rawURL =
+            try container.decodeIfPresent(String.self, forKey: .url) ??
+            container.decodeIfPresent(String.self, forKey: .path)
+        if let nestedImageURL = try? container.nestedContainer(
+            keyedBy: ImageURLCodingKeys.self,
+            forKey: .imageUrl)
+        {
+            self.imageURL = try nestedImageURL.decodeIfPresent(String.self, forKey: .url)
+        } else {
+            self.imageURL =
+                (self.type?.lowercased() == "image" || self.type?.lowercased() == "image_url" || self.type == nil)
+                ? rawURL : nil
+        }
+        if let nestedVideoURL = try? container.nestedContainer(
+            keyedBy: VideoURLCodingKeys.self,
+            forKey: .videoUrl)
+        {
+            self.videoURL = try nestedVideoURL.decodeIfPresent(String.self, forKey: .url)
+        } else {
+            self.videoURL =
+                (self.type?.lowercased() == "video" || self.type?.lowercased() == "video_url")
+                ? rawURL : nil
+        }
+        self.filePath =
+            try container.decodeIfPresent(String.self, forKey: .filePath) ??
+            container.decodeIfPresent(String.self, forKey: .path)
         self.mimeType = try container.decodeIfPresent(String.self, forKey: .mimeType)
         self.fileName = try container.decodeIfPresent(String.self, forKey: .fileName)
         self.id = try container.decodeIfPresent(String.self, forKey: .id)
@@ -132,6 +180,29 @@ public struct OpenClawChatMessageContent: Codable, Hashable, Sendable {
         } else {
             self.content = nil
         }
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encodeIfPresent(self.type, forKey: .type)
+        try container.encodeIfPresent(self.text, forKey: .text)
+        try container.encodeIfPresent(self.thinking, forKey: .thinking)
+        try container.encodeIfPresent(self.thinkingSignature, forKey: .thinkingSignature)
+        if let imageURL = self.imageURL {
+            var nested = container.nestedContainer(keyedBy: ImageURLCodingKeys.self, forKey: .imageUrl)
+            try nested.encode(imageURL, forKey: .url)
+        }
+        if let videoURL = self.videoURL {
+            var nested = container.nestedContainer(keyedBy: VideoURLCodingKeys.self, forKey: .videoUrl)
+            try nested.encode(videoURL, forKey: .url)
+        }
+        try container.encodeIfPresent(self.filePath, forKey: .filePath)
+        try container.encodeIfPresent(self.mimeType, forKey: .mimeType)
+        try container.encodeIfPresent(self.fileName, forKey: .fileName)
+        try container.encodeIfPresent(self.content, forKey: .content)
+        try container.encodeIfPresent(self.id, forKey: .id)
+        try container.encodeIfPresent(self.name, forKey: .name)
+        try container.encodeIfPresent(self.arguments, forKey: .arguments)
     }
 }
 

@@ -12,6 +12,10 @@ import {
   renderReadingIndicatorGroup,
   renderStreamingGroup,
 } from "../chat/grouped-render.ts";
+import {
+  extractInlineImageBlocks,
+  type UiChatImageBlock as UiChatMediaBlock,
+} from "../chat/image-artifacts.ts";
 import { InputHistory } from "../chat/input-history.ts";
 import { normalizeMessage, normalizeRoleForGrouping } from "../chat/message-normalizer.ts";
 import { PinnedMessages } from "../chat/pinned-messages.ts";
@@ -1356,6 +1360,124 @@ export function renderChat(props: ChatProps) {
 
 const CHAT_HISTORY_RENDER_LIMIT = 200;
 
+function appendMediaBlocksToMessage(message: unknown, mediaBlocks: UiChatMediaBlock[]): unknown {
+  if (!message || typeof message !== "object" || mediaBlocks.length === 0) {
+    return message;
+  }
+  const entry = message as Record<string, unknown>;
+  const content = Array.isArray(entry.content) ? entry.content : [];
+  return {
+    ...entry,
+    content: [...content, ...mediaBlocks],
+  };
+}
+
+function stripInlineMediaBlocksFromMessage(message: unknown): unknown {
+  if (!message || typeof message !== "object") {
+    return message;
+  }
+  const entry = message as Record<string, unknown>;
+  if (!Array.isArray(entry.content)) {
+    return message;
+  }
+  const filtered = entry.content.filter((item) => {
+    if (!item || typeof item !== "object") {
+      return true;
+    }
+    const block = item as Record<string, unknown>;
+    const type = typeof block.type === "string" ? block.type.toLowerCase() : "";
+    return type !== "image" && type !== "image_url" && type !== "video" && type !== "video_url";
+  });
+  if (filtered.length === entry.content.length) {
+    return message;
+  }
+  return {
+    ...entry,
+    content: filtered,
+  };
+}
+
+function hasRenderableMessageContent(message: unknown): boolean {
+  if (!message || typeof message !== "object") {
+    return false;
+  }
+  const entry = message as Record<string, unknown>;
+  if (typeof entry.text === "string" && entry.text.trim()) {
+    return true;
+  }
+  if (!Array.isArray(entry.content)) {
+    return false;
+  }
+  return entry.content.some((item) => {
+    if (!item || typeof item !== "object") {
+      return false;
+    }
+    const block = item as Record<string, unknown>;
+    const type = typeof block.type === "string" ? block.type.toLowerCase() : "";
+    if (type === "text") {
+      return typeof block.text === "string" && block.text.trim().length > 0;
+    }
+    return type !== "image" && type !== "image_url" && type !== "video" && type !== "video_url";
+  });
+}
+
+function mergeToolResultMediaIntoMessages(messages: unknown[], basePath?: string): unknown[] {
+  if (messages.length === 0) {
+    return messages;
+  }
+  const merged: unknown[] = [];
+  let pendingMediaBlocks: UiChatMediaBlock[] = [];
+  let pendingTimestamp: number | undefined;
+
+  const flushPendingMedia = () => {
+    if (pendingMediaBlocks.length === 0) {
+      return;
+    }
+    merged.push({
+      role: "assistant",
+      content: pendingMediaBlocks,
+      timestamp: pendingTimestamp ?? Date.now(),
+    });
+    pendingMediaBlocks = [];
+    pendingTimestamp = undefined;
+  };
+
+  for (const message of messages) {
+    const normalized = normalizeMessage(message);
+    const role = normalized.role.toLowerCase();
+    const mediaBlocks = extractInlineImageBlocks(message, basePath);
+    const hasMedia = mediaBlocks.length > 0;
+    const isToolResult = role === "toolresult" || role === "tool_result";
+
+    if (!isToolResult) {
+      if (pendingMediaBlocks.length > 0 && role === "assistant") {
+        merged.push(appendMediaBlocksToMessage(message, pendingMediaBlocks));
+        pendingMediaBlocks = [];
+        pendingTimestamp = undefined;
+        continue;
+      }
+      flushPendingMedia();
+      merged.push(message);
+      continue;
+    }
+
+    if (!hasMedia) {
+      merged.push(message);
+      continue;
+    }
+
+    pendingMediaBlocks = [...pendingMediaBlocks, ...mediaBlocks];
+    pendingTimestamp = normalized.timestamp || pendingTimestamp;
+    const strippedMessage = stripInlineMediaBlocksFromMessage(message);
+    if (hasRenderableMessageContent(strippedMessage)) {
+      merged.push(strippedMessage);
+    }
+  }
+
+  flushPendingMedia();
+  return merged;
+}
+
 function groupMessages(items: ChatItem[]): Array<ChatItem | MessageGroup> {
   const result: Array<ChatItem | MessageGroup> = [];
   let currentGroup: MessageGroup | null = null;
@@ -1405,7 +1527,10 @@ function groupMessages(items: ChatItem[]): Array<ChatItem | MessageGroup> {
 
 function buildChatItems(props: ChatProps): Array<ChatItem | MessageGroup> {
   const items: ChatItem[] = [];
-  const history = Array.isArray(props.messages) ? props.messages : [];
+  const history = mergeToolResultMediaIntoMessages(
+    Array.isArray(props.messages) ? props.messages : [],
+    props.basePath,
+  );
   const tools = Array.isArray(props.toolMessages) ? props.toolMessages : [];
   const historyStart = Math.max(0, history.length - CHAT_HISTORY_RENDER_LIMIT);
   if (historyStart > 0) {

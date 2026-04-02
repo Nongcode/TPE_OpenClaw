@@ -1,6 +1,7 @@
 import { access, mkdir } from "node:fs/promises";
 import path from "node:path";
 import { chromium } from "playwright-core";
+import { buildChatImageReplyPayload } from "../shared/chat-image-result.js";
 
 const DEFAULTS = {
   browser_path: "C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe",
@@ -431,7 +432,7 @@ async function downloadFromSpecificBlock(page, freshTarget, outputDir, logs) {
     logs.push('[step1] Opening Microsoft Edge with target profile');
     context = await chromium.launchPersistentContext(userDataDir, {
       executablePath: browserPath,
-      headless: true,
+      headless: false,
       acceptDownloads: true,
       args: [`--profile-directory=${profileName}`],
       viewport: { width: 1440, height: 900 },
@@ -468,7 +469,23 @@ async function downloadFromSpecificBlock(page, freshTarget, outputDir, logs) {
       return await downloadFromSpecificBlock(page, freshTarget, artifactsDir, logs);
     });
 
-    artifacts.push({ type: 'generated_image', path: path.relative(process.cwd(), downloadedImagePath).replace(/\\/g, '/') });
+    const relativeDownloadedImagePath = path
+      .relative(process.cwd(), downloadedImagePath)
+      .replace(/\\/g, '/');
+    const chatReply = buildChatImageReplyPayload({
+      imagePath: downloadedImagePath,
+      data: {
+        target_gemini_url: targetGeminiUrl,
+        image_prompt: imagePrompt,
+        downloaded_image_path: relativeDownloadedImagePath,
+      },
+      artifacts: [
+        {
+          type: 'generated_image',
+          path: relativeDownloadedImagePath,
+        },
+      ],
+    });
 
     const screenshotAfter = path.join(artifactsDir, `gemini-after-${nowStamp()}.png`);
     await page.screenshot({ path: screenshotAfter, fullPage: true });
@@ -493,15 +510,17 @@ async function downloadFromSpecificBlock(page, freshTarget, outputDir, logs) {
 
     printResult(buildResult({
       success: true,
-      message: 'Gemini image generation flow completed',
+      message: chatReply.assistantText,
       data: {
+        ...chatReply.data,
+        generation_status_message: 'Gemini image generation flow completed',
         target_gemini_url: targetGeminiUrl,
         image_prompt: imagePrompt,
         downloaded_image_path: relativePath,
         // Cấp sẵn luôn 1 cục Markdown chứa Base64 cho AI
         markdown_display: `![Ảnh thành phẩm](${base64DataUri})` 
       },
-      artifacts,
+      artifacts: [...artifacts, ...chatReply.artifacts],
       logs,
     }));
   } catch (error) {

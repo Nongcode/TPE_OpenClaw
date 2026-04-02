@@ -394,6 +394,60 @@ extension TestChatTransportState {
 }
 
 @Suite struct ChatViewModelTests {
+    @Test func decodesImageArtifactBlocksFromChatHistory() async throws {
+        let imagePath = "C:/workspace/artifacts/images/generated.png"
+        let history = historyPayload(
+            messages: [
+                AnyCodable([
+                    "role": "assistant",
+                    "content": [
+                        ["type": "text", "text": "Here is the generated image:"],
+                        [
+                            "type": "image_url",
+                            "image_url": ["url": "/__openclaw/chat-artifact?path=images%2Fgenerated.png"],
+                            "filePath": imagePath,
+                        ],
+                    ],
+                    "timestamp": Date().timeIntervalSince1970 * 1000,
+                ]),
+            ])
+
+        let (_, vm) = await makeViewModel(historyResponses: [history])
+        try await loadAndWaitBootstrap(vm: vm)
+
+        let decodedImage = await MainActor.run { vm.messages.first?.content.last }
+        #expect(decodedImage?.type == "image_url")
+        #expect(decodedImage?.imageURL == "/__openclaw/chat-artifact?path=images%2Fgenerated.png")
+        #expect(decodedImage?.filePath == imagePath)
+    }
+
+    @Test func decodesVideoArtifactBlocksFromChatHistory() async throws {
+        let videoPath = "C:/workspace/artifacts/videos/generated.mp4"
+        let history = historyPayload(
+            messages: [
+                AnyCodable([
+                    "role": "assistant",
+                    "content": [
+                        ["type": "text", "text": "Here is the generated video:"],
+                        [
+                            "type": "video_url",
+                            "video_url": ["url": "/__openclaw/chat-artifact?path=videos%2Fgenerated.mp4"],
+                            "filePath": videoPath,
+                        ],
+                    ],
+                    "timestamp": Date().timeIntervalSince1970 * 1000,
+                ]),
+            ])
+
+        let (_, vm) = await makeViewModel(historyResponses: [history])
+        try await loadAndWaitBootstrap(vm: vm)
+
+        let decodedVideo = await MainActor.run { vm.messages.first?.content.last }
+        #expect(decodedVideo?.type == "video_url")
+        #expect(decodedVideo?.videoURL == "/__openclaw/chat-artifact?path=videos%2Fgenerated.mp4")
+        #expect(decodedVideo?.filePath == videoPath)
+    }
+
     @Test func streamsAssistantAndClearsOnFinal() async throws {
         let sessionId = "sess-main"
         let history1 = historyPayload(sessionId: sessionId)

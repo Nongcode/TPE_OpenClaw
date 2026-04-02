@@ -338,6 +338,91 @@ describe("chat view", () => {
     expect(groupedLogo?.getAttribute("src")).toBe("/openclaw/favicon.svg");
   });
 
+  it("renders tool-result image artifacts inline under the following assistant message", () => {
+    const container = document.createElement("div");
+    render(
+      renderChat(
+        createProps({
+          basePath: "/openclaw",
+          messages: [
+            {
+              role: "toolResult",
+              content: [
+                {
+                  type: "image_url",
+                  image_url: {
+                    url: "/openclaw/__openclaw/chat-artifact?path=images%2Fgenerated.png",
+                  },
+                },
+              ],
+              timestamp: 1000,
+            },
+            {
+              role: "assistant",
+              content: [{ type: "text", text: "Đây là ảnh vừa tạo cho bạn:" }],
+              timestamp: 1001,
+            },
+          ],
+        }),
+      ),
+      container,
+    );
+
+    const assistantGroup = container.querySelector(".chat-group.assistant");
+    const assistantImage = assistantGroup?.querySelector<HTMLImageElement>(".chat-message-image");
+    const toolImages = container.querySelectorAll(".chat-group.tool .chat-message-image");
+
+    expect(assistantImage).not.toBeNull();
+    expect(assistantImage?.getAttribute("src")).toBe(
+      "/openclaw/__openclaw/chat-artifact?path=images%2Fgenerated.png",
+    );
+    expect(assistantGroup?.textContent).toContain("Đây là ảnh vừa tạo cho bạn:");
+    expect(toolImages).toHaveLength(0);
+  });
+
+  it("renders tool-result video artifacts inline under the following assistant message", () => {
+    const container = document.createElement("div");
+    render(
+      renderChat(
+        createProps({
+          basePath: "/openclaw",
+          messages: [
+            {
+              role: "toolResult",
+              content: [
+                {
+                  type: "video_url",
+                  video_url: {
+                    url: "/openclaw/__openclaw/chat-artifact?path=videos%2Fgenerated.mp4",
+                  },
+                },
+              ],
+              timestamp: 1000,
+            },
+            {
+              role: "assistant",
+              content: [{ type: "text", text: "Here is the generated video:" }],
+              timestamp: 1001,
+            },
+          ],
+        }),
+      ),
+      container,
+    );
+
+    const assistantGroup = container.querySelector(".chat-group.assistant");
+    const assistantVideo = assistantGroup?.querySelector<HTMLVideoElement>(".chat-message-video");
+    const assistantVideoSource = assistantVideo?.querySelector("source");
+    const toolVideos = container.querySelectorAll(".chat-group.tool .chat-message-video");
+
+    expect(assistantVideo).not.toBeNull();
+    expect(assistantVideoSource?.getAttribute("src")).toBe(
+      "/openclaw/__openclaw/chat-artifact?path=videos%2Fgenerated.mp4",
+    );
+    expect(assistantGroup?.textContent).toContain("Here is the generated video:");
+    expect(toolVideos).toHaveLength(0);
+  });
+
   it("keeps the persisted overview locale selected before i18n hydration finishes", async () => {
     const container = document.createElement("div");
     const props = createOverviewProps({

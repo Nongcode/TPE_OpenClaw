@@ -8,6 +8,13 @@ import { stripInlineDirectiveTagsForDisplay } from "../utils/directive-tags.js";
 import { loadSessionEntry } from "./session-utils.js";
 import { formatForLog } from "./ws-log.js";
 
+const CHAT_MEDIA_ARTIFACT_TYPES = new Set([
+  "chat_image",
+  "generated_image",
+  "chat_video",
+  "generated_video",
+]);
+
 function resolveHeartbeatAckMaxChars(): number {
   try {
     const cfg = loadConfig();
@@ -73,6 +80,77 @@ function normalizeHeartbeatChatFinalText(params: {
     return { suppress: true, text: "" };
   }
   return { suppress: false, text: stripped.text };
+}
+
+function normalizeMediaResultString(value: unknown): string | undefined {
+  if (typeof value !== "string") {
+    return undefined;
+  }
+  const trimmed = value.trim();
+  return trimmed || undefined;
+}
+
+function sanitizeToolResultMediaPayload(value: unknown): unknown {
+  const rawString = normalizeMediaResultString(value);
+  let candidate = value;
+  if (rawString) {
+    try {
+      candidate = JSON.parse(rawString) as unknown;
+    } catch {
+      return undefined;
+    }
+  }
+  if (!candidate || typeof candidate !== "object" || Array.isArray(candidate)) {
+    return undefined;
+  }
+
+  const record = candidate as Record<string, unknown>;
+  const data =
+    record.data && typeof record.data === "object" && !Array.isArray(record.data)
+      ? (record.data as Record<string, unknown>)
+      : undefined;
+  const sanitizedData: Record<string, unknown> = {};
+  for (const key of [
+    "relative_image_path",
+    "absolute_image_path",
+    "relative_video_path",
+    "absolute_video_path",
+  ]) {
+    const value = data?.[key];
+    if (typeof value === "string" && value.trim()) {
+      sanitizedData[key] = value;
+    }
+  }
+
+  const artifacts = Array.isArray(record.artifacts) ? record.artifacts : [];
+  const sanitizedArtifacts = artifacts
+    .filter((artifact): artifact is Record<string, unknown> => {
+      if (!artifact || typeof artifact !== "object" || Array.isArray(artifact)) {
+        return false;
+      }
+      const type = artifact.type;
+      return typeof type === "string" && CHAT_MEDIA_ARTIFACT_TYPES.has(type.toLowerCase());
+    })
+    .map((artifact) => {
+      const sanitizedArtifact: Record<string, unknown> = { type: artifact.type };
+      if (typeof artifact.path === "string" && artifact.path.trim()) {
+        sanitizedArtifact.path = artifact.path;
+      }
+      if (typeof artifact.url === "string" && artifact.url.trim()) {
+        sanitizedArtifact.url = artifact.url;
+      }
+      return sanitizedArtifact;
+    })
+    .filter((artifact) => Object.keys(artifact).length > 1);
+
+  if (sanitizedArtifacts.length === 0 && Object.keys(sanitizedData).length === 0) {
+    return undefined;
+  }
+
+  return {
+    ...(sanitizedArtifacts.length > 0 ? { artifacts: sanitizedArtifacts } : {}),
+    ...(Object.keys(sanitizedData).length > 0 ? { data: sanitizedData } : {}),
+  };
 }
 
 function isSilentReplyLeadFragment(text: string): boolean {
@@ -537,13 +615,24 @@ export function createAgentEventHandler({
     const last = agentRunSeq.get(evt.runId) ?? 0;
     const isToolEvent = evt.stream === "tool";
     const toolVerbose = isToolEvent ? resolveToolVerboseLevel(evt.runId, sessionKey) : "off";
-    // Build tool payload: strip result/partialResult unless verbose=full
+    // Build tool payload: strip raw result/partialResult unless verbose=full, but
+    // preserve the minimal media artifact summary needed for chat previews.
     const toolPayload =
       isToolEvent && toolVerbose !== "full"
         ? (() => {
             const data = evt.data ? { ...evt.data } : {};
-            delete data.result;
-            delete data.partialResult;
+            const sanitizedResult = sanitizeToolResultMediaPayload(data.result);
+            const sanitizedPartialResult = sanitizeToolResultMediaPayload(data.partialResult);
+            if (sanitizedResult === undefined) {
+              delete data.result;
+            } else {
+              data.result = sanitizedResult;
+            }
+            if (sanitizedPartialResult === undefined) {
+              delete data.partialResult;
+            } else {
+              data.partialResult = sanitizedPartialResult;
+            }
             return sessionKey
               ? { ...eventForClients, sessionKey, data }
               : { ...eventForClients, data };

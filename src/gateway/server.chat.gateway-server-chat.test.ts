@@ -473,6 +473,164 @@ describe("gateway server chat", () => {
     expect(textValues).toEqual(["hello", "real reply", "real text field reply", "NO_REPLY"]);
   });
 
+  test("chat.history maps media artifacts to image_url/video_url content blocks and bridges local artifact paths", async () => {
+    testState.gatewayControlUi = { basePath: "/openclaw" };
+    try {
+      const history = await loadChatHistoryWithMessages([
+        {
+          role: "toolResult",
+          content: [
+            {
+              type: "text",
+              text: JSON.stringify({
+                success: true,
+                artifacts: [
+                  {
+                    type: "chat_image",
+                    path: "https://example.com/generated-image.png",
+                  },
+                  {
+                    type: "generated_image",
+                  },
+                ],
+                data: {
+                  relative_image_path: "artifacts/images/generated-image-local.png",
+                },
+              }),
+          },
+        ],
+        timestamp: 7,
+      },
+        {
+          role: "toolResult",
+          content: [
+            {
+              type: "text",
+              text: JSON.stringify({
+                success: true,
+                data: {
+                  absolute_image_path: path
+                    .resolve(process.cwd(), "artifacts", "images", "generated-image-absolute.png")
+                    .replace(/\\/g, "/"),
+                },
+              }),
+            },
+          ],
+          timestamp: 8,
+        },
+        {
+          role: "toolResult",
+          content: [
+            {
+              type: "text",
+              text: JSON.stringify({
+                success: true,
+                artifacts: [
+                  {
+                    type: "chat_image",
+                    path: "artifacts/images/generated-image-external.png",
+                  },
+                ],
+                data: {
+                  absolute_image_path:
+                    "C:/Users/Administrator/.openclaw/workspace/artifacts/images/generated-image-external.png",
+                },
+              }),
+            },
+          ],
+          timestamp: 9,
+        },
+        {
+          role: "toolResult",
+          content: [
+            {
+              type: "text",
+              text: JSON.stringify({
+                success: true,
+                artifacts: [
+                  {
+                    type: "chat_video",
+                    path: "artifacts/videos/generated-video-external.mp4",
+                  },
+                ],
+                data: {
+                  absolute_video_path:
+                    "C:/Users/Administrator/.openclaw/workspace/artifacts/videos/generated-video-external.mp4",
+                },
+              }),
+            },
+          ],
+          timestamp: 10,
+        },
+      ]);
+
+      const first = history[0] as { content?: unknown } | undefined;
+      const second = history[1] as { content?: unknown } | undefined;
+      const third = history[2] as { content?: unknown } | undefined;
+      const fourth = history[3] as { content?: unknown } | undefined;
+      const firstContent = Array.isArray(first?.content) ? first.content : [];
+      const secondContent = Array.isArray(second?.content) ? second.content : [];
+      const thirdContent = Array.isArray(third?.content) ? third.content : [];
+      const fourthContent = Array.isArray(fourth?.content) ? fourth.content : [];
+      expect(firstContent).toEqual(
+        expect.arrayContaining([
+          {
+            type: "image_url",
+            image_url: { url: "https://example.com/generated-image.png" },
+          },
+          {
+            type: "image_url",
+            image_url: {
+              url: "/openclaw/__openclaw/chat-artifact?path=images%2Fgenerated-image-local.png",
+            },
+            filePath: path
+              .resolve(process.cwd(), "artifacts", "images", "generated-image-local.png")
+              .replace(/\\/g, "/"),
+          },
+        ]),
+      );
+      expect(secondContent).toEqual(
+        expect.arrayContaining([
+          {
+            type: "image_url",
+            image_url: {
+              url: "/openclaw/__openclaw/chat-artifact?path=images%2Fgenerated-image-absolute.png",
+            },
+            filePath: path
+              .resolve(process.cwd(), "artifacts", "images", "generated-image-absolute.png")
+              .replace(/\\/g, "/"),
+          },
+        ]),
+      );
+      expect(thirdContent).toEqual(
+        expect.arrayContaining([
+          {
+            type: "image_url",
+            image_url: {
+              url: "/openclaw/__openclaw/chat-artifact?absolute_path=C%3A%2FUsers%2FAdministrator%2F.openclaw%2Fworkspace%2Fartifacts%2Fimages%2Fgenerated-image-external.png",
+            },
+            filePath:
+              "C:/Users/Administrator/.openclaw/workspace/artifacts/images/generated-image-external.png",
+          },
+        ]),
+      );
+      expect(fourthContent).toEqual(
+        expect.arrayContaining([
+          {
+            type: "video_url",
+            video_url: {
+              url: "/openclaw/__openclaw/chat-artifact?absolute_path=C%3A%2FUsers%2FAdministrator%2F.openclaw%2Fworkspace%2Fartifacts%2Fvideos%2Fgenerated-video-external.mp4",
+            },
+            filePath:
+              "C:/Users/Administrator/.openclaw/workspace/artifacts/videos/generated-video-external.mp4",
+          },
+        ]),
+      );
+    } finally {
+      testState.gatewayControlUi = undefined;
+    }
+  });
+
   test("chat.history rejects sessions outside control-ui hierarchy access", async () => {
     const dir = await fs.mkdtemp(path.join(os.tmpdir(), "openclaw-gw-"));
     const gatedWs = new WebSocket(`ws://127.0.0.1:${port}`, {

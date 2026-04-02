@@ -33,6 +33,7 @@ import {
   isChatStopCommandText,
   resolveChatRunExpiresAtMs,
 } from "../chat-abort.js";
+import { collectChatImageBlocksFromMessage } from "../chat-image-artifacts.js";
 import { type ChatImageContent, parseMessageWithAttachments } from "../chat-attachments.js";
 import { stripEnvelopeFromMessage, stripEnvelopeFromMessages } from "../chat-sanitize.js";
 import { ADMIN_SCOPE } from "../method-scopes.js";
@@ -401,12 +402,22 @@ function sanitizeCost(raw: unknown): { total?: number } | undefined {
   return total !== undefined ? { total } : undefined;
 }
 
-function sanitizeChatHistoryMessage(message: unknown): { message: unknown; changed: boolean } {
+function sanitizeChatHistoryMessage(params: {
+  message: unknown;
+  controlUiBasePath?: string;
+  logDebug?: (message: string) => void;
+}): { message: unknown; changed: boolean } {
+  const { message, controlUiBasePath, logDebug } = params;
   if (!message || typeof message !== "object") {
     return { message, changed: false };
   }
   const entry = { ...(message as Record<string, unknown>) };
   let changed = false;
+  const chatImageResolution = collectChatImageBlocksFromMessage({
+    message: entry,
+    controlUiBasePath,
+  });
+  const chatImageBlocks = chatImageResolution.blocks;
 
   if ("details" in entry) {
     delete entry.details;
@@ -459,6 +470,24 @@ function sanitizeChatHistoryMessage(message: unknown): { message: unknown; chang
     }
   }
 
+  if (chatImageBlocks.length > 0) {
+    for (const imageDebug of chatImageResolution.debug) {
+      logDebug?.(
+        `chat.history media artifact payload=${imageDebug.payloadPreview} ` +
+          `selected=${JSON.stringify(imageDebug.selectedSource)} ` +
+          `filePath=${JSON.stringify(imageDebug.resolvedFilePath ?? "")} ` +
+          `final=${JSON.stringify(imageDebug.finalSource)} ` +
+          `type=${imageDebug.artifactType}`,
+      );
+    }
+    if (Array.isArray(entry.content)) {
+      entry.content = [...entry.content, ...chatImageBlocks];
+    } else {
+      entry.content = chatImageBlocks;
+    }
+    changed = true;
+  }
+
   if (typeof entry.text === "string") {
     const stripped = stripInlineDirectiveTagsForDisplay(entry.text);
     const res = truncateChatHistoryText(stripped.text);
@@ -507,14 +536,23 @@ function extractAssistantTextForSilentCheck(message: unknown): string | undefine
   return texts.length > 0 ? texts.join("\n") : undefined;
 }
 
-function sanitizeChatHistoryMessages(messages: unknown[]): unknown[] {
+function sanitizeChatHistoryMessages(params: {
+  messages: unknown[];
+  controlUiBasePath?: string;
+  logDebug?: (message: string) => void;
+}): unknown[] {
+  const { messages, controlUiBasePath, logDebug } = params;
   if (messages.length === 0) {
     return messages;
   }
   let changed = false;
   const next: unknown[] = [];
   for (const message of messages) {
-    const res = sanitizeChatHistoryMessage(message);
+    const res = sanitizeChatHistoryMessage({
+      message,
+      controlUiBasePath,
+      logDebug,
+    });
     changed ||= res.changed;
     // Drop assistant messages whose entire visible text is the silent reply token.
     const text = extractAssistantTextForSilentCheck(res.message);
@@ -989,7 +1027,11 @@ export const chatHandlers: GatewayRequestHandlers = {
     const max = Math.min(hardMax, requested);
     const sliced = rawMessages.length > max ? rawMessages.slice(-max) : rawMessages;
     const sanitized = stripEnvelopeFromMessages(sliced);
-    const normalized = sanitizeChatHistoryMessages(sanitized);
+    const normalized = sanitizeChatHistoryMessages({
+      messages: sanitized,
+      controlUiBasePath: cfg.gateway?.controlUi?.basePath,
+      logDebug: (message) => context.logGateway.debug(message),
+    });
     const maxHistoryBytes = getMaxChatHistoryMessagesBytes();
     const perMessageHardCap = Math.min(CHAT_HISTORY_MAX_SINGLE_MESSAGE_BYTES, maxHistoryBytes);
     const replaced = replaceOversizedChatHistoryMessages({
