@@ -16,7 +16,5 @@ requires:
 Để sử dụng skill này, bạn (AI Agent) PHẢI thực thi file `skills/gemini_generate_image/action.js` bằng lệnh dòng lệnh `node`, truyền đầu vào là một chuỗi JSON hợp lệ được đặt trong dấu ngoặc kép đơn (`'`). Các tham số mặc định (browser_path, user_data_dir...) có thể bỏ qua nếu người dùng không yêu cầu ghi đè.
 
 **Câu lệnh thực thi:**
-
 ```bash
 node skills/gemini_generate_image/action.js '{"image_prompt": "...", "dry_run": false}'
-```

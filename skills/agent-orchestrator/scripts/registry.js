@@ -44,7 +44,6 @@ function inferManifest(agentId) {
       role: "department head",
       reportsTo: "quan_ly",
       canDelegateTo: ["pho_phong"],
-      requiresReviewBy: "quan_ly",
       capabilities: ["review", "approval", "publish-decision"],
     };
   }

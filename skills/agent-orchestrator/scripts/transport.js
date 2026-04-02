@@ -25,9 +25,11 @@ function buildTaskEnvelope(step, registry, index, total, context = {}) {
     completedSteps: context.completedSteps || [],
     reportsTo: target?.reportsTo || null,
     requiresReviewBy: target?.requiresReviewBy || null,
+    requiresExecutiveApproval: Boolean(step.requiresExecutiveApproval),
     rules: [
       "Respect your role and permission boundaries.",
       "If the task requires escalation, name the next agent explicitly.",
+      "Routine department execution should be approved at the department-head level and must not wait for executive approval unless the task is flagged as exceptional.",
       "Respond with sections: KET_QUA, RUI_RO, DE_XUAT_BUOC_TIEP.",
     ],
   };
@@ -36,6 +38,7 @@ function buildTaskEnvelope(step, registry, index, total, context = {}) {
 function buildTaskPrompt(envelope, registry) {
   const source = registry.byId[envelope.from];
   const target = registry.byId[envelope.to];
+  const normalizedGoal = String(envelope.goal || "").toLowerCase();
   const lines = [
     `[HE THONG DIEU PHOI] Buoc ${envelope.stepIndex}/${envelope.totalSteps}`,
     "",
@@ -64,14 +67,76 @@ function buildTaskPrompt(envelope, registry) {
   if (envelope.reportsTo) {
     lines.push(`- Cap tren truc tiep cua ban: ${envelope.reportsTo}`);
   }
+  lines.push(
+    `- Co can phe duyet cap quan ly khong: ${envelope.requiresExecutiveApproval ? "co" : "khong"}`,
+  );
+  if (!envelope.requiresExecutiveApproval) {
+    lines.push(
+      "- Viec nam trong tham quyen van hanh thuong ngay cua phong. Truong phong duoc quyen tu duyet va cho trien khai.",
+    );
+  }
+  if (envelope.type === "propose") {
+    lines.push(
+      "- Day la buoc LAP KE HOACH DE XIN DUYET. Tuyet doi KHONG tu trien khai, KHONG tu viet bai dang hoan chinh, KHONG tu tao media, KHONG tu dang bai.",
+    );
+  }
+  if (envelope.type === "plan") {
+    lines.push(
+      "- Day la buoc pho phong boc tach ke hoach da duoc truong phong chot thanh dau viec thuc thi cho doi san xuat.",
+    );
+    lines.push(
+      "- Sau khi nhan lenh nay, pho phong phai brief cho nv_content viet bai. Chua duoc giao media truoc khi content da duoc pho phong duyet.",
+    );
+  }
+  if (envelope.type === "plan_execute") {
+    lines.push(
+      "- Day la buoc pho phong mo pha trien khai theo ke hoach da duoc truong phong va nguoi dung chot. Bat dau tu content, khong duoc nhay thang sang media.",
+    );
+  }
+  if (envelope.type === "content_revise") {
+    lines.push(
+      "- Day la buoc nhan vien content sua lai noi dung theo nhan xet review. Chua duoc nhay sang media cho den khi content duoc duyet lai.",
+    );
+  }
+  if (envelope.type === "media_revise") {
+    lines.push(
+      "- Day la buoc nhan vien media sua lai media theo nhan xet review. Chi tap trung sua media bi loi.",
+    );
+  }
+  if (envelope.type === "content_review") {
+    lines.push(
+      "- Day la buoc duyet noi dung. Neu content chua dat, yeu cau lam lai dung vao phan noi dung, chua chuyen sang media. Neu content da dat, luc do moi duoc brief media.",
+    );
+  }
+  if (envelope.type === "media_review") {
+    lines.push(
+      "- Day la buoc duyet media. Chi xac nhan dat khi media khop voi content da duoc duyet.",
+    );
+  }
+  if (envelope.type === "final_review") {
+    lines.push(
+      "- Day la buoc truong phong nhan ban hoan chinh tu pho phong de chot noi bo va trinh len nguoi dung. Khong duoc tu dang bai neu nguoi dung chua xac nhan dang.",
+    );
+  }
+  if (envelope.type === "publish") {
+    lines.push(
+      "- Day la buoc dang bai sau khi nguoi dung da xac nhan ro rang rang duoc phep dang.",
+    );
+  }
   if (envelope.handoffContext) {
-    lines.push("", "BAN GIAO TU BUOC TRUOC:", envelope.handoffContext);
+    const handoffHeading =
+      envelope.type === "content_review"
+          ? "BAN NHAP CONTENT TU BUOC TRUOC:"
+          : envelope.type === "media_review"
+            ? "BAN NHAP MEDIA TU BUOC TRUOC:"
+            : "BAN GIAO TU BUOC TRUOC:";
+    lines.push("", handoffHeading, envelope.handoffContext);
   }
   if (Array.isArray(envelope.completedSteps) && envelope.completedSteps.length > 0) {
     lines.push("", "TOM TAT CAC BUOC DA HOAN THANH:");
     for (const item of envelope.completedSteps) {
       lines.push(`- ${item.stepIndex}. ${item.from} -> ${item.to} [${item.type}]`);
-      if (item.summary) {
+      if (item.summary && !envelope.type.endsWith("_review")) {
         lines.push(`  ${item.summary}`);
       }
     }
@@ -82,9 +147,13 @@ function buildTaskPrompt(envelope, registry) {
     "YEU CAU TRA LOI:",
     "- Lam dung vai tro cua ban.",
     "- Neu can giao tiep cho cap duoi hoac cap tren, neu ro ten agent tiep theo trong phan DE_XUAT_BUOC_TIEP.",
+    "- Neu task KHONG can phe duyet cap quan ly, khong de xuat xin duyet len quan_ly chi de cho phe duyet hinh thuc.",
+    "- Neu dang o buoc propose, chi tra ban ke hoach de xin duyet va dung lai cho quyet dinh cua cap tren.",
+    "- Khong duoc bo qua thu tu: truong phong lap ke hoach va cho nguoi dung duyet -> pho phong brief content -> phe duyet content -> media -> phe duyet media -> truong phong chot noi bo -> cho nguoi dung xac nhan dang bai.",
+    "- Truong phong khong duoc tu san xuat noi dung, prompt anh, prompt video, caption, hay bai dang hoan chinh cho dau viec nhieu buoc. Truong phong phai giao xuong pho phong de trien khai.",
     "- Tra loi bang tieng Viet.",
     "- Bat buoc dung 3 muc: KET_QUA, RUI_RO, DE_XUAT_BUOC_TIEP.",
-    "- Neu day la buoc publish, hay xac nhan ro ket qua dang bai va trang thai hoan tat.",
+    "- Chi khi step type la publish va nguoi dung da xac nhan dang bai thi moi duoc xac nhan ket qua dang bai.",
     "",
     "TASK_ENVELOPE_JSON:",
     JSON.stringify(envelope, null, 2),
@@ -147,7 +216,7 @@ async function sendToSession(options) {
       idempotencyKey: randomUUID(),
     },
     expectFinal: true,
-    timeoutMs: options.timeoutMs || 300000,
+    timeoutMs: options.timeoutMs || 900000,
   });
   const payloads = Array.isArray(result?.result?.payloads) ? result.result.payloads : [];
   const text = payloads

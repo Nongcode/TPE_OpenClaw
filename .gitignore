@@ -32,3 +32,5 @@ Thumbs.db
 # generated bundles
 src/canvas-host/a2ui/.bundle.hash
 src/canvas-host/a2ui/a2ui.bundle.js
+
+.env
