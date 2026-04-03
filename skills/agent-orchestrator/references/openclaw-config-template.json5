@@ -44,6 +44,11 @@
         subagents: { allowAgents: [] },
       },
       {
+        id: "nv_consultant",
+        workspace: "~/.openclaw/workspace_consultant",
+        subagents: { allowAgents: [] },
+      },
+      {
         id: "nv_media",
         workspace: "~/.openclaw/workspace_media",
         subagents: { allowAgents: [] },
