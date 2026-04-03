@@ -3,7 +3,7 @@ import { TextExtractor } from "./text-extractor.js";
 
 const DEFAULTS = {
   keyword: "",
-  target_site: "tanphatetek.com",
+  target_site: "tpe.lamvoxe.com",
   browser_path: "",
   timeout_ms: 45000,
   headless: true,

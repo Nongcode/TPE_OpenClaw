@@ -153,7 +153,7 @@ function buildTaskPrompt(envelope, registry) {
     lines.push("", "TOM TAT CAC BUOC DA HOAN THANH:");
     for (const item of envelope.completedSteps) {
       lines.push(`- ${item.stepIndex}. ${item.from} -> ${item.to} [${item.type}]`);
-      if (item.summary && !envelope.type.endsWith("_review")) {
+      if (item.summary && (envelope.type === "final_review" || !envelope.type.endsWith("_review"))) {
         lines.push(`  ${item.summary}`);
       }
     }
@@ -236,11 +236,36 @@ async function sendToSession(options) {
     timeoutMs: options.timeoutMs || 900000,
   });
   const payloads = Array.isArray(result?.result?.payloads) ? result.result.payloads : [];
+
+  function extractTextFromPayload(item) {
+    if (!item) return "";
+    if (typeof item.text === "string" && item.text.trim()) return item.text.trim();
+    if (typeof item.assistantText === "string" && item.assistantText.trim()) return item.assistantText.trim();
+    if (typeof item.message === "string" && item.message.trim()) return item.message.trim();
+    if (item.data && typeof item.data.assistant_text === "string" && item.data.assistant_text.trim()) return item.data.assistant_text.trim();
+    if (item.data && typeof item.data.assistantText === "string" && item.data.assistantText.trim()) return item.data.assistantText.trim();
+    if (Array.isArray(item.content)) {
+      return item.content
+        .map((c) => {
+          if (!c) return "";
+          if (typeof c.text === "string") return c.text;
+          if (typeof c.message === "string") return c.message;
+          if (typeof c.content === "string") return c.content;
+          return "";
+        })
+        .filter(Boolean)
+        .join("\n\n");
+    }
+    if (item.data && typeof item.data === "string") return item.data;
+    return "";
+  }
+
   const text = payloads
-    .map((item) => (typeof item?.text === "string" ? item.text : ""))
+    .map(extractTextFromPayload)
     .filter(Boolean)
     .join("\n\n")
     .trim();
+
   return text || result?.summary || "";
 }
 

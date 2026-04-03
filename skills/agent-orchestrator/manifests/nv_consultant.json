@@ -1,0 +1,18 @@
+{
+  "id": "nv_consultant",
+  "label": "Nhân viên Tư vấn Khách hàng",
+  "role": "Customer Support & Sales Specialist",
+  "reportsTo": "pho_phong",
+  "canDelegateTo": [],
+  "requiresReviewBy": null,
+  "capabilities": [
+    "customer-support",
+    "chat-reply",
+    "product-consulting",
+    "sales-closing"
+  ],
+  "taskTypes": [
+    "consultant.reply",
+    "consultant.research"
+  ]
+}

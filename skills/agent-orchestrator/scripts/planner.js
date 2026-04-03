@@ -54,6 +54,24 @@ function classifyApprovalPolicy(message, fromAgentId) {
 }
 
 function classifyWorkflow(normalized, fromAgentId) {
+  const forbidsMedia = messageMentionsAny(normalized, [
+    "khong can anh",
+    "khong can hinh",
+    "khong can hinh anh",
+    "khong can media",
+    "khong lam media",
+    "khong can video",
+    "text only",
+    "text-only",
+    "only text",
+    "chi co text",
+    "chi gom text",
+    "chi can content",
+    "chi viet bai",
+    "chi can bai viet",
+    "khong can visual",
+    "khong can banner",
+  ]);
   const wantsExplicitPublish =
     fromAgentId === "truong_phong" &&
     messageMentionsAny(normalized, [
@@ -66,6 +84,22 @@ function classifyWorkflow(normalized, fromAgentId) {
       "duoc dang facebook",
       "hay dang bai",
       "hay dang facebook",
+    ]) &&
+    !messageMentionsAny(normalized, [
+      "viet bai",
+      "viet content",
+      "bai content",
+      "lam bai",
+      "tao bai",
+      "caption",
+      "nghien cuu",
+      "brief",
+      "quang ba",
+      "khong can media",
+      "khong lam media",
+      "chi gom text",
+      "chi co text",
+      "chi can content",
     ]);
   const wantsPlanOnly =
     (fromAgentId === "truong_phong" || fromAgentId === "quan_ly") &&
@@ -94,12 +128,28 @@ function classifyWorkflow(normalized, fromAgentId) {
     wantsCampaign ||
     messageMentionsAny(normalized, ["viet", "content", "facebook", "bai", "caption", "copy"]);
   const wantsMedia =
-    wantsCampaign ||
-    messageMentionsAny(normalized, ["image", "anh", "banner", "media", "video", "visual"]);
+    !forbidsMedia &&
+    messageMentionsAny(normalized, [
+      "image",
+      "anh",
+      "hinh",
+      "hinh anh",
+      "banner",
+      "media",
+      "video",
+      "visual",
+      "kem anh",
+      "kem hinh",
+      "tao anh",
+      "lam anh",
+      "tao video",
+      "lam video",
+    ]);
   const wantsPublish =
     messageMentionsAny(normalized, ["dang bai", "dang facebook", "facebook", "post", "xuat ban"]);
 
   return {
+    forbidsMedia,
     wantsExplicitPublish,
     wantsPlanOnly,
     wantsCampaign,
@@ -226,6 +276,7 @@ function buildHierarchyPlan(registry, fromAgentId, message, taskType) {
       taskType,
       message,
       requiresExecutiveApproval,
+      deliverToUser: true,
     });
     return {
       mode: "hierarchy",
@@ -252,7 +303,7 @@ function buildHierarchyPlan(registry, fromAgentId, message, taskType) {
       taskType,
       message,
       requiresExecutiveApproval,
-      requiresReviewBy: userDirectToDeputy ? null : "truong_phong",
+      requiresReviewBy: "pho_phong",
       deliverToUser: userDirectToDeputy && !wantsMedia,
     });
     currentOwner = "pho_phong";
@@ -266,7 +317,7 @@ function buildHierarchyPlan(registry, fromAgentId, message, taskType) {
       taskType,
       message,
       requiresExecutiveApproval,
-      requiresReviewBy: userDirectToDeputy ? null : "truong_phong",
+      requiresReviewBy: "pho_phong",
       deliverToUser: userDirectToDeputy,
     });
     currentOwner = "pho_phong";
