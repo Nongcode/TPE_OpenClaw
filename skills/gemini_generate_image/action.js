@@ -4,13 +4,13 @@ import { chromium } from "playwright-core";
 import { buildChatImageReplyPayload } from "../shared/chat-image-result.js";
 
 const DEFAULTS = {
-  browser_path: "C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe",
-  user_data_dir: "C:/Users/PHAMDUCLONG/AppData/Local/Microsoft/Edge/User Data",
+  browser_path: "C:/Program Files/CocCoc/Browser/Application/browser.exe",
+  user_data_dir: "C:/Users/Administrator/AppData/Local/CocCoc/Browser/User Data",
   profile_name: "Default",
-  target_gemini_url: "https://gemini.google.com/app/6db6710e653d9645",
+  target_gemini_url: "https://gemini.google.com/app/5037765b9f5baf2a",
   image_paths: [],
   timeout_ms: 120000,
-  retry_count: 2,
+  retry_count: 2, 
   dry_run: false,
 };
 

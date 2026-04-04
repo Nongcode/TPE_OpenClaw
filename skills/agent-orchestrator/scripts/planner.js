@@ -101,6 +101,22 @@ function classifyWorkflow(normalized, fromAgentId) {
       "chi co text",
       "chi can content",
     ]);
+  const asksDetailedPlan = messageMentionsAny(normalized, [
+    "lap ke hoach chi tiet",
+    "ke hoach chi tiet",
+    "len ke hoach chi tiet",
+    "xay dung ke hoach chi tiet",
+    "plan chi tiet",
+  ]);
+  const hasApprovedPlan = messageMentionsAny(normalized, [
+    "da duyet ke hoach",
+    "duoc duyet ke hoach",
+    "ke hoach da duoc duyet",
+    "duyet ke hoach roi",
+    "ke hoach da chot",
+    "cho trien khai theo ke hoach da duyet",
+    "trien khai theo ke hoach da duyet",
+  ]);
   const wantsPlanOnly =
     (fromAgentId === "truong_phong" || fromAgentId === "quan_ly") &&
     messageMentionsAny(normalized, [
@@ -152,6 +168,8 @@ function classifyWorkflow(normalized, fromAgentId) {
     forbidsMedia,
     wantsExplicitPublish,
     wantsPlanOnly,
+    asksDetailedPlan,
+    hasApprovedPlan,
     wantsCampaign,
     wantsContent,
     wantsMedia,
@@ -222,15 +240,19 @@ function buildHierarchyPlan(registry, fromAgentId, message, taskType) {
   const {
     wantsExplicitPublish,
     wantsPlanOnly,
+    asksDetailedPlan,
+    hasApprovedPlan,
     wantsCampaign,
     wantsContent,
     wantsMedia,
-    wantsPublish,
   } = classifyWorkflow(normalized, fromAgentId);
 
   const steps = [];
   let currentOwner = fromAgentId;
   const userDirectToDeputy = fromAgentId === "pho_phong";
+  const strictDepartmentFlow = fromAgentId === "truong_phong" && (wantsCampaign || asksDetailedPlan);
+  const needsPlanApprovalGate = strictDepartmentFlow && asksDetailedPlan && !hasApprovedPlan;
+  const canExecuteStrictFlow = strictDepartmentFlow && (hasApprovedPlan || !asksDetailedPlan);
 
   if (wantsExplicitPublish) {
     return {
@@ -248,6 +270,110 @@ function buildHierarchyPlan(registry, fromAgentId, message, taskType) {
           taskType,
           message,
           requiresExecutiveApproval,
+          simulateOnly: true,
+        },
+      ],
+    };
+  }
+
+  if (needsPlanApprovalGate) {
+    return {
+      mode: "hierarchy",
+      from: fromAgentId,
+      taskType,
+      message,
+      requiresExecutiveApproval,
+      reportBackToOrigin: false,
+      steps: [
+        {
+          type: "propose",
+          from: "truong_phong",
+          to: "truong_phong",
+          taskType,
+          message,
+          requiresExecutiveApproval,
+          deliverToUser: true,
+          requiresPlanApproval: true,
+        },
+      ],
+    };
+  }
+
+  if (canExecuteStrictFlow) {
+    return {
+      mode: "hierarchy",
+      from: fromAgentId,
+      taskType,
+      message,
+      requiresExecutiveApproval,
+      reportBackToOrigin: false,
+      steps: [
+        {
+          type: "plan_execute",
+          from: "truong_phong",
+          to: "pho_phong",
+          taskType,
+          message,
+          requiresExecutiveApproval,
+        },
+        {
+          type: "product_research",
+          from: "pho_phong",
+          to: "pho_phong",
+          taskType,
+          message,
+          requiresExecutiveApproval,
+        },
+        {
+          type: "produce",
+          from: "pho_phong",
+          to: "nv_content",
+          taskType,
+          message,
+          requiresExecutiveApproval,
+        },
+        {
+          type: "content_review",
+          from: "nv_content",
+          to: "pho_phong",
+          taskType,
+          message,
+          requiresExecutiveApproval,
+          requiresReviewBy: "pho_phong",
+        },
+        {
+          type: "produce",
+          from: "pho_phong",
+          to: "nv_media",
+          taskType,
+          message,
+          requiresExecutiveApproval,
+        },
+        {
+          type: "media_review",
+          from: "nv_media",
+          to: "pho_phong",
+          taskType,
+          message,
+          requiresExecutiveApproval,
+          requiresReviewBy: "pho_phong",
+        },
+        {
+          type: "compile_post",
+          from: "pho_phong",
+          to: "pho_phong",
+          taskType,
+          message,
+          requiresExecutiveApproval,
+        },
+        {
+          type: "final_review",
+          from: "pho_phong",
+          to: "truong_phong",
+          taskType,
+          message,
+          requiresExecutiveApproval,
+          deliverToUser: true,
         },
       ],
     };

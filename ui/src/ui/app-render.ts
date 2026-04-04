@@ -87,7 +87,6 @@ import {
   canBrowseMultipleControlUiSessions,
   shouldShowControlUiTab,
 } from "./control-ui-access.ts";
-import { agentLogoUrl } from "./views/agents-utils.ts";
 import {
   resolveAgentConfig,
   resolveConfiguredCronModelSuggestions,
@@ -434,27 +433,6 @@ export function renderApp(state: AppViewState) {
       <button
         type="button"
         class="shell-nav-backdrop"
-                        <img
-                          class="sidebar-brand__logo"
-                          src="${basePath ? basePath + '/assets/tpe-etek-logo.png' : '/assets/tpe-etek-logo.png'}"
-                          alt="TPE-OpenClaw"
-                          @error=${(e: Event) => {
-                            const img = e.currentTarget as HTMLImageElement;
-                            try {
-                              if (img.dataset?.triedFallback) {
-                                img.style.display = 'none';
-                                return;
-                              }
-                              img.dataset.triedFallback = '1';
-                            } catch {
-                              /* ignore dataset issues */
-                            }
-                            img.onerror = null;
-                            img.src = basePath
-                              ? basePath + '/assets/chrome-extension/icons/tpe-etek-logo.png'
-                              : '/assets/chrome-extension/icons/tpe-etek-logo.png';
-                          }}
-                        />
         aria-label="${t("nav.collapse")}"
         @click=${() => {
           state.navDrawerOpen = false;
@@ -505,30 +483,9 @@ export function renderApp(state: AppViewState) {
                   navCollapsed
                     ? nothing
                     : html`
-                        <img
-                          class="sidebar-brand__logo"
-                          src="${basePath ? basePath + '/assets/tpe-etek-logo.png' : '/assets/tpe-etek-logo.png'}"
-                          alt="TPE-OpenClaw"
-                          @error=${(e: Event) => {
-                            const img = e.currentTarget as HTMLImageElement;
-                            try {
-                              if (img.dataset?.triedFallback) {
-                                img.style.display = 'none';
-                                return;
-                              }
-                              img.dataset.triedFallback = '1';
-                            } catch {
-                              /* ignore dataset issues */
-                            }
-                            img.onerror = null;
-                            img.src = basePath
-                              ? basePath + '/assets/chrome-extension/icons/tpe-etek-logo.png'
-                              : '/assets/chrome-extension/icons/tpe-etek-logo.png';
-                          }}
-                        />
                         <span class="sidebar-brand__copy">
                           <span class="sidebar-brand__eyebrow">${t("nav.control")}</span>
-                          <span class="sidebar-brand__title">TPE-OpenClaw</span>
+                          <span class="sidebar-brand__title">Uptek Command Center</span>
                         </span>
                       `
                 }
@@ -700,6 +657,10 @@ export function renderApp(state: AppViewState) {
                 attentionItems: state.attentionItems,
                 eventLog: state.eventLog,
                 overviewLogLines: state.overviewLogLines,
+                agentsList: state.agentsList,
+                channelsSnapshot: state.channelsSnapshot,
+                healthResult: state.healthResult,
+                bootstrapAccessPolicy: state.bootstrapAccessPolicy,
                 showGatewayToken: state.overviewShowGatewayToken,
                 showGatewayPassword: state.overviewShowGatewayPassword,
                 onSettingsChange: (next) => state.applySettings(next),

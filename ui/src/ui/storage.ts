@@ -180,8 +180,8 @@ export function loadSettings(): UiSettings {
     token: loadSessionToken(defaultUrl),
     sessionKey: "main",
     lastActiveSessionKey: "main",
-    theme: "claw",
-    themeMode: "system",
+    theme: "dash",
+    themeMode: "dark",
     chatFocusMode: false,
     chatShowThinking: true,
     chatShowToolCalls: true,
@@ -189,6 +189,7 @@ export function loadSettings(): UiSettings {
     navCollapsed: false,
     navWidth: 220,
     navGroupsCollapsed: {},
+    locale: "vi",
   };
 
   try {

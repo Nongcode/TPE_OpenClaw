@@ -1,9 +1,11 @@
 import { BaseScraper } from "./base-scraper.js";
+import { extractImageForMedia } from "./extract-image-for-media.js";
 import { TextExtractor } from "./text-extractor.js";
 
 const DEFAULTS = {
   keyword: "",
-  target_site: "tpe.lamvoxe.com",
+  target_site: "uptek.vn",
+  category_hint: "",
   browser_path: "",
   timeout_ms: 45000,
   headless: true,
@@ -50,6 +52,11 @@ function parseArgs(argv) {
       index += 1;
       continue;
     }
+    if (token === "--category_hint") {
+      params.category_hint = next;
+      index += 1;
+      continue;
+    }
     if (token === "--browser_path") {
       params.browser_path = next;
       index += 1;
@@ -90,7 +97,20 @@ async function main() {
     const opened = await scraper.openProductPage();
     browser = opened.browser;
 
-    const data = await extractor.extract(opened.page, opened.productUrl);
+    const data = await extractor.extract(opened.page, opened.productUrl, {
+      categoryIndex: opened.categoryIndex,
+      matchedCandidate: opened.matchedCandidate,
+    });
+    const imageResult = await extractImageForMedia({
+      productName: data.product_name,
+      productUrl: data.product_url || opened.productUrl,
+      images: data.images,
+      debug: params.debug,
+    });
+
+    data.images = imageResult.downloaded;
+    data.primary_image = imageResult.primary_image;
+    data.image_download_dir = imageResult.output_dir;
 
     printJson({
       success: true,

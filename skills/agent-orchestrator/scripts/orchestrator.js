@@ -15,6 +15,11 @@ function parseArgs(argv) {
     list: false,
     openClawHome: null,
     manifestDir: null,
+    productKeyword: null,
+    targetSite: "uptek.vn",
+    artifactsDir: null,
+    disableSimulationArtifacts: false,
+    demoSmoothMode: true,
   };
 
   const positional = [];
@@ -54,6 +59,29 @@ function parseArgs(argv) {
     if (token === "--manifest-dir") {
       options.manifestDir = argv[index + 1] || null;
       index += 1;
+      continue;
+    }
+    if (token === "--product-keyword") {
+      options.productKeyword = argv[index + 1] || null;
+      index += 1;
+      continue;
+    }
+    if (token === "--target-site") {
+      options.targetSite = argv[index + 1] || options.targetSite;
+      index += 1;
+      continue;
+    }
+    if (token === "--artifacts-dir") {
+      options.artifactsDir = argv[index + 1] || null;
+      index += 1;
+      continue;
+    }
+    if (token === "--no-simulation-artifacts") {
+      options.disableSimulationArtifacts = true;
+      continue;
+    }
+    if (token === "--strict-review-gates") {
+      options.demoSmoothMode = false;
       continue;
     }
     positional.push(token);
@@ -114,6 +142,9 @@ function printResult(result, asJson) {
     return;
   }
   console.log(`[PLAN] mode=${result.mode} from=${result.from}`);
+  if (result.simulationArtifacts?.runDir) {
+    console.log(`[SIMULATION] ${result.simulationArtifacts.runDir}`);
+  }
   for (const [index, step] of result.executedSteps.entries()) {
     console.log(`\n[STEP ${index + 1}] ${step.from} -> ${step.to}`);
     console.log(`session=${step.sessionKey}`);

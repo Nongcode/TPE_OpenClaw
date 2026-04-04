@@ -1,0 +1,26 @@
+<svg width="256" height="256" viewBox="0 0 256 256" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="uptek-bg" x1="32" y1="28" x2="228" y2="232" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#1B7BFF"/>
+      <stop offset="0.52" stop-color="#0EA5E9"/>
+      <stop offset="1" stop-color="#17C3B2"/>
+    </linearGradient>
+    <linearGradient id="uptek-stroke" x1="72" y1="64" x2="188" y2="192" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#E0F2FE"/>
+      <stop offset="1" stop-color="#F0FDFA"/>
+    </linearGradient>
+  </defs>
+  <rect x="16" y="16" width="224" height="224" rx="56" fill="#061425"/>
+  <rect x="24" y="24" width="208" height="208" rx="48" fill="url(#uptek-bg)"/>
+  <path
+    d="M74 72C74 64.268 80.268 58 88 58H103C110.732 58 117 64.268 117 72V121.5C117 136.688 129.312 149 144.5 149C159.688 149 172 136.688 172 121.5V72C172 64.268 178.268 58 186 58H200C207.732 58 214 64.268 214 72V122C214 160.66 182.66 192 144 192H142C103.34 192 72 160.66 72 122V72H74Z"
+    fill="#07131F"
+    fill-opacity="0.18"
+  />
+  <path
+    d="M84 68C84 63.582 87.582 60 92 60H104C108.418 60 112 63.582 112 68V121.5C112 139.45 126.55 154 144.5 154C162.45 154 177 139.45 177 121.5V68C177 63.582 180.582 60 185 60H197C201.418 60 205 63.582 205 68V122C205 155.137 178.137 182 145 182H144C110.863 182 84 155.137 84 122V68Z"
+    fill="url(#uptek-stroke)"
+  />
+  <circle cx="188" cy="82" r="10" fill="#7DD3FC"/>
+  <circle cx="160" cy="196" r="8" fill="#99F6E4" fill-opacity="0.9"/>
+</svg>
