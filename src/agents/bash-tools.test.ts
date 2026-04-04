@@ -109,6 +109,13 @@ const readTotalLines = (details: unknown) => (details as { totalLines?: number }
 const readProcessStatus = (details: unknown) => (details as { status?: string }).status;
 const readProcessStatusOrRunning = (details: unknown) =>
   readProcessStatus(details) ?? PROCESS_STATUS_RUNNING;
+const buildShellJsonEchoCommand = (payload: unknown) => {
+  const json = JSON.stringify(payload);
+  if (isWin) {
+    return `Write-Output '${json.replace(/'/g, "''")}'`;
+  }
+  return `printf '%s' '${json.replace(/'/g, `'\\''`)}'`;
+};
 const expectTextContainsValues = (
   text: string,
   values: string[] | undefined,
@@ -510,6 +517,83 @@ describe("exec exit codes", () => {
     const text = readNormalizedTextContent(result.content);
     expect(text).toContain(OUTPUT_NOPE);
     expect(text).toContain(OUTPUT_EXIT_CODE_1);
+  });
+});
+
+describe("exec media artifact parsing", () => {
+  useCapturedEnv([...SHELL_ENV_KEYS], applyDefaultShellEnv);
+
+  it("adds image_url blocks for skill JSON that returns chat image artifacts", async () => {
+    const absoluteImagePath = isWin
+      ? "C:/Users/Administrator/.openclaw/workspace/artifacts/images/generated.png"
+      : "/tmp/openclaw/artifacts/images/generated.png";
+    const payload = {
+      success: true,
+      message: "Đây là ảnh vừa tạo cho bạn:",
+      data: {
+        downloaded_image_path: "artifacts/images/generated.png",
+        absolute_image_path: absoluteImagePath,
+      },
+      artifacts: [
+        {
+          type: "generated_image",
+          path: "artifacts/images/generated.png",
+        },
+        {
+          type: "chat_image",
+          path: "artifacts/images/generated.png",
+        },
+      ],
+    };
+    const command = buildShellJsonEchoCommand(payload);
+    const result = await executeExecCommand(execTool, command);
+    const imageBlock = result.content.find(
+      (part) => (part as { type?: string }).type === "image_url",
+    ) as
+      | {
+          type: "image_url";
+          image_url?: { url?: string };
+          filePath?: string;
+        }
+      | undefined;
+
+    expect(imageBlock).toBeDefined();
+    expect(imageBlock?.image_url?.url).toBe(absoluteImagePath);
+    expect(imageBlock?.filePath).toBe(absoluteImagePath);
+  });
+
+  it("adds video_url blocks for skill JSON that returns chat video artifacts", async () => {
+    const absoluteVideoPath = isWin
+      ? "C:/Users/Administrator/.openclaw/workspace/artifacts/videos/generated.mp4"
+      : "/tmp/openclaw/artifacts/videos/generated.mp4";
+    const payload = {
+      success: true,
+      message: "Đây là video vừa tạo cho bạn:",
+      data: {
+        absolute_video_path: absoluteVideoPath,
+      },
+      artifacts: [
+        {
+          type: "chat_video",
+          path: "artifacts/videos/generated.mp4",
+        },
+      ],
+    };
+    const command = buildShellJsonEchoCommand(payload);
+    const result = await executeExecCommand(execTool, command);
+    const videoBlock = result.content.find(
+      (part) => (part as { type?: string }).type === "video_url",
+    ) as
+      | {
+          type: "video_url";
+          video_url?: { url?: string };
+          filePath?: string;
+        }
+      | undefined;
+
+    expect(videoBlock).toBeDefined();
+    expect(videoBlock?.video_url?.url).toBe(absoluteVideoPath);
+    expect(videoBlock?.filePath).toBe(absoluteVideoPath);
   });
 });
 

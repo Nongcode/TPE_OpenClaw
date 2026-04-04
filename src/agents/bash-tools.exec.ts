@@ -52,6 +52,181 @@ export type {
   ExecToolDetails,
 } from "./bash-tools.exec-types.js";
 
+const CHAT_MEDIA_ARTIFACT_TYPES = new Set([
+  "chat_image",
+  "generated_image",
+  "chat_video",
+  "generated_video",
+]);
+
+type ExecMediaBlock =
+  | {
+      type: "image_url";
+      image_url: { url: string };
+      filePath?: string;
+    }
+  | {
+      type: "video_url";
+      video_url: { url: string };
+      filePath?: string;
+    };
+
+function normalizeExecMediaString(value: unknown): string | undefined {
+  if (typeof value !== "string") {
+    return undefined;
+  }
+  const trimmed = value.trim();
+  return trimmed || undefined;
+}
+
+function tryParseExecJsonPayload(value: string): Record<string, unknown> | null {
+  const raw = value.trim();
+  if (!raw) {
+    return null;
+  }
+
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed)
+      ? (parsed as Record<string, unknown>)
+      : null;
+  } catch {
+    const start = raw.indexOf("{");
+    const end = raw.lastIndexOf("}");
+    if (start < 0 || end <= start) {
+      return null;
+    }
+    try {
+      const parsed = JSON.parse(raw.slice(start, end + 1)) as unknown;
+      return parsed && typeof parsed === "object" && !Array.isArray(parsed)
+        ? (parsed as Record<string, unknown>)
+        : null;
+    } catch {
+      return null;
+    }
+  }
+}
+
+function isVideoArtifactType(artifactType: string): boolean {
+  return artifactType.includes("video");
+}
+
+function isRemoteMediaSource(value: string): boolean {
+  return /^(https?:\/\/|data:(?:image|video)\/)/i.test(value);
+}
+
+function isAbsoluteLocalPath(value: string): boolean {
+  return path.isAbsolute(value) || /^[a-zA-Z]:[\\/]/.test(value);
+}
+
+function preferExecMediaSource(source: unknown, absoluteFallback?: string): string | undefined {
+  const normalized = normalizeExecMediaString(source);
+  if (!normalized) {
+    return undefined;
+  }
+  if (isRemoteMediaSource(normalized) || isAbsoluteLocalPath(normalized)) {
+    return normalized;
+  }
+  return absoluteFallback ?? normalized;
+}
+
+function pushExecMediaBlock(
+  blocks: ExecMediaBlock[],
+  emitted: Set<string>,
+  source: string | undefined,
+  artifactType: string,
+) {
+  if (!source) {
+    return;
+  }
+  const mediaKind = isVideoArtifactType(artifactType) ? "video" : "image";
+  const dedupeKey = `${mediaKind}\u{001F}${source}`;
+  if (emitted.has(dedupeKey)) {
+    return;
+  }
+  emitted.add(dedupeKey);
+  const filePath = isRemoteMediaSource(source) || !isAbsoluteLocalPath(source) ? undefined : source;
+  if (isVideoArtifactType(artifactType)) {
+    blocks.push({
+      type: "video_url",
+      video_url: { url: source },
+      ...(filePath ? { filePath } : {}),
+    });
+    return;
+  }
+  blocks.push({
+    type: "image_url",
+    image_url: { url: source },
+    ...(filePath ? { filePath } : {}),
+  });
+}
+
+function collectExecMediaBlocks(outputText: string): ExecMediaBlock[] {
+  const parsed = tryParseExecJsonPayload(outputText);
+  if (!parsed) {
+    return [];
+  }
+
+  const blocks: ExecMediaBlock[] = [];
+  const emitted = new Set<string>();
+  const data =
+    parsed.data && typeof parsed.data === "object" && !Array.isArray(parsed.data)
+      ? (parsed.data as Record<string, unknown>)
+      : undefined;
+  const absoluteImageFallback = normalizeExecMediaString(data?.absolute_image_path);
+  const absoluteVideoFallback = normalizeExecMediaString(data?.absolute_video_path);
+  const artifacts = Array.isArray(parsed.artifacts) ? parsed.artifacts : [];
+
+  for (const artifact of artifacts) {
+    if (!artifact || typeof artifact !== "object" || Array.isArray(artifact)) {
+      continue;
+    }
+    const typedArtifact = artifact as Record<string, unknown>;
+    const artifactType = normalizeExecMediaString(typedArtifact.type)?.toLowerCase();
+    if (!artifactType || !CHAT_MEDIA_ARTIFACT_TYPES.has(artifactType)) {
+      continue;
+    }
+    const absoluteFallback = isVideoArtifactType(artifactType)
+      ? absoluteVideoFallback
+      : absoluteImageFallback;
+    pushExecMediaBlock(
+      blocks,
+      emitted,
+      preferExecMediaSource(typedArtifact.path, absoluteFallback),
+      artifactType,
+    );
+    pushExecMediaBlock(
+      blocks,
+      emitted,
+      preferExecMediaSource(typedArtifact.url, absoluteFallback),
+      artifactType,
+    );
+  }
+
+  pushExecMediaBlock(
+    blocks,
+    emitted,
+    preferExecMediaSource(data?.relative_image_path, absoluteImageFallback),
+    "generated_image",
+  );
+  pushExecMediaBlock(blocks, emitted, absoluteImageFallback, "generated_image");
+  pushExecMediaBlock(
+    blocks,
+    emitted,
+    preferExecMediaSource(data?.downloaded_image_path, absoluteImageFallback),
+    "generated_image",
+  );
+  pushExecMediaBlock(
+    blocks,
+    emitted,
+    preferExecMediaSource(data?.relative_video_path, absoluteVideoFallback),
+    "generated_video",
+  );
+  pushExecMediaBlock(blocks, emitted, absoluteVideoFallback, "generated_video");
+
+  return blocks;
+}
+
 function extractScriptTargetFromCommand(
   command: string,
 ): { kind: "python"; relOrAbsPath: string } | { kind: "node"; relOrAbsPath: string } | null {
@@ -571,6 +746,7 @@ export function createExecTool(
                   type: "text",
                   text: `${getWarningText()}${outcome.aggregated || "(no output)"}`,
                 },
+                ...collectExecMediaBlocks(outcome.aggregated),
               ],
               details: {
                 status: "completed",

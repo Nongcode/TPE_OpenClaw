@@ -233,6 +233,10 @@ function createOverviewProps(overrides: Partial<OverviewProps> = {}): OverviewPr
     attentionItems: [],
     eventLog: [],
     overviewLogLines: [],
+    agentsList: null,
+    channelsSnapshot: null,
+    healthResult: null,
+    bootstrapAccessPolicy: null,
     showGatewayToken: false,
     showGatewayPassword: false,
     onSettingsChange: () => undefined,
@@ -286,7 +290,7 @@ describe("chat view", () => {
     );
     expect(welcomeImage).toBeNull();
     expect(logoImage).not.toBeNull();
-    expect(logoImage?.getAttribute("src")).toBe("favicon.svg");
+    expect(logoImage?.getAttribute("src")).toBe("uptek-logo.svg");
   });
 
   it("keeps the welcome logo fallback under the mounted base path", () => {
@@ -307,7 +311,7 @@ describe("chat view", () => {
       ".agent-chat__welcome .agent-chat__avatar--logo img",
     );
     expect(logoImage).not.toBeNull();
-    expect(logoImage?.getAttribute("src")).toBe("/openclaw/favicon.svg");
+    expect(logoImage?.getAttribute("src")).toBe("/openclaw/uptek-logo.svg");
   });
 
   it("keeps grouped assistant avatar fallbacks under the mounted base path", () => {
@@ -335,7 +339,7 @@ describe("chat view", () => {
       ".chat-group.assistant .chat-avatar--logo",
     );
     expect(groupedLogo).not.toBeNull();
-    expect(groupedLogo?.getAttribute("src")).toBe("/openclaw/favicon.svg");
+    expect(groupedLogo?.getAttribute("src")).toBe("/openclaw/uptek-logo.svg");
   });
 
   it("renders tool-result image artifacts inline under the following assistant message", () => {

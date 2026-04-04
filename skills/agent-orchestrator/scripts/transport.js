@@ -100,6 +100,14 @@ function buildTaskPrompt(envelope, registry) {
       "- Day la buoc pho phong mo pha trien khai theo ke hoach da duoc truong phong va nguoi dung chot. Bat dau tu content, khong duoc nhay thang sang media.",
     );
   }
+  if (envelope.type === "product_research") {
+    lines.push(
+      "- Day la buoc thu thap du lieu san pham bat buoc cho content. Hay su dung skill search_product_text de lay text day du + anh goc san pham.",
+    );
+    lines.push(
+      "- Ket qua phai neu ro: ten san pham, url, thong so chinh, duong dan thu muc anh goc, danh sach anh tai ve.",
+    );
+  }
   if (envelope.type === "content_revise") {
     lines.push(
       "- Day la buoc nhan vien content sua lai noi dung theo nhan xet review. Chua duoc nhay sang media cho den khi content duoc duyet lai.",
@@ -108,6 +116,14 @@ function buildTaskPrompt(envelope, registry) {
   if (envelope.type === "media_revise") {
     lines.push(
       "- Day la buoc nhan vien media sua lai media theo nhan xet review. Chi tap trung sua media bi loi.",
+    );
+  }
+  if (envelope.to === "nv_media") {
+    lines.push(
+      "- Quy dinh bat buoc cho nhan vien media: KHONG su dung skill tao anh. Chi duoc kiem tra anh goc san pham (THU_MUC_ANH_GOC) va ban giao chinh bo anh goc do cho cac buoc tiep theo.",
+    );
+    lines.push(
+      "- Xem anh goc la anh da duoc tao hop le trong workflow nay; khong yeu cau render/artifact moi.",
     );
   }
   if (envelope.type === "content_review") {
@@ -130,6 +146,14 @@ function buildTaskPrompt(envelope, registry) {
       );
     }
   }
+  if (envelope.type === "compile_post") {
+    lines.push(
+      "- Day la buoc pho phong tong hop content da duyet + media da duyet thanh goi bai viet hoan chinh de trinh truong phong.",
+    );
+    lines.push(
+      "- Bat buoc tra ve: noi dung bai final, prompt tao anh final, prompt tao video final, checklist tai nguyen kem theo.",
+    );
+  }
   if (envelope.type === "final_review") {
     lines.push(
       "- Day la buoc truong phong nhan ban hoan chinh tu pho phong de chot noi bo va trinh len nguoi dung. Khong duoc tu dang bai neu nguoi dung chua xac nhan dang.",
@@ -137,7 +161,10 @@ function buildTaskPrompt(envelope, registry) {
   }
   if (envelope.type === "publish") {
     lines.push(
-      "- Day la buoc dang bai sau khi nguoi dung da xac nhan ro rang rang duoc phep dang.",
+      "- Day la buoc mo phong dang bai sau khi nguoi dung da xac nhan ro rang rang duoc phep dang.",
+    );
+    lines.push(
+      "- KHONG dang that. Chi tao bao cao mo phong dang bai va luu thong tin can post de he thong main xu ly sau.",
     );
   }
   if (envelope.handoffContext) {
@@ -167,6 +194,7 @@ function buildTaskPrompt(envelope, registry) {
     "- Neu task KHONG can phe duyet cap quan ly, khong de xuat xin duyet len quan_ly chi de cho phe duyet hinh thuc.",
     "- Neu dang o buoc propose, chi tra ban ke hoach de xin duyet va dung lai cho quyet dinh cua cap tren.",
     "- Khong duoc bo qua thu tu: truong phong lap ke hoach va cho nguoi dung duyet -> pho phong brief content -> phe duyet content -> media -> phe duyet media -> truong phong chot noi bo -> cho nguoi dung xac nhan dang bai.",
+    "- Trong workflow nay, khong duoc dang Facebook that. Chi mo phong va luu artifact de cho workflow main thuc thi sau.",
     "- Truong phong khong duoc tu san xuat noi dung, prompt anh, prompt video, caption, hay bai dang hoan chinh cho dau viec nhieu buoc. Truong phong phai giao xuong pho phong de trien khai.",
     "- Tra loi bang tieng Viet.",
     "- Bat buoc dung 3 muc: KET_QUA, RUI_RO, DE_XUAT_BUOC_TIEP.",

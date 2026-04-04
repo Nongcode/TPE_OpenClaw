@@ -1,31 +1,32 @@
-﻿import { access } from "node:fs/promises";
+import { access } from "node:fs/promises";
 import { constants as fsConstants } from "node:fs";
 import { chromium } from "playwright-core";
 
 const EDGE_CANDIDATES = [
   "C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe",
   "C:/Program Files/Microsoft/Edge/Application/msedge.exe",
+  "C:/Program Files/Google/Chrome/Application/chrome.exe",
 ];
 
 const SEARCH_ENGINES = [
   {
     name: "google",
     buildUrl(targetSite, keyword) {
-      const query = `site:${targetSite} ${keyword}`;
+      const query = `site:${targetSite}/shop ${keyword}`;
       return `https://www.google.com/search?hl=vi&gl=vn&q=${encodeURIComponent(query)}`;
     },
   },
   {
     name: "bing",
     buildUrl(targetSite, keyword) {
-      const query = `site:${targetSite} ${keyword}`;
+      const query = `site:${targetSite}/shop ${keyword}`;
       return `https://www.bing.com/search?setlang=vi&q=${encodeURIComponent(query)}`;
     },
   },
   {
     name: "duckduckgo",
     buildUrl(targetSite, keyword) {
-      const query = `site:${targetSite} ${keyword}`;
+      const query = `site:${targetSite}/shop ${keyword}`;
       return `https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}`;
     },
   },
@@ -37,6 +38,9 @@ function normalizeUrlCandidate(rawHref) {
     const url = new URL(rawHref, "https://www.google.com");
     if (url.hostname.includes("google.") && url.pathname === "/url") {
       return url.searchParams.get("q") || "";
+    }
+    if (url.hostname.includes("duckduckgo.com") && url.pathname.startsWith("/l/")) {
+      return url.searchParams.get("uddg") || "";
     }
     return url.href;
   } catch {
@@ -53,6 +57,18 @@ function hostMatchesTarget(urlString, targetSite) {
   }
 }
 
+function isProductUrl(urlString, targetSite) {
+  try {
+    const url = new URL(urlString);
+    if (!hostMatchesTarget(url.href, targetSite)) {
+      return false;
+    }
+    return /\/shop\/(?!category\/)(?!cart(?:\/|$))/.test(url.pathname);
+  } catch {
+    return false;
+  }
+}
+
 async function firstExistingPath(candidates) {
   for (const candidate of candidates) {
     try {
@@ -63,10 +79,221 @@ async function firstExistingPath(candidates) {
   return null;
 }
 
+async function getShopCategoryIndex(page) {
+  return await page.evaluate(() => {
+    const toAbsolute = (value) => {
+      try {
+        return new URL(value, window.location.href).href;
+      } catch {
+        return "";
+      }
+    };
+
+    const readText = (node) =>
+      String(node?.textContent || "")
+        .replace(/\u00A0/g, " ")
+        .replace(/\s+/g, " ")
+        .trim();
+
+    const categories = [];
+    const seen = new Set();
+    const nodes = Array.from(
+      document.querySelectorAll('[data-link-href*="/shop/category/"], a[href*="/shop/category/"]'),
+    );
+    for (const node of nodes) {
+      const href = node.getAttribute("data-link-href") || node.getAttribute("href") || "";
+      const url = toAbsolute(href);
+      if (!url || seen.has(url)) continue;
+      seen.add(url);
+
+      const text =
+        readText(node.querySelector("label span")) ||
+        readText(node.querySelector("span")) ||
+        readText(node);
+      const match = url.match(/-([0-9]+)(?:$|[/?#])/);
+      categories.push({
+        id: match ? match[1] : "",
+        name: text,
+        url,
+      });
+    }
+    return categories.filter((entry) => entry.name || entry.id);
+  });
+}
+
+function normalizeSearchText(value) {
+  return String(value || "")
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+}
+
+function tokenizeSearchText(value) {
+  return normalizeSearchText(value)
+    .split(/\s+/)
+    .filter(Boolean);
+}
+
+function extractModelTokens(value) {
+  const source = String(value || "").toUpperCase();
+  const matches = source.match(/[A-Z]{1,6}-\d+(?:\.\d+)?(?:-\d+[A-Z0-9]*)+/g) || [];
+  return [...new Set(matches.map((token) => token.trim()).filter(Boolean))];
+}
+
+function buildKeywordSignals(keyword, categoryHint = "") {
+  const normalizedKeyword = normalizeSearchText(keyword);
+  const tokens = tokenizeSearchText(keyword);
+  const modelTokens = extractModelTokens(keyword);
+  const categoryHints = [];
+  const addCategoryHint = (value) => {
+    const normalized = normalizeSearchText(value);
+    if (normalized && !categoryHints.includes(normalized)) {
+      categoryHints.push(normalized);
+    }
+  };
+
+  if (normalizedKeyword.includes("cau nang")) addCategoryHint("cau nang");
+  if (normalizedKeyword.includes("cau nang o to")) addCategoryHint("cau nang o to");
+  if (normalizedKeyword.includes("2 tru")) addCategoryHint("2 tru");
+  if (normalizedKeyword.includes("rua xe")) addCategoryHint("rua xe");
+  if (normalizedKeyword.includes("xuong lam lop")) addCategoryHint("xuong lam lop");
+  addCategoryHint(categoryHint);
+
+  return {
+    normalizedKeyword,
+    tokens,
+    modelTokens,
+    categoryHints,
+  };
+}
+
+function scoreProductCandidate(candidate, keywordSignals) {
+  const haystack = normalizeSearchText(
+    `${candidate.title || ""} ${candidate.url || ""} ${candidate.category?.name || ""}`,
+  );
+  const needle = keywordSignals.normalizedKeyword;
+  if (!haystack || !needle) return 0;
+
+  let score = 0;
+  if (haystack.includes(needle)) {
+    score += 1000;
+  }
+
+  for (const token of keywordSignals.tokens) {
+    if (haystack.includes(token)) {
+      score += 10 + token.length;
+    }
+  }
+
+  const candidateModelTokens = extractModelTokens(`${candidate.title || ""} ${candidate.url || ""}`);
+  if (keywordSignals.modelTokens.length > 0) {
+    const modelMatched = keywordSignals.modelTokens.some((token) => candidateModelTokens.includes(token));
+    if (modelMatched) {
+      score += 5000;
+    } else {
+      score -= 1500;
+    }
+  }
+
+  if (candidate.category?.name) {
+    const normalizedCategory = normalizeSearchText(candidate.category.name);
+    for (const hint of keywordSignals.categoryHints) {
+      if (normalizedCategory.includes(hint)) {
+        score += 400;
+      }
+    }
+  }
+
+  if (candidate.url && /\/en\/shop\//.test(candidate.url)) {
+    score += 5;
+  }
+  if (candidate.title) {
+    score += Math.min(candidate.title.length, 60) / 60;
+  }
+  return score;
+}
+
+async function collectProductCandidates(page) {
+  return await page.evaluate(() => {
+    const toAbsolute = (value) => {
+      try {
+        return new URL(value, window.location.href).href;
+      } catch {
+        return "";
+      }
+    };
+
+    const breadcrumb = Array.from(document.querySelectorAll(".breadcrumb .breadcrumb-item"))
+      .map((node) => String(node.textContent || "").replace(/\s+/g, " ").trim())
+      .filter(Boolean);
+    const currentCategory =
+      window.location.pathname.includes("/shop/category/") && breadcrumb.length >= 3
+        ? {
+            name: breadcrumb[breadcrumb.length - 1],
+            url: window.location.href,
+          }
+        : null;
+
+    const products = [];
+    const seen = new Set();
+    const productAnchors = Array.from(
+      document.querySelectorAll(
+        '.tp-product-title a[href*="/shop/"], a[itemprop="name"][href*="/shop/"], .oe_product a[href*="/shop/"]',
+      ),
+    );
+    const anchors =
+      productAnchors.length > 0
+        ? productAnchors
+        : Array.from(document.querySelectorAll('a[href*="/shop/"]'));
+    for (const anchor of anchors) {
+      const href = anchor.getAttribute("href") || "";
+      const url = toAbsolute(href);
+      if (!url || seen.has(url)) continue;
+      if (!/\/shop\/(?!category\/)(?!cart(?:\/|$))(?!wishlist(?:\/|$))(?!all-brands(?:\/|$))/.test(url)) {
+        continue;
+      }
+
+      const title =
+        String(anchor.getAttribute("title") || "")
+          .replace(/\u00A0/g, " ")
+          .replace(/\s+/g, " ")
+          .trim() ||
+        String(anchor.textContent || "")
+        .replace(/\u00A0/g, " ")
+        .replace(/\s+/g, " ")
+        .trim();
+      products.push({
+        url,
+        title,
+        category: currentCategory,
+      });
+      seen.add(url);
+    }
+
+    const categoryLinks = Array.from(
+      document.querySelectorAll('[data-link-href*="/shop/category/"], a[href*="/shop/category/"]'),
+    )
+      .map((node) => {
+        const href = node.getAttribute("data-link-href") || node.getAttribute("href") || "";
+        return toAbsolute(href);
+      })
+      .filter(Boolean);
+
+    const pageLinks = Array.from(document.querySelectorAll(".pagination a[href]"))
+      .map((anchor) => toAbsolute(anchor.getAttribute("href") || ""))
+      .filter((url) => url.includes("/shop/category/"));
+
+    return { products, categoryLinks, pageLinks };
+  });
+}
+
 export class BaseScraper {
   constructor(options = {}) {
     this.keyword = String(options.keyword || "").trim();
-    this.targetSite = String(options.target_site || options.targetSite || "canifa.com").trim();
+    this.targetSite = String(options.target_site || options.targetSite || "uptek.vn").trim();
+    this.categoryHint = String(options.category_hint || options.categoryHint || "").trim();
     this.browserPath = String(options.browser_path || options.browserPath || "").trim();
     this.headless = options.headless !== false;
     this.timeoutMs = Number(options.timeout_ms || options.timeoutMs || 45000);
@@ -85,14 +312,9 @@ export class BaseScraper {
     }
     const found = await firstExistingPath(EDGE_CANDIDATES);
     if (!found) {
-      throw new Error("Cannot find Microsoft Edge executable");
+      throw new Error("Cannot find Microsoft Edge or Google Chrome executable");
     }
     return found;
-  }
-
-  buildGoogleSearchUrl() {
-    const query = `site:${this.targetSite} ${this.keyword}`;
-    return `https://www.google.com/search?hl=vi&gl=vn&q=${encodeURIComponent(query)}`;
   }
 
   async dismissGoogleConsentIfNeeded(page) {
@@ -149,7 +371,10 @@ export class BaseScraper {
           try {
             const parsedCandidate = new URL(candidate);
             const hostname = parsedCandidate.hostname;
-            if (hostname === currentTargetSite || hostname.endsWith(`.${currentTargetSite}`)) {
+            if (
+              (hostname === currentTargetSite || hostname.endsWith(`.${currentTargetSite}`)) &&
+              /\/shop\/(?!category\/)/.test(parsedCandidate.pathname)
+            ) {
               return parsedCandidate.href;
             }
           } catch {}
@@ -159,16 +384,16 @@ export class BaseScraper {
       { currentTargetSite: this.targetSite },
     );
 
-    if (productUrl && hostMatchesTarget(productUrl, this.targetSite)) {
+    if (isProductUrl(productUrl, this.targetSite)) {
       return productUrl;
     }
 
-    const fallbackAnchors = await page.locator('a[href]').evaluateAll((nodes) =>
+    const fallbackAnchors = await page.locator("a[href]").evaluateAll((nodes) =>
       nodes.map((node) => node.getAttribute("href") || ""),
     );
     for (const href of fallbackAnchors) {
       const normalized = normalizeUrlCandidate(href);
-      if (hostMatchesTarget(normalized, this.targetSite)) {
+      if (isProductUrl(normalized, this.targetSite)) {
         return normalized;
       }
     }
@@ -196,7 +421,9 @@ export class BaseScraper {
       page.setDefaultNavigationTimeout(this.timeoutMs);
 
       let productUrl = "";
+      let matchedCandidate = null;
       let lastError = null;
+      const keywordSignals = buildKeywordSignals(this.keyword, this.categoryHint);
       for (const engine of SEARCH_ENGINES) {
         try {
           const searchUrl = engine.buildUrl(this.targetSite, this.keyword);
@@ -216,6 +443,111 @@ export class BaseScraper {
       }
 
       if (!productUrl) {
+        try {
+          const shopUrl = new URL("/shop", `https://${this.targetSite}`).href;
+          await page.goto(shopUrl, { waitUntil: "domcontentloaded" });
+          await page.waitForLoadState("networkidle").catch(() => {});
+
+          const rootCollection = await collectProductCandidates(page);
+          const rootCategoryIndex = await getShopCategoryIndex(page);
+          const prioritizedCategories = [...rootCategoryIndex]
+            .map((entry) => ({
+              ...entry,
+              score: scoreProductCandidate(
+                {
+                  title: entry.name,
+                  url: entry.url,
+                  category: { name: entry.name, url: entry.url },
+                },
+                keywordSignals,
+              ),
+            }))
+            .sort((left, right) => right.score - left.score);
+
+          const categoryQueue = [
+            ...new Set(
+              prioritizedCategories
+                .filter((entry) => entry.score > 0)
+                .slice(0, 10)
+                .map((entry) => entry.url),
+            ),
+            ...new Set(rootCollection.categoryLinks),
+          ].slice(0, 24);
+          const allCandidates = [...rootCollection.products];
+
+          for (const categoryUrl of categoryQueue) {
+            try {
+              await page.goto(categoryUrl, { waitUntil: "domcontentloaded" });
+              await page.waitForLoadState("networkidle").catch(() => {});
+              const categoryCollection = await collectProductCandidates(page);
+              allCandidates.push(...categoryCollection.products);
+
+              const paginationQueue = [...new Set(categoryCollection.pageLinks)].slice(0, 8);
+              for (const paginationUrl of paginationQueue) {
+                try {
+                  await page.goto(paginationUrl, { waitUntil: "domcontentloaded" });
+                  await page.waitForLoadState("networkidle").catch(() => {});
+                  const pagedCollection = await collectProductCandidates(page);
+                  allCandidates.push(...pagedCollection.products);
+                } catch (error) {
+                  this.debugLog(
+                    `category page crawl failed ${paginationUrl}: ${error instanceof Error ? error.message : String(error)}`,
+                  );
+                }
+              }
+            } catch (error) {
+              this.debugLog(
+                `category crawl failed ${categoryUrl}: ${error instanceof Error ? error.message : String(error)}`,
+              );
+            }
+          }
+
+          const mergedCandidates = [];
+          const candidateByUrl = new Map();
+          for (const entry of allCandidates) {
+            const existing = candidateByUrl.get(entry.url);
+            if (!existing) {
+              candidateByUrl.set(entry.url, { ...entry });
+              mergedCandidates.push(candidateByUrl.get(entry.url));
+              continue;
+            }
+            if (!existing.title && entry.title) {
+              existing.title = entry.title;
+            }
+            if (!existing.category && entry.category) {
+              existing.category = entry.category;
+            }
+          }
+
+          const ranked = mergedCandidates
+            .map((entry) => ({
+              ...entry,
+              score: scoreProductCandidate(entry, keywordSignals),
+            }))
+            .sort((left, right) => right.score - left.score);
+
+          if (this.debug) {
+            for (const candidate of ranked.slice(0, 5)) {
+              this.debugLog(
+                `candidate score=${candidate.score} title=${candidate.title || "<empty>"} url=${candidate.url}`,
+              );
+            }
+          }
+
+          if (ranked[0] && ranked[0].score > 0) {
+            matchedCandidate = ranked[0];
+            productUrl = ranked[0].url;
+            this.debugLog(`matched product url via shop crawl=${productUrl}`);
+          }
+        } catch (error) {
+          lastError = error;
+          this.debugLog(
+            `shop crawl fallback failed: ${error instanceof Error ? error.message : String(error)}`,
+          );
+        }
+      }
+
+      if (!productUrl) {
         throw lastError || new Error(`No search result matched target site ${this.targetSite}`);
       }
 
@@ -224,7 +556,24 @@ export class BaseScraper {
       });
       await page.waitForLoadState("networkidle").catch(() => {});
 
-      return { browser, page, productUrl };
+      const shopUrl = new URL("/shop", productUrl).href;
+      let categoryIndex = [];
+      try {
+        await page.goto(shopUrl, { waitUntil: "domcontentloaded" });
+        await page.waitForLoadState("networkidle").catch(() => {});
+        categoryIndex = await getShopCategoryIndex(page);
+      } catch (error) {
+        this.debugLog(
+          `category index load failed: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
+
+      await page.goto(productUrl, {
+        waitUntil: "domcontentloaded",
+      });
+      await page.waitForLoadState("networkidle").catch(() => {});
+
+      return { browser, page, productUrl, categoryIndex, matchedCandidate };
     } catch (error) {
       await browser.close().catch(() => {});
       throw error;

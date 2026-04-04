@@ -19,6 +19,39 @@ Build or operate a reusable orchestration layer above OpenClaw agents. Prefer th
 5. Execute through the transport layer using each agent's real session key.
 6. Keep wrappers thin. Feature skills should call the orchestrator, not reimplement routing.
 
+## Fixed Department Flow (Facebook Campaign)
+
+When user commands `truong_phong` directly, the hierarchy mode now enforces this exact order:
+
+1. `truong_phong` creates detailed plan (proposal only) and returns for user approval.
+2. After user approval signal, `truong_phong` hands off execution to `pho_phong`.
+3. `pho_phong` triggers mandatory product research via `search_product_text`.
+4. `pho_phong` assigns `nv_content` to write content.
+5. `pho_phong` reviews content.
+6. `pho_phong` assigns `nv_media` to create media.
+7. `pho_phong` reviews media.
+8. `pho_phong` compiles final package and submits to `truong_phong`.
+9. `truong_phong` returns final package for user approval before posting.
+
+The orchestrator does simulation-only output for media/publish workflow; no real Facebook post is executed in this path.
+Detailed-plan approval gate is applied only when user explicitly requests a detailed plan.
+
+For presentation/demo runs, smooth mode is enabled by default: media creation/review and final review are treated as successful so the flow completes and exports a full artifact bundle (content + image prompt + video prompt + copied original product images). Use `--strict-review-gates` to restore strict blocking behavior.
+
+## CLI Notes
+
+- `--product-keyword`: keyword passed to `skills/search_product_text/action.js`.
+- `--target-site`: target domain for product research (default `uptek.vn`).
+- `--artifacts-dir`: custom output folder for simulation artifacts.
+- `--no-simulation-artifacts`: disable artifact writing.
+- `--strict-review-gates`: disable demo smooth mode and enforce strict review blocking.
+
+Simulation output default folder:
+
+- `artifacts/campaigns/agent-orchestrator-simulations/<run-id>/`
+- Includes plan/result, per-step snapshots, final content, image/video prompts, and copied product original images.
+- Includes `23-facebook-publish-simulation.json` for handoff to a later main-agent batch execution.
+
 ## Rules
 
 - Treat `agents/*` as the runtime source of truth for which agents exist.

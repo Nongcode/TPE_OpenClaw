@@ -563,10 +563,10 @@ function exportMarkdown(props: ChatProps): void {
 }
 
 const WELCOME_SUGGESTIONS = [
-  "What can you do?",
-  "Summarize my recent sessions",
-  "Help me configure a channel",
-  "Check system health",
+  "Tổng hợp hiệu suất marketing hôm nay",
+  "Cho tôi tình trạng các agent",
+  "Liệt kê lịch cron đang chạy",
+  "Kiểm tra sức khỏe hệ thống",
 ];
 
 function renderWelcomeState(props: ChatProps): TemplateResult {
@@ -596,9 +596,9 @@ function renderWelcomeState(props: ChatProps): TemplateResult {
                 /* ignore */
               }
               img.onerror = null;
-              img.src = props.basePath ? props.basePath + '/assets/chrome-extension/icons/tpe-etek-logo.png' : '/assets/chrome-extension/icons/tpe-etek-logo.png';
+              img.src = logoUrl;
             } } />`
-          : html`<div class="agent-chat__avatar agent-chat__avatar--logo"><img src='https://www.tanphat.com/storage/logo/Tanphatetek-logo-2025.png' alt="TPE-OpenClaw" @error=${(e: Event) => {
+          : html`<div class="agent-chat__avatar agent-chat__avatar--logo"><img src=${logoUrl} alt="Uptek" @error=${(e: Event) => {
               const img = e.currentTarget as HTMLImageElement;
               try {
                 if (img.dataset?.triedFallback) {
@@ -610,15 +610,15 @@ function renderWelcomeState(props: ChatProps): TemplateResult {
                 /* ignore */
               }
               img.onerror = null;
-              img.src = props.basePath ? props.basePath + '/assets/chrome-extension/icons/tpe-etek-logo.png' : '/assets/chrome-extension/icons/tpe-etek-logo.png';
+              img.src = logoUrl;
             } } /></div>`
       }
       <h2>${name}</h2>
       <div class="agent-chat__badges">
-        <span class="agent-chat__badge"><img src=${logoUrl} alt="TPE-OpenClaw" /> Ready to chat</span>
+        <span class="agent-chat__badge"><img src=${logoUrl} alt="Uptek" /> Sẵn sàng điều hành</span>
       </div>
       <p class="agent-chat__hint">
-        Type a message below &middot; <kbd>/</kbd> for commands
+        Nhập yêu cầu bên dưới &middot; <kbd>/</kbd> để mở lệnh nhanh
       </p>
       <div class="agent-chat__suggestions">
         ${WELCOME_SUGGESTIONS.map(

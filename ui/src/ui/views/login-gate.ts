@@ -21,9 +21,9 @@ export function renderLoginGate(state: AppViewState) {
       <div class="login-gate__theme">${renderThemeToggle(state)}</div>
       <div class="login-gate__card">
         <div class="login-gate__header">
-          <img class="login-gate__logo" src=${faviconSrc} alt="OpenClaw" />
-          <div class="login-gate__title">OpenClaw</div>
-          <div class="login-gate__sub">${t("login.subtitle")}</div>
+          <img class="login-gate__logo" src=${faviconSrc} alt="Uptek" />
+          <div class="login-gate__title">Uptek</div>
+          <div class="login-gate__sub">Trung tâm điều hành marketing AI</div>
         </div>
         ${
           employeeName || lockedAgentId || lockedSessionKey
@@ -45,7 +45,7 @@ export function renderLoginGate(state: AppViewState) {
             ? html`
                 <div class="login-gate__form">
                   <label class="field">
-                    <span>Email</span>
+                    <span>Email quản trị</span>
                     <input
                       type="email"
                       autocomplete="username"
@@ -68,7 +68,7 @@ export function renderLoginGate(state: AppViewState) {
                         @input=${(e: Event) => {
                           state.demoLoginPassword = (e.target as HTMLInputElement).value;
                         }}
-                        placeholder="${t("login.passwordPlaceholder")}"
+                        placeholder="Nhập mật khẩu đăng nhập"
                         @keydown=${(e: KeyboardEvent) => {
                           if (e.key === "Enter") {
                             void state.handleDemoLogin();
@@ -94,13 +94,13 @@ export function renderLoginGate(state: AppViewState) {
                     ?disabled=${state.demoLoginBusy}
                     @click=${() => void state.handleDemoLogin()}
                   >
-                    ${state.demoLoginBusy ? "Signing in..." : "Sign in"}
+                    ${state.demoLoginBusy ? "Đang đăng nhập..." : "Đăng nhập"}
                   </button>
                   ${
                     demoAccounts.length > 0
                       ? html`
                           <div class="callout" style="margin-top: 14px;">
-                            <div><strong>Sample accounts</strong></div>
+                            <div><strong>Tài khoản mẫu</strong></div>
                             ${demoAccounts.map(
                               (account) => html`
                                 <button
@@ -218,7 +218,7 @@ export function renderLoginGate(state: AppViewState) {
             : ""
         }
         <div class="login-gate__help">
-          <div class="login-gate__help-title">${t("overview.connection.title")}</div>
+          <div class="login-gate__help-title">Kết nối dashboard Uptek</div>
           <ol class="login-gate__steps">
             <li>${t("overview.connection.step1")}<code>openclaw gateway run</code></li>
             <li>${t("overview.connection.step2")}<code>openclaw dashboard --no-open</code></li>

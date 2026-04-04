@@ -3,10 +3,10 @@ import path from "node:path";
 import { chromium } from "playwright-core";
 
 const DEFAULTS = {
-  browser_path: "C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe",
-  user_data_dir: "C:/Users/Administrator/AppData/Local/Microsoft/Edge/User Data",
+  browser_path: "C:/Program Files/CocCoc/Browser/Application/browser.exe",
+  user_data_dir: "C:/Users/Administrator/AppData/Local/CocCoc/Browser/User Data",
   profile_name: "Default",
-  target_gemini_url: "https://gemini.google.com/u/1/app/2a5b61cc5f1a0e3b",
+  target_gemini_url: "https://gemini.google.com/app/2a5b61cc5f1a0e3b",
   timeout_ms: 480000,
   retry_count: 2,
   dry_run: false,

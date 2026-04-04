@@ -1,7 +1,11 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
 
-const { classifyReviewDecision } = require("./executor");
+const {
+  buildOriginalImageMediaReply,
+  classifyReviewDecision,
+  shouldForceOriginalImageMedia,
+} = require("./executor");
 
 test("classifyReviewDecision marks explicit approval as approved", () => {
   const reply = `
@@ -33,4 +37,78 @@ DE_XUAT_BUOC_TIEP:
 `;
 
   assert.equal(classifyReviewDecision(reply), "revise");
+});
+
+test("classifyReviewDecision returns unknown when no approval or revision signal", () => {
+  const reply = `
+KET_QUA:
+- Da tiep nhan va tong hop thong tin.
+
+RUI_RO:
+- Chua xac dinh.
+
+DE_XUAT_BUOC_TIEP:
+- Tiep tuc danh gia.
+`;
+
+  assert.equal(classifyReviewDecision(reply), "unknown");
+});
+
+test("classifyReviewDecision prioritizes revision when reply contains both dat and chua dat", () => {
+  const reply = `
+KET_QUA:
+- Content: dat.
+- Media: chua dat, khong du dieu kien nghiem thu.
+
+RUI_RO:
+- Neu day tiep se gay loi quy trinh.
+
+DE_XUAT_BUOC_TIEP:
+- Agent tiep theo: nv_media sua lai.
+`;
+
+  assert.equal(classifyReviewDecision(reply), "revise");
+});
+
+test("shouldForceOriginalImageMedia enables forced mode for media pipeline when original images exist", () => {
+  const workflowState = {
+    productResearch: {
+      data: {
+        images: [{ file_path: "artifacts/references/search_product_text/a.jpg" }],
+      },
+    },
+  };
+  const plan = { steps: [{ type: "media_review" }] };
+
+  assert.equal(
+    shouldForceOriginalImageMedia({ type: "produce", to: "nv_media" }, workflowState, plan),
+    true,
+  );
+  assert.equal(shouldForceOriginalImageMedia({ type: "media_review" }, workflowState, plan), true);
+  assert.equal(shouldForceOriginalImageMedia({ type: "compile_post" }, workflowState, plan), true);
+  assert.equal(shouldForceOriginalImageMedia({ type: "final_review" }, workflowState, plan), true);
+  assert.equal(shouldForceOriginalImageMedia({ type: "produce", to: "nv_content" }, workflowState, plan), false);
+});
+
+test("buildOriginalImageMediaReply emits approval and original image assets for media_review", () => {
+  const workflowState = {
+    finalContent: "Noi dung final",
+    imagePrompt: "Prompt anh",
+    videoPrompt: "Prompt video",
+    productResearch: {
+      data: {
+        images: [
+          { file_path: "artifacts/references/search_product_text/a.jpg" },
+          { file_path: "artifacts/references/search_product_text/b.jpg" },
+        ],
+      },
+    },
+  };
+
+  const reply = buildOriginalImageMediaReply({ type: "media_review" }, workflowState);
+  assert.match(reply, /DUYET PASS media/i);
+  assert.match(reply, /a\.jpg/);
+  assert.match(reply, /b\.jpg/);
+  assert.match(reply, /IMAGE_PROMPT:\s*Prompt anh/);
+  assert.equal(classifyReviewDecision(reply), "approved");
 });
