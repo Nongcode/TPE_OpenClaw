@@ -21,6 +21,9 @@ function buildTaskEnvelope(step, registry, index, total, context = {}) {
     stepIndex: index + 1,
     totalSteps: total,
     goal: step.message,
+    requestedProductKeyword: context.requestedProductKeyword || null,
+    researchedProductName: context.researchedProductName || null,
+    productAlignmentStatus: context.productAlignmentStatus || null,
     handoffContext: context.handoffContext || null,
     completedSteps: context.completedSteps || [],
     reportsTo: target?.reportsTo || null,
@@ -44,68 +47,77 @@ function buildTaskPrompt(envelope, registry) {
   const target = registry.byId[envelope.to];
   const normalizedGoal = String(envelope.goal || "").toLowerCase();
   const lines = [
-    `[HE THONG DIEU PHOI] Buoc ${envelope.stepIndex}/${envelope.totalSteps}`,
+    `[HỆ THỐNG ĐIỀU PHỐI] Bước ${envelope.stepIndex}/${envelope.totalSteps}`,
     "",
-    `${envelope.sourceLabel || envelope.from} (${envelope.from}) dang giao viec cho ${envelope.targetLabel || envelope.to} (${envelope.to}).`,
+    `${envelope.sourceLabel || envelope.from} (${envelope.from}) đang giao việc cho ${envelope.targetLabel || envelope.to} (${envelope.to}).`,
     "",
-    "NHIEM VU:",
+    "NHIỆM VỤ:",
     envelope.goal,
     "",
-    "THONG TIN DIEU PHOI:",
-    `- Nguoi giao viec: ${envelope.sourceLabel || envelope.from}`,
-    `- Vai tro nguoi giao: ${envelope.sourceRole}`,
-    `- Nguoi nhan viec: ${envelope.targetLabel || envelope.to}`,
-    `- Vai tro nguoi nhan: ${envelope.targetRole}`,
-    `- Loai buoc: ${envelope.type}`,
+    "THÔNG TIN ĐIỀU PHỐI:",
+    `- Người giao việc: ${envelope.sourceLabel || envelope.from}`,
+    `- Vai trò người giao: ${envelope.sourceRole}`,
+    `- Người nhận việc: ${envelope.targetLabel || envelope.to}`,
+    `- Vai trò người nhận: ${envelope.targetRole}`,
+    `- Loại bước: ${envelope.type}`,
   ];
 
   if (source?.canDelegateTo?.length) {
-    lines.push(`- Nguon co the giao cho: ${source.canDelegateTo.join(", ")}`);
+    lines.push(`- Nguồn có thể giao cho: ${source.canDelegateTo.join(", ")}`);
   }
   if (target?.canDelegateTo?.length) {
-    lines.push(`- Dich co the giao tiep cho: ${target.canDelegateTo.join(", ")}`);
+    lines.push(`- Đích có thể giao tiếp cho: ${target.canDelegateTo.join(", ")}`);
   }
   if (envelope.requiresReviewBy) {
-    lines.push(`- Ket qua can duoc review boi: ${envelope.requiresReviewBy}`);
+    lines.push(`- Kết quả cần được review bởi: ${envelope.requiresReviewBy}`);
   }
   if (envelope.deliverToUser) {
-    lines.push("- Sau khi buoc nay dat, ban phai tong hop ket qua va tra thang cho nguoi dung trong chinh khung chat nay.");
+    lines.push("- Sau khi bước này đạt, bạn phải tổng hợp kết quả và trả thẳng cho người dùng trong chính khung chat này.");
   }
   if (envelope.reportsTo) {
-    lines.push(`- Cap tren truc tiep cua ban: ${envelope.reportsTo}`);
+    lines.push(`- Cấp trên trực tiếp của bạn: ${envelope.reportsTo}`);
   }
   lines.push(
-    `- Co can phe duyet cap quan ly khong: ${envelope.requiresExecutiveApproval ? "co" : "khong"}`,
+    `- Có cần phê duyệt cấp quản lý không: ${envelope.requiresExecutiveApproval ? "có" : "không"}`,
   );
+  if (envelope.requestedProductKeyword) {
+    lines.push(`- Yêu cầu gốc về sản phẩm: ${envelope.requestedProductKeyword}`);
+  }
+  if (envelope.researchedProductName) {
+    lines.push(`- Sản phẩm đã research: ${envelope.researchedProductName}`);
+  }
+  if (envelope.productAlignmentStatus) {
+    lines.push(`- Trạng thái khớp sản phẩm: ${envelope.productAlignmentStatus}`);
+  }
   if (!envelope.requiresExecutiveApproval) {
     lines.push(
-      "- Viec nam trong tham quyen van hanh thuong ngay cua phong. Truong phong duoc quyen tu duyet va cho trien khai.",
+      "- Việc nằm trong thẩm quyền vận hành thường ngày của phòng. Trưởng phòng được quyền tự duyệt và cho triển khai.",
     );
   }
   if (envelope.type === "propose") {
     lines.push(
-      "- Day la buoc LAP KE HOACH DE XIN DUYET. Tuyet doi KHONG tu trien khai, KHONG tu viet bai dang hoan chinh, KHONG tu tao media, KHONG tu dang bai.",
+      "- Đây là bước LẬP KẾ HOẠCH ĐỂ XIN DUYỆT. Tuyệt đối KHÔNG tự triển khai, KHÔNG tự viết bài đăng hoàn chỉnh, KHÔNG tự tạo media, KHÔNG tự đăng bài.",
     );
   }
   if (envelope.type === "plan") {
     lines.push(
-      "- Day la buoc pho phong boc tach ke hoach da duoc truong phong chot thanh dau viec thuc thi cho doi san xuat.",
+      "- Đây là bước phó phòng bóc tách kế hoạch đã được trưởng phòng chốt thành đầu việc thực thi cho đội sản xuất.",
     );
     lines.push(
-      "- Sau khi nhan lenh nay, pho phong phai brief cho nv_content viet bai. Chua duoc giao media truoc khi content da duoc pho phong duyet.",
+      "- Sau khi nhận lệnh này, phó phòng phải brief cho `nv_content` viết bài. Chưa được giao media trước khi content đã được phó phòng duyệt.",
     );
   }
   if (envelope.type === "plan_execute") {
     lines.push(
-      "- Day la buoc pho phong mo pha trien khai theo ke hoach da duoc truong phong va nguoi dung chot. Bat dau tu content, khong duoc nhay thang sang media.",
+      "- Đây là bước mở pha triển khai theo kế hoạch đã được chốt. Bắt đầu từ content, không được nhảy thẳng sang media.",
     );
   }
   if (envelope.type === "product_research") {
     lines.push(
-      "- Day la buoc thu thap du lieu san pham bat buoc cho content. Hay su dung skill search_product_text de lay text day du + anh goc san pham.",
+      "- Đây là bước thu thập dữ liệu sản phẩm bắt buộc cho content. Hãy dùng skill `search_product_text` để lấy text đầy đủ và ảnh gốc sản phẩm.",
     );
     lines.push(
-      "- Ket qua phai neu ro: ten san pham, url, thong so chinh, duong dan thu muc anh goc, danh sach anh tai ve.",
+      "- Kết quả phải nêu rõ: tên sản phẩm, URL, thông số chính, đường dẫn thư mục ảnh gốc, danh sách ảnh tải về.",
     );
   }
   if (envelope.type === "content_revise") {
@@ -170,14 +182,14 @@ function buildTaskPrompt(envelope, registry) {
   if (envelope.handoffContext) {
     const handoffHeading =
       envelope.type === "content_review"
-          ? "BAN NHAP CONTENT TU BUOC TRUOC:"
+          ? "BẢN NHÁP CONTENT TỪ BƯỚC TRƯỚC:"
           : envelope.type === "media_review"
-            ? "BAN NHAP MEDIA TU BUOC TRUOC:"
-            : "BAN GIAO TU BUOC TRUOC:";
+            ? "BẢN NHÁP MEDIA TỪ BƯỚC TRƯỚC:"
+            : "BÀN GIAO TỪ BƯỚC TRƯỚC:";
     lines.push("", handoffHeading, envelope.handoffContext);
   }
   if (Array.isArray(envelope.completedSteps) && envelope.completedSteps.length > 0) {
-    lines.push("", "TOM TAT CAC BUOC DA HOAN THANH:");
+    lines.push("", "TÓM TẮT CÁC BƯỚC ĐÃ HOÀN THÀNH:");
     for (const item of envelope.completedSteps) {
       lines.push(`- ${item.stepIndex}. ${item.from} -> ${item.to} [${item.type}]`);
       if (item.summary && (envelope.type === "final_review" || !envelope.type.endsWith("_review"))) {
@@ -188,17 +200,17 @@ function buildTaskPrompt(envelope, registry) {
 
   lines.push(
     "",
-    "YEU CAU TRA LOI:",
-    "- Lam dung vai tro cua ban.",
-    "- Neu can giao tiep cho cap duoi hoac cap tren, neu ro ten agent tiep theo trong phan DE_XUAT_BUOC_TIEP.",
-    "- Neu task KHONG can phe duyet cap quan ly, khong de xuat xin duyet len quan_ly chi de cho phe duyet hinh thuc.",
-    "- Neu dang o buoc propose, chi tra ban ke hoach de xin duyet va dung lai cho quyet dinh cua cap tren.",
-    "- Khong duoc bo qua thu tu: truong phong lap ke hoach va cho nguoi dung duyet -> pho phong brief content -> phe duyet content -> media -> phe duyet media -> truong phong chot noi bo -> cho nguoi dung xac nhan dang bai.",
-    "- Trong workflow nay, khong duoc dang Facebook that. Chi mo phong va luu artifact de cho workflow main thuc thi sau.",
-    "- Truong phong khong duoc tu san xuat noi dung, prompt anh, prompt video, caption, hay bai dang hoan chinh cho dau viec nhieu buoc. Truong phong phai giao xuong pho phong de trien khai.",
-    "- Tra loi bang tieng Viet.",
-    "- Bat buoc dung 3 muc: KET_QUA, RUI_RO, DE_XUAT_BUOC_TIEP.",
-    "- Chi khi step type la publish va nguoi dung da xac nhan dang bai thi moi duoc xac nhan ket qua dang bai.",
+    "YÊU CẦU TRẢ LỜI:",
+    "- Làm đúng vai trò của bạn.",
+    "- Nếu cần giao tiếp cho cấp dưới hoặc cấp trên, nêu rõ tên agent tiếp theo trong phần ĐỀ_XUẤT_BƯỚC_TIẾP.",
+    "- Nếu task KHÔNG cần phê duyệt cấp quản lý, không đề xuất xin duyệt lên `quan_ly` chỉ để chờ phê duyệt hình thức.",
+    "- Nếu đang ở bước `propose`, chỉ trả bản kế hoạch để xin duyệt và dừng lại chờ quyết định của cấp trên.",
+    "- Không được bỏ qua thứ tự: trưởng phòng lập kế hoạch và chờ người dùng duyệt -> phó phòng brief content -> phê duyệt content -> media -> phê duyệt media -> trưởng phòng chốt nội bộ -> chờ người dùng xác nhận đăng bài.",
+    "- Trong workflow này, không được đăng Facebook thật. Chỉ mô phỏng và lưu artifact để cho workflow `main` thực thi sau.",
+    "- Trưởng phòng không được tự sản xuất nội dung, prompt ảnh, prompt video, caption, hay bài đăng hoàn chỉnh cho đầu việc nhiều bước. Trưởng phòng phải giao xuống phó phòng để triển khai.",
+    "- Trả lời bằng tiếng Việt có dấu.",
+    "- Bắt buộc dùng 3 mục: KẾT_QUẢ, RỦI_RO, ĐỀ_XUẤT_BƯỚC_TIẾP.",
+    "- Chỉ khi `step type` là `publish` và người dùng đã xác nhận đăng bài thì mới được xác nhận kết quả đăng bài.",
     "",
     "TASK_ENVELOPE_JSON:",
     JSON.stringify(envelope, null, 2),

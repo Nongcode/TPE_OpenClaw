@@ -2,12 +2,68 @@ const { spawnSync } = require("child_process");
 const fs = require("fs");
 const path = require("path");
 
+function stripQuotedEdges(value) {
+  return String(value || "")
+    .trim()
+    .replace(/^["'“”‘’\s]+/, "")
+    .replace(/["'“”‘’\s]+$/, "")
+    .trim();
+}
+
+function cleanKeywordCandidate(value) {
+  return stripQuotedEdges(
+    String(value || "")
+      .replace(/^(là|la|là:|la:)\s*/i, "")
+      .replace(/\s+/g, " ")
+      .trim(),
+  );
+}
+
+function extractProductKeywordFromMessage(source) {
+  const text = String(source || "").replace(/\s+/g, " ").trim();
+  if (!text) {
+    return "";
+  }
+
+  const labeledPatterns = [
+    /TEN_SAN_PHAM:\s*([^.\n]+?)(?=\s+(?:URL_SAN_PHAM|DANH_MUC|THONG_SO|THU_MUC_ANH_GOC|$))/i,
+    /Tên sản phẩm(?: chuẩn)?\s*:\s*([^?\n]+?)(?=\s+(?:URL|Chất liệu|Kích thước|Đối tượng|CTA|$))/i,
+  ];
+  for (const pattern of labeledPatterns) {
+    const match = text.match(pattern);
+    if (match?.[1]) {
+      const candidate = cleanKeywordCandidate(match[1]);
+      if (candidate) {
+        return candidate;
+      }
+    }
+  }
+
+  const inlinePatterns = [
+    /quảng bá sản phẩm\s+(.+?)(?=\s+(?:để|de|voi|với|trình|review|duyệt|dang|đăng|Yêu cầu:|yeu cau:|$))/i,
+    /viết bài(?: Facebook)?(?: quảng bá)?\s+(?:cho|về)\s+(.+?)(?=\s+(?:để|de|voi|với|trình|review|duyệt|dang|đăng|Yêu cầu:|yeu cau:|$))/i,
+    /cho\s+(.+?)(?=\s+(?:để|de|trình|review|duyệt|dang|đăng|Yêu cầu:|yeu cau:|$))/i,
+  ];
+
+  for (const pattern of inlinePatterns) {
+    const match = text.match(pattern);
+    if (match?.[1]) {
+      const candidate = cleanKeywordCandidate(match[1]);
+      if (candidate && candidate.length <= 160) {
+        return candidate;
+      }
+    }
+  }
+
+  return "";
+}
+
 function resolveKeyword(step, plan, options) {
   if (options?.productKeyword && String(options.productKeyword).trim()) {
     return String(options.productKeyword).trim();
   }
   const source = step?.message || plan?.message || "";
-  return String(source).trim();
+  return extractProductKeywordFromMessage(source) || String(source).trim();
 }
 
 function runProductResearch(step, plan, options = {}) {
@@ -171,6 +227,7 @@ function createDemoProductResearchFallback(step, plan, options = {}) {
 }
 
 module.exports = {
+  extractProductKeywordFromMessage,
   createDemoProductResearchFallback,
   runProductResearch,
 };

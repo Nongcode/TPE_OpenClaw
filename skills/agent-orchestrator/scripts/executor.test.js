@@ -2,6 +2,8 @@ const test = require("node:test");
 const assert = require("node:assert/strict");
 
 const {
+  assessProductResearchAlignment,
+  buildProductResearchMismatchReply,
   buildOriginalImageMediaReply,
   classifyReviewDecision,
   shouldForceOriginalImageMedia,
@@ -111,4 +113,30 @@ test("buildOriginalImageMediaReply emits approval and original image assets for 
   assert.match(reply, /b\.jpg/);
   assert.match(reply, /IMAGE_PROMPT:\s*Prompt anh/);
   assert.equal(classifyReviewDecision(reply), "approved");
+});
+
+test("assessProductResearchAlignment flags unrelated product names as mismatch", () => {
+  const result = assessProductResearchAlignment("tủ đựng đồ 7 ngăn", "Cầu nâng cắt kéo 4,3 tấn");
+  assert.equal(result.aligned, false);
+  assert.equal(result.reason, "weak-overlap");
+});
+
+test("assessProductResearchAlignment accepts close product matches", () => {
+  const result = assessProductResearchAlignment(
+    "tủ đựng đồ 7 ngăn",
+    "Tủ đựng đồ 7 ngăn bằng thép sơn tĩnh điện",
+  );
+  assert.equal(result.aligned, true);
+});
+
+test("buildProductResearchMismatchReply includes requested and found products", () => {
+  const reply = buildProductResearchMismatchReply({
+    requestedKeyword: "tủ đựng đồ 7 ngăn",
+    productName: "Cầu nâng cắt kéo 4,3 tấn",
+    productUrl: "https://example.com/product",
+    alignment: { overlapTokens: [] },
+  });
+
+  assert.match(reply, /YÊU_CẦU_GỐC_SẢN_PHẨM: tủ đựng đồ 7 ngăn/);
+  assert.match(reply, /SẢN_PHẨM_ĐÃ_TÌM_ĐƯỢC: Cầu nâng cắt kéo 4,3 tấn/);
 });

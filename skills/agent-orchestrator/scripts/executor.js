@@ -1,5 +1,9 @@
 const { normalizeText } = require("./common");
-const { createDemoProductResearchFallback, runProductResearch } = require("./product_research");
+const {
+  createDemoProductResearchFallback,
+  extractProductKeywordFromMessage,
+  runProductResearch,
+} = require("./product_research");
 const { createSimulationArtifacts } = require("./simulation_artifacts");
 const { buildTaskEnvelope, buildTaskPrompt, sendToSession } = require("./transport");
 
@@ -522,11 +526,114 @@ function buildDemoSmoothReply(step, workflowState) {
   ].join("\n");
 }
 
+function tokenizeProductIntent(value) {
+  const stopwords = new Set([
+    "san",
+    "pham",
+    "may",
+    "thiet",
+    "bi",
+    "cho",
+    "de",
+    "va",
+    "voi",
+    "trong",
+    "ngoai",
+    "hang",
+    "loai",
+    "cao",
+    "cap",
+    "dong",
+    "goi",
+    "bai",
+    "facebook",
+    "quang",
+    "ba",
+    "trien",
+    "khai",
+    "nhanh",
+  ]);
+  return Array.from(
+    new Set(
+      normalizeText(value)
+        .split(/[^a-z0-9]+/)
+        .map((token) => token.trim())
+        .filter((token) => token.length >= 2 && !stopwords.has(token)),
+    ),
+  );
+}
+
+function assessProductResearchAlignment(requestedKeyword, productName) {
+  const requested = String(requestedKeyword || "").trim();
+  const actual = String(productName || "").trim();
+  if (!requested || !actual) {
+    return {
+      aligned: false,
+      reason: "missing-data",
+      overlapTokens: [],
+      requestedTokens: tokenizeProductIntent(requested),
+      actualTokens: tokenizeProductIntent(actual),
+    };
+  }
+
+  const normalizedRequested = normalizeText(requested);
+  const normalizedActual = normalizeText(actual);
+  if (normalizedActual.includes(normalizedRequested)) {
+    return {
+      aligned: true,
+      reason: "full-substring-match",
+      overlapTokens: tokenizeProductIntent(requested),
+      requestedTokens: tokenizeProductIntent(requested),
+      actualTokens: tokenizeProductIntent(actual),
+    };
+  }
+
+  const requestedTokens = tokenizeProductIntent(requested);
+  const actualTokens = tokenizeProductIntent(actual);
+  const overlapTokens = requestedTokens.filter((token) => actualTokens.includes(token));
+  const ratio = requestedTokens.length === 0 ? 0 : overlapTokens.length / requestedTokens.length;
+
+  return {
+    aligned: overlapTokens.length >= 2 && ratio >= 0.6,
+    reason: overlapTokens.length >= 2 && ratio >= 0.6 ? "token-overlap" : "weak-overlap",
+    overlapTokens,
+    requestedTokens,
+    actualTokens,
+  };
+}
+
+function buildProductResearchMismatchReply(params) {
+  const requested = params.requestedKeyword || "(không rõ)";
+  const actual = params.productName || "(không rõ)";
+  const overlap = params.alignment?.overlapTokens?.length
+    ? params.alignment.overlapTokens.join(", ")
+    : "(không có)";
+
+  return [
+    "KẾT_QUẢ:",
+    "- Dừng workflow tại bước nghiên cứu sản phẩm vì dữ liệu tìm được không khớp đủ với yêu cầu gốc.",
+    `- YÊU_CẦU_GỐC_SẢN_PHẨM: ${requested}`,
+    `- SẢN_PHẨM_ĐÃ_TÌM_ĐƯỢC: ${actual}`,
+    `- URL_SẢN_PHẨM: ${params.productUrl || "(không rõ)"}`,
+    `- TOKEN_KHỚP: ${overlap}`,
+    "",
+    "RỦI_RO:",
+    "- Nếu tiếp tục giao xuống content/media, toàn bộ workflow có nguy cơ viết sai sản phẩm.",
+    "",
+    "ĐỀ_XUẤT_BƯỚC_TIẾP:",
+    "- Xác nhận lại đúng keyword hoặc cung cấp URL sản phẩm chuẩn.",
+    "- Sau khi keyword đúng, chạy lại workflow từ bước research.",
+  ].join("\n");
+}
+
 async function executePlan(registry, plan, options) {
   const steps = [];
   const reviewLoopCounts = new Map();
   const simulation = createSimulationArtifacts(plan, options);
   const workflowState = {
+    requestedProductKeyword:
+      String(options?.productKeyword || "").trim() ||
+      extractProductKeywordFromMessage(plan?.message || ""),
     productResearch: null,
     finalContent: "",
     imagePrompt: "",
@@ -553,12 +660,29 @@ async function executePlan(registry, plan, options) {
           `Demo smooth fallback at step ${index + 1} (${step.type}): ${error?.message || error}`,
         );
       }
-      workflowState.productResearch = payload;
+      const alignment = assessProductResearchAlignment(
+        workflowState.requestedProductKeyword,
+        payload?.data?.product_name || "",
+      );
+      workflowState.productResearch = {
+        ...payload,
+        alignment,
+      };
+      const mismatchReply = !alignment.aligned
+        ? buildProductResearchMismatchReply({
+            requestedKeyword: workflowState.requestedProductKeyword,
+            productName: payload?.data?.product_name || "",
+            productUrl: payload?.data?.product_url || "",
+            alignment,
+          })
+        : "";
       const summary = [
-        `Da lay du lieu san pham bang skill search_product_text.`,
-        `San pham: ${payload?.data?.product_name || "(khong ro)"}`,
-        `URL: ${payload?.data?.product_url || "(khong ro)"}`,
-        `Thu muc anh: ${payload?.data?.image_download_dir || "(khong ro)"}`,
+        `Đã lấy dữ liệu sản phẩm bằng skill search_product_text.`,
+        `YÊU_CẦU_GỐC_SẢN_PHẨM: ${workflowState.requestedProductKeyword || "(không rõ)"}`,
+        `SẢN_PHẨM_ĐÃ_TÌM_ĐƯỢC: ${payload?.data?.product_name || "(không rõ)"}`,
+        `URL: ${payload?.data?.product_url || "(không rõ)"}`,
+        `THƯ_MỤC_ẢNH: ${payload?.data?.image_download_dir || "(không rõ)"}`,
+        !alignment.aligned ? `TRẠNG_THÁI_KHỚP: KHÔNG_ĐẠT (${alignment.reason})` : "TRẠNG_THÁI_KHỚP: ĐẠT",
       ].join("\n");
       const record = {
         ...step,
@@ -568,10 +692,12 @@ async function executePlan(registry, plan, options) {
           from: step.from,
           to: step.to,
           keyword: payload.keyword,
+          requestedKeyword: workflowState.requestedProductKeyword,
           targetSite: payload.targetSite,
+          alignment,
         },
         prompt: "[local] run skills/search_product_text/action.js",
-        reply: summary,
+        reply: !alignment.aligned ? mismatchReply : summary,
         productResearch: payload,
       };
       steps.push(record);
@@ -581,10 +707,16 @@ async function executePlan(registry, plan, options) {
         from: step.from,
         to: step.to,
         keyword: payload.keyword,
+        requestedKeyword: workflowState.requestedProductKeyword,
         targetSite: payload.targetSite,
         productName: payload?.data?.product_name || null,
         productUrl: payload?.data?.product_url || null,
+        aligned: alignment.aligned,
+        alignmentReason: alignment.reason,
       });
+      if (!alignment.aligned) {
+        break;
+      }
       continue;
     }
 
@@ -693,17 +825,26 @@ async function executePlan(registry, plan, options) {
         research.category || research.categories || "",
       );
       const researchSummary = [
-        `TEN_SAN_PHAM: ${research.product_name || ""}`,
-        `URL_SAN_PHAM: ${research.product_url || ""}`,
-        `DANH_MUC: ${normalizedCategory}`,
-        `THONG_SO: ${research.specifications_text || ""}`,
-        `THU_MUC_ANH_GOC: ${research.image_download_dir || ""}`,
+        `YÊU_CẦU_GỐC_SẢN_PHẨM: ${workflowState.requestedProductKeyword || ""}`,
+        `TÊN_SẢN_PHẨM: ${research.product_name || ""}`,
+        `URL_SẢN_PHẨM: ${research.product_url || ""}`,
+        `DANH_MỤC: ${normalizedCategory}`,
+        `THÔNG_SỐ: ${research.specifications_text || ""}`,
+        `THƯ_MỤC_ẢNH_GỐC: ${research.image_download_dir || ""}`,
       ].join("\n");
       handoffContext = handoffContext
-        ? `${handoffContext}\n\nDU_LIEU_SAN_PHAM_BAT_BUOC:\n${researchSummary}`
-        : `DU_LIEU_SAN_PHAM_BAT_BUOC:\n${researchSummary}`;
+        ? `${handoffContext}\n\nDỮ_LIỆU_SẢN_PHẨM_BẮT_BUỘC:\n${researchSummary}`
+        : `DỮ_LIỆU_SẢN_PHẨM_BẮT_BUỘC:\n${researchSummary}`;
     }
     const envelope = buildTaskEnvelope(step, registry, index, plan.steps.length, {
+      requestedProductKeyword: workflowState.requestedProductKeyword || null,
+      researchedProductName: workflowState.productResearch?.data?.product_name || null,
+      productAlignmentStatus:
+        workflowState.productResearch?.alignment?.aligned === true
+          ? "ĐẠT"
+          : workflowState.productResearch?.alignment?.aligned === false
+            ? `KHÔNG_ĐẠT:${workflowState.productResearch.alignment.reason}`
+            : null,
       handoffContext,
       completedSteps: isReviewStep
         ? priorSteps.map((item) =>
@@ -878,6 +1019,8 @@ async function executePlan(registry, plan, options) {
 }
 
 module.exports = {
+  assessProductResearchAlignment,
+  buildProductResearchMismatchReply,
   buildOriginalImageMediaReply,
   shouldForceOriginalImageMedia,
   classifyReviewDecision,
