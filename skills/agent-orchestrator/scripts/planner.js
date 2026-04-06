@@ -145,22 +145,23 @@ function classifyWorkflow(normalized, fromAgentId) {
     messageMentionsAny(normalized, ["viet", "content", "facebook", "bai", "caption", "copy"]);
   const wantsMedia =
     !forbidsMedia &&
-    messageMentionsAny(normalized, [
-      "image",
-      "anh",
-      "hinh",
-      "hinh anh",
-      "banner",
-      "media",
-      "video",
-      "visual",
-      "kem anh",
-      "kem hinh",
-      "tao anh",
-      "lam anh",
-      "tao video",
-      "lam video",
-    ]);
+    (wantsCampaign ||
+      messageMentionsAny(normalized, [
+        "image",
+        "anh",
+        "hinh",
+        "hinh anh",
+        "banner",
+        "media",
+        "video",
+        "visual",
+        "kem anh",
+        "kem hinh",
+        "tao anh",
+        "lam anh",
+        "tao video",
+        "lam video",
+      ]));
   const wantsPublish =
     messageMentionsAny(normalized, ["dang bai", "dang facebook", "facebook", "post", "xuat ban"]);
 
@@ -227,6 +228,178 @@ function chooseBestAllowedChild(registry, fromAgentId, message, taskType) {
   return candidates[0];
 }
 
+function createStep(params) {
+  return {
+    type: params.type,
+    from: params.from,
+    to: params.to,
+    taskType: params.taskType,
+    message: params.message,
+    requiresExecutiveApproval: params.requiresExecutiveApproval,
+    ...(params.requiresReviewBy ? { requiresReviewBy: params.requiresReviewBy } : {}),
+    ...(params.deliverToUser ? { deliverToUser: true } : {}),
+    ...(params.requiresPlanApproval ? { requiresPlanApproval: true } : {}),
+    ...(params.simulateOnly ? { simulateOnly: true } : {}),
+  };
+}
+
+function buildDepartmentExecutionSteps(params) {
+  const {
+    fromAgentId,
+    taskType,
+    message,
+    requiresExecutiveApproval,
+    includePlanExecute,
+    includeDepartmentFinalReview,
+    finalDeliverAgentId,
+    wantsMedia,
+  } = params;
+  const steps = [];
+
+  if (includePlanExecute) {
+    steps.push(
+      createStep({
+        type: "plan_execute",
+        from: fromAgentId,
+        to: "pho_phong",
+        taskType,
+        message,
+        requiresExecutiveApproval,
+      }),
+    );
+  }
+
+  steps.push(
+    createStep({
+      type: "product_research",
+      from: "pho_phong",
+      to: "pho_phong",
+      taskType,
+      message,
+      requiresExecutiveApproval,
+    }),
+    createStep({
+      type: "produce",
+      from: "pho_phong",
+      to: "nv_content",
+      taskType,
+      message,
+      requiresExecutiveApproval,
+    }),
+    createStep({
+      type: "content_review",
+      from: "nv_content",
+      to: "pho_phong",
+      taskType,
+      message,
+      requiresExecutiveApproval,
+      requiresReviewBy: "pho_phong",
+      deliverToUser: !wantsMedia && finalDeliverAgentId === "pho_phong",
+    }),
+  );
+
+  if (!wantsMedia) {
+    if (includeDepartmentFinalReview) {
+      steps.push(
+        createStep({
+          type: "final_review",
+          from: "pho_phong",
+          to: "truong_phong",
+          taskType,
+          message,
+          requiresExecutiveApproval,
+          deliverToUser: finalDeliverAgentId === "truong_phong",
+        }),
+      );
+      if (finalDeliverAgentId === "quan_ly") {
+        steps.push(
+          createStep({
+            type: "report",
+            from: "truong_phong",
+            to: "quan_ly",
+            taskType,
+            message,
+            requiresExecutiveApproval,
+            deliverToUser: true,
+          }),
+        );
+      }
+    }
+    return steps;
+  }
+
+  steps.push(
+    createStep({
+      type: "produce",
+      from: "pho_phong",
+      to: "nv_media",
+      taskType,
+      message,
+      requiresExecutiveApproval,
+    }),
+    createStep({
+      type: "media_review",
+      from: "nv_media",
+      to: "pho_phong",
+      taskType,
+      message,
+      requiresExecutiveApproval,
+      requiresReviewBy: "pho_phong",
+    }),
+  );
+
+  if (finalDeliverAgentId === "pho_phong") {
+    steps.push(
+      createStep({
+        type: "compile_post",
+        from: "pho_phong",
+        to: "pho_phong",
+        taskType,
+        message,
+        requiresExecutiveApproval,
+        deliverToUser: true,
+      }),
+    );
+    return steps;
+  }
+
+  steps.push(
+    createStep({
+      type: "compile_post",
+      from: "pho_phong",
+      to: "pho_phong",
+      taskType,
+      message,
+      requiresExecutiveApproval,
+    }),
+    createStep({
+      type: "final_review",
+      from: "pho_phong",
+      to: "truong_phong",
+      taskType,
+      message,
+      requiresExecutiveApproval,
+      deliverToUser: finalDeliverAgentId === "truong_phong",
+    }),
+  );
+
+  if (finalDeliverAgentId === "quan_ly") {
+    steps.push(
+      createStep({
+        type: "report",
+        from: "truong_phong",
+        to: "quan_ly",
+        taskType,
+        message,
+        requiresExecutiveApproval,
+        deliverToUser: true,
+      }),
+    );
+  }
+
+  return steps;
+}
+
 function buildHierarchyPlan(registry, fromAgentId, message, taskType) {
   const fromAgent = registry.byId[fromAgentId];
   if (!fromAgent) {
@@ -250,9 +423,12 @@ function buildHierarchyPlan(registry, fromAgentId, message, taskType) {
   const steps = [];
   let currentOwner = fromAgentId;
   const userDirectToDeputy = fromAgentId === "pho_phong";
-  const strictDepartmentFlow = fromAgentId === "truong_phong" && (wantsCampaign || asksDetailedPlan);
-  const needsPlanApprovalGate = strictDepartmentFlow && asksDetailedPlan && !hasApprovedPlan;
-  const canExecuteStrictFlow = strictDepartmentFlow && (hasApprovedPlan || !asksDetailedPlan);
+  const isDepartmentManager = fromAgentId === "truong_phong" || fromAgentId === "quan_ly";
+  const needsManagedExecution = isDepartmentManager && wantsCampaign;
+  const needsPlanApprovalGate =
+    needsManagedExecution &&
+    ((fromAgentId === "quan_ly" && !hasApprovedPlan) || (fromAgentId === "truong_phong" && asksDetailedPlan && !hasApprovedPlan));
+  const canExecuteManagedFlow = needsManagedExecution && !needsPlanApprovalGate;
 
   if (wantsExplicitPublish) {
     return {
@@ -285,21 +461,21 @@ function buildHierarchyPlan(registry, fromAgentId, message, taskType) {
       requiresExecutiveApproval,
       reportBackToOrigin: false,
       steps: [
-        {
+        createStep({
           type: "propose",
-          from: "truong_phong",
-          to: "truong_phong",
+          from: fromAgentId,
+          to: fromAgentId,
           taskType,
           message,
           requiresExecutiveApproval,
           deliverToUser: true,
           requiresPlanApproval: true,
-        },
+        }),
       ],
     };
   }
 
-  if (canExecuteStrictFlow) {
+  if (canExecuteManagedFlow && fromAgentId === "quan_ly") {
     return {
       mode: "hierarchy",
       from: fromAgentId,
@@ -308,86 +484,125 @@ function buildHierarchyPlan(registry, fromAgentId, message, taskType) {
       requiresExecutiveApproval,
       reportBackToOrigin: false,
       steps: [
-        {
+        createStep({
           type: "plan_execute",
-          from: "truong_phong",
-          to: "pho_phong",
-          taskType,
-          message,
-          requiresExecutiveApproval,
-        },
-        {
-          type: "product_research",
-          from: "pho_phong",
-          to: "pho_phong",
-          taskType,
-          message,
-          requiresExecutiveApproval,
-        },
-        {
-          type: "produce",
-          from: "pho_phong",
-          to: "nv_content",
-          taskType,
-          message,
-          requiresExecutiveApproval,
-        },
-        {
-          type: "content_review",
-          from: "nv_content",
-          to: "pho_phong",
-          taskType,
-          message,
-          requiresExecutiveApproval,
-          requiresReviewBy: "pho_phong",
-        },
-        {
-          type: "produce",
-          from: "pho_phong",
-          to: "nv_media",
-          taskType,
-          message,
-          requiresExecutiveApproval,
-        },
-        {
-          type: "media_review",
-          from: "nv_media",
-          to: "pho_phong",
-          taskType,
-          message,
-          requiresExecutiveApproval,
-          requiresReviewBy: "pho_phong",
-        },
-        {
-          type: "compile_post",
-          from: "pho_phong",
-          to: "pho_phong",
-          taskType,
-          message,
-          requiresExecutiveApproval,
-        },
-        {
-          type: "final_review",
-          from: "pho_phong",
+          from: "quan_ly",
           to: "truong_phong",
           taskType,
           message,
           requiresExecutiveApproval,
+        }),
+        ...buildDepartmentExecutionSteps({
+          fromAgentId: "truong_phong",
+          taskType,
+          message,
+          requiresExecutiveApproval,
+          includePlanExecute: true,
+          includeDepartmentFinalReview: true,
+          finalDeliverAgentId: "quan_ly",
+          wantsMedia,
+        }),
+      ],
+    };
+  }
+
+  if (canExecuteManagedFlow && fromAgentId === "truong_phong") {
+    return {
+      mode: "hierarchy",
+      from: fromAgentId,
+      taskType,
+      message,
+      requiresExecutiveApproval,
+      reportBackToOrigin: false,
+      steps: buildDepartmentExecutionSteps({
+        fromAgentId: "truong_phong",
+        taskType,
+        message,
+        requiresExecutiveApproval,
+        includePlanExecute: true,
+        includeDepartmentFinalReview: true,
+        finalDeliverAgentId: "truong_phong",
+        wantsMedia,
+      }),
+    };
+  }
+
+  if (fromAgentId === "pho_phong" && wantsCampaign) {
+    return {
+      mode: "hierarchy",
+      from: fromAgentId,
+      taskType,
+      message,
+      requiresExecutiveApproval,
+      reportBackToOrigin: false,
+      steps: buildDepartmentExecutionSteps({
+        fromAgentId: "pho_phong",
+        taskType,
+        message,
+        requiresExecutiveApproval,
+        includePlanExecute: false,
+        includeDepartmentFinalReview: false,
+        finalDeliverAgentId: "pho_phong",
+        wantsMedia,
+      }),
+    };
+  }
+
+  if (fromAgentId === "nv_content") {
+    return {
+      mode: "hierarchy",
+      from: fromAgentId,
+      taskType,
+      message,
+      requiresExecutiveApproval,
+      reportBackToOrigin: false,
+      steps: [
+        createStep({
+          type: "direct",
+          from: "nv_content",
+          to: "nv_content",
+          taskType,
+          message,
+          requiresExecutiveApproval,
           deliverToUser: true,
-        },
+        }),
+      ],
+    };
+  }
+
+  if (fromAgentId === "nv_media") {
+    return {
+      mode: "hierarchy",
+      from: fromAgentId,
+      taskType,
+      message,
+      requiresExecutiveApproval,
+      reportBackToOrigin: false,
+      steps: [
+        createStep({
+          type: "direct",
+          from: "nv_media",
+          to: "nv_media",
+          taskType,
+          message,
+          requiresExecutiveApproval,
+          deliverToUser: true,
+        }),
       ],
     };
   }
 
   const handoff = (to, kind) => {
-    steps.push({
-      type: kind,
-      from: currentOwner,
-      to,
-      taskType,
-      message,
-      requiresExecutiveApproval,
-    });
+    steps.push(
+      createStep({
+        type: kind,
+        from: currentOwner,
+        to,
+        taskType,
+        message,
+        requiresExecutiveApproval,
+      }),
+    );
     currentOwner = to;
   };
 
@@ -395,15 +610,17 @@ function buildHierarchyPlan(registry, fromAgentId, message, taskType) {
     handoff("quan_ly", "delegate");
   }
   if (wantsPlanOnly && fromAgentId === "truong_phong") {
-    steps.push({
-      type: "propose",
-      from: "truong_phong",
-      to: "truong_phong",
-      taskType,
-      message,
-      requiresExecutiveApproval,
-      deliverToUser: true,
-    });
+    steps.push(
+      createStep({
+        type: "propose",
+        from: "truong_phong",
+        to: "truong_phong",
+        taskType,
+        message,
+        requiresExecutiveApproval,
+        deliverToUser: true,
+      }),
+    );
     return {
       mode: "hierarchy",
       from: fromAgentId,
@@ -422,30 +639,34 @@ function buildHierarchyPlan(registry, fromAgentId, message, taskType) {
   }
   if (wantsContent && registry.byId[currentOwner]?.canDelegateTo?.includes("nv_content")) {
     handoff("nv_content", "produce");
-    steps.push({
-      type: "content_review",
-      from: "nv_content",
-      to: "pho_phong",
-      taskType,
-      message,
-      requiresExecutiveApproval,
-      requiresReviewBy: "pho_phong",
-      deliverToUser: userDirectToDeputy && !wantsMedia,
-    });
+    steps.push(
+      createStep({
+        type: "content_review",
+        from: "nv_content",
+        to: "pho_phong",
+        taskType,
+        message,
+        requiresExecutiveApproval,
+        requiresReviewBy: "pho_phong",
+        deliverToUser: userDirectToDeputy && !wantsMedia,
+      }),
+    );
     currentOwner = "pho_phong";
   }
   if (wantsMedia && registry.byId[currentOwner]?.canDelegateTo?.includes("nv_media")) {
     handoff("nv_media", "produce");
-    steps.push({
-      type: "media_review",
-      from: "nv_media",
-      to: "pho_phong",
-      taskType,
-      message,
-      requiresExecutiveApproval,
-      requiresReviewBy: "pho_phong",
-      deliverToUser: userDirectToDeputy,
-    });
+    steps.push(
+      createStep({
+        type: "media_review",
+        from: "nv_media",
+        to: "pho_phong",
+        taskType,
+        message,
+        requiresExecutiveApproval,
+        requiresReviewBy: "pho_phong",
+        deliverToUser: userDirectToDeputy,
+      }),
+    );
     currentOwner = "pho_phong";
   }
   if (!userDirectToDeputy && registry.byId[currentOwner]?.reportsTo === "truong_phong") {
@@ -467,15 +688,17 @@ function buildHierarchyPlan(registry, fromAgentId, message, taskType) {
 
   if (steps.length === 0) {
     const best = chooseBestAllowedChild(registry, fromAgentId, message, taskType);
-      steps.push({
+    steps.push({
+      ...createStep({
         type: "delegate",
         from: fromAgentId,
         to: best.agent.id,
         taskType,
         message,
-        score: best.score,
         requiresExecutiveApproval,
-      });
+      }),
+      score: best.score,
+    });
   }
 
   return {

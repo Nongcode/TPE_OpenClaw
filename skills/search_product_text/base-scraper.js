@@ -130,6 +130,60 @@ function normalizeSearchText(value) {
     .trim();
 }
 
+function cleanExtractedKeyword(value) {
+  return String(value || "")
+    .replace(/^["'“”‘’\s]+/, "")
+    .replace(/["'“”‘’\s]+$/, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+export function extractProductIntentKeyword(source) {
+  const text = String(source || "").replace(/\s+/g, " ").trim();
+  if (!text) {
+    return "";
+  }
+
+  const labeledPatterns = [
+    /YEU_CAU_GOC_SAN_PHAM:\s*([^.\n]+?)(?=\s*(?:URL_SAN_PHAM|TEN_SAN_PHAM|DANH_MUC|THONG_SO|THU_MUC_ANH_GOC|$))/i,
+    /KEYWORD_SACH:\s*([^.\n]+?)(?=\s*(?:URL_SAN_PHAM|TEN_SAN_PHAM|DANH_MUC|THONG_SO|THU_MUC_ANH_GOC|$))/i,
+    /TEN_SAN_PHAM:\s*([^.\n]+?)(?=\s*(?:URL_SAN_PHAM|DANH_MUC|THONG_SO|THU_MUC_ANH_GOC|$))/i,
+    /keyword sach(?: chi gom ten san pham)?\s*:\s*([^?\n]+?)(?=\s*(?:URL|Chat lieu|Kich thuoc|Doi tuong|CTA|$))/i,
+    /keyword sạch(?: chỉ gồm tên sản phẩm)?\s*:\s*([^?\n]+?)(?=\s*(?:URL|Chất liệu|Kích thước|Đối tượng|CTA|$))/i,
+    /Yêu cầu gốc sản phẩm\s*:\s*([^?\n]+?)(?=\s*(?:URL|Tên sản phẩm|Danh mục|Thông số|$))/i,
+    /Tên sản phẩm(?: chuẩn)?\s*:\s*([^?\n]+?)(?=\s*(?:URL|Chất liệu|Kích thước|Đối tượng|CTA|$))/i,
+    /sản phẩm(?: chuẩn)?\s*:\s*([^?\n]+?)(?=\s*(?:URL|Chất liệu|Kích thước|Đối tượng|CTA|$))/i,
+  ];
+
+  for (const pattern of labeledPatterns) {
+    const match = text.match(pattern);
+    if (match?.[1]) {
+      const candidate = cleanExtractedKeyword(match[1]);
+      if (candidate) {
+        return candidate;
+      }
+    }
+  }
+
+  const inlinePatterns = [
+    /quảng bá sản phẩm\s+(.+?)(?=\s+(?:để|de|và|va|với|voi|trình|review|duyệt|đăng|dang|yêu cầu:|yeu cau:|$))/i,
+    /viết bài(?: Facebook)?(?: quảng bá)?\s+(?:cho|về)\s+(.+?)(?=\s+(?:để|de|và|va|với|voi|trình|review|duyệt|đăng|dang|yêu cầu:|yeu cau:|$))/i,
+    /cho\s+(.+?)(?=\s+(?:để|de|và|va|với|voi|trình|review|duyệt|đăng|dang|yêu cầu:|yeu cau:|$))/i,
+  ];
+
+  for (const pattern of inlinePatterns) {
+    const match = text.match(pattern);
+    if (match?.[1]) {
+      const candidate = cleanExtractedKeyword(match[1]);
+      if (candidate && candidate.length <= 160) {
+        return candidate;
+      }
+    }
+  }
+
+  return cleanExtractedKeyword(text);
+}
+
 function tokenizeSearchText(value) {
   return normalizeSearchText(value)
     .split(/\s+/)
@@ -143,9 +197,10 @@ function extractModelTokens(value) {
 }
 
 function buildKeywordSignals(keyword, categoryHint = "") {
-  const normalizedKeyword = normalizeSearchText(keyword);
-  const tokens = tokenizeSearchText(keyword);
-  const modelTokens = extractModelTokens(keyword);
+  const effectiveKeyword = extractProductIntentKeyword(keyword);
+  const normalizedKeyword = normalizeSearchText(effectiveKeyword);
+  const tokens = tokenizeSearchText(effectiveKeyword);
+  const modelTokens = extractModelTokens(effectiveKeyword);
   const categoryHints = [];
   const addCategoryHint = (value) => {
     const normalized = normalizeSearchText(value);
@@ -213,6 +268,20 @@ function scoreProductCandidate(candidate, keywordSignals) {
     score += Math.min(candidate.title.length, 60) / 60;
   }
   return score;
+}
+
+function hasStrongKeywordMatch(candidate, keywordSignals) {
+  const haystack = normalizeSearchText(
+    `${candidate.title || ""} ${candidate.url || ""} ${candidate.category?.name || ""}`,
+  );
+  const matchedTokens = keywordSignals.tokens.filter((token) => haystack.includes(token));
+  if (keywordSignals.modelTokens.length > 0) {
+    return matchedTokens.length >= 1;
+  }
+  if (keywordSignals.tokens.length <= 2) {
+    return matchedTokens.length >= keywordSignals.tokens.length;
+  }
+  return matchedTokens.length >= Math.max(2, Math.ceil(keywordSignals.tokens.length * 0.6));
 }
 
 async function collectProductCandidates(page) {
@@ -289,9 +358,76 @@ async function collectProductCandidates(page) {
   });
 }
 
+async function collectSearchEngineCandidates(page, targetSite) {
+  return await page.evaluate(
+    ({ currentTargetSite }) => {
+      const normalizeCandidate = (rawHref) => {
+        if (!rawHref) return "";
+        try {
+          const parsed = new URL(rawHref, "https://www.google.com");
+          if (parsed.hostname.includes("google.") && parsed.pathname === "/url") {
+            return parsed.searchParams.get("q") || "";
+          }
+          if (parsed.hostname.includes("duckduckgo.com") && parsed.pathname.startsWith("/l/")) {
+            return parsed.searchParams.get("uddg") || "";
+          }
+          return parsed.href;
+        } catch {
+          return "";
+        }
+      };
+
+      const cleanText = (value) =>
+        String(value || "")
+          .replace(/\u00A0/g, " ")
+          .replace(/\s+/g, " ")
+          .trim();
+
+      const results = [];
+      const seen = new Set();
+      for (const anchor of Array.from(document.querySelectorAll("a[href]"))) {
+        const rawHref = anchor.getAttribute("href") || "";
+        const candidateUrl = normalizeCandidate(rawHref);
+        if (!candidateUrl || seen.has(candidateUrl)) {
+          continue;
+        }
+        try {
+          const parsed = new URL(candidateUrl);
+          const hostname = parsed.hostname;
+          if (
+            !(hostname === currentTargetSite || hostname.endsWith(`.${currentTargetSite}`)) ||
+            !/\/shop\/(?!category\/)(?!cart(?:\/|$))(?!wishlist(?:\/|$))(?!all-brands(?:\/|$))/.test(
+              parsed.pathname,
+            )
+          ) {
+            continue;
+          }
+        } catch {
+          continue;
+        }
+
+        const heading =
+          cleanText(anchor.closest("div, li, article")?.querySelector("h3, h2")?.textContent || "") ||
+          cleanText(anchor.getAttribute("title") || "") ||
+          cleanText(anchor.textContent || "");
+
+        results.push({
+          url: candidateUrl,
+          title: heading,
+          category: null,
+        });
+        seen.add(candidateUrl);
+      }
+      return results;
+    },
+    { currentTargetSite: targetSite },
+  );
+}
+
 export class BaseScraper {
   constructor(options = {}) {
     this.keyword = String(options.keyword || "").trim();
+    this.effectiveKeyword = extractProductIntentKeyword(this.keyword) || this.keyword;
     this.targetSite = String(options.target_site || options.targetSite || "uptek.vn").trim();
     this.categoryHint = String(options.category_hint || options.categoryHint || "").trim();
     this.browserPath = String(options.browser_path || options.browserPath || "").trim();
@@ -338,54 +474,30 @@ export class BaseScraper {
     }
   }
 
-  async findFirstResultUrl(page, engineName) {
+  async findFirstResultUrl(page, engineName, keywordSignals) {
     await page.waitForLoadState("domcontentloaded");
     if (engineName === "google") {
       await this.dismissGoogleConsentIfNeeded(page);
     }
     await page.waitForTimeout(1200);
 
-    const productUrl = await page.evaluate(
-      ({ currentTargetSite }) => {
-        const normalizeCandidate = (rawHref) => {
-          if (!rawHref) return "";
-          try {
-            const parsed = new URL(rawHref, "https://www.google.com");
-            if (parsed.hostname.includes("google.") && parsed.pathname === "/url") {
-              return parsed.searchParams.get("q") || "";
-            }
-            if (parsed.hostname.includes("duckduckgo.com") && parsed.pathname.startsWith("/l/")) {
-              return parsed.searchParams.get("uddg") || "";
-            }
-            return parsed.href;
-          } catch {
-            return "";
-          }
-        };
+    const rankedCandidates = (await collectSearchEngineCandidates(page, this.targetSite))
+      .map((candidate) => ({
+        ...candidate,
+        score: scoreProductCandidate(candidate, keywordSignals),
+      }))
+      .sort((left, right) => right.score - left.score);
 
-        const anchors = Array.from(document.querySelectorAll("a[href]"));
-        for (const anchor of anchors) {
-          const rawHref = anchor.getAttribute("href") || "";
-          const candidate = normalizeCandidate(rawHref);
-          if (!candidate) continue;
-          try {
-            const parsedCandidate = new URL(candidate);
-            const hostname = parsedCandidate.hostname;
-            if (
-              (hostname === currentTargetSite || hostname.endsWith(`.${currentTargetSite}`)) &&
-              /\/shop\/(?!category\/)/.test(parsedCandidate.pathname)
-            ) {
-              return parsedCandidate.href;
-            }
-          } catch {}
-        }
-        return "";
-      },
-      { currentTargetSite: this.targetSite },
-    );
+    if (this.debug) {
+      for (const candidate of rankedCandidates.slice(0, 5)) {
+        this.debugLog(
+          `search-engine candidate score=${candidate.score} title=${candidate.title || "<empty>"} url=${candidate.url}`,
+        );
+      }
+    }
 
-    if (isProductUrl(productUrl, this.targetSite)) {
-      return productUrl;
+    if (rankedCandidates[0] && rankedCandidates[0].score > 0 && hasStrongKeywordMatch(rankedCandidates[0], keywordSignals)) {
+      return rankedCandidates[0].url;
     }
 
     const fallbackAnchors = await page.locator("a[href]").evaluateAll((nodes) =>
@@ -423,15 +535,15 @@ export class BaseScraper {
       let productUrl = "";
       let matchedCandidate = null;
       let lastError = null;
-      const keywordSignals = buildKeywordSignals(this.keyword, this.categoryHint);
+      const keywordSignals = buildKeywordSignals(this.effectiveKeyword, this.categoryHint);
       for (const engine of SEARCH_ENGINES) {
         try {
-          const searchUrl = engine.buildUrl(this.targetSite, this.keyword);
+          const searchUrl = engine.buildUrl(this.targetSite, this.effectiveKeyword);
           this.debugLog(`${engine.name} search url=${searchUrl}`);
           await page.goto(searchUrl, {
             waitUntil: "domcontentloaded",
           });
-          productUrl = await this.findFirstResultUrl(page, engine.name);
+          productUrl = await this.findFirstResultUrl(page, engine.name, keywordSignals);
           this.debugLog(`matched product url via ${engine.name}=${productUrl}`);
           break;
         } catch (error) {
@@ -534,7 +646,7 @@ export class BaseScraper {
             }
           }
 
-          if (ranked[0] && ranked[0].score > 0) {
+          if (ranked[0] && ranked[0].score > 0 && hasStrongKeywordMatch(ranked[0], keywordSignals)) {
             matchedCandidate = ranked[0];
             productUrl = ranked[0].url;
             this.debugLog(`matched product url via shop crawl=${productUrl}`);

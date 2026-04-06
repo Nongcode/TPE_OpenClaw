@@ -7,6 +7,7 @@ Environment variables
 - `VERIFY_TOKEN` (required for webhook setup): verify token you set in Meta Webhooks
 - `FB_APP_SECRET` (recommended): App secret for `x-hub-signature-256` verification
 - `OPENCLAW_BIN` (optional): openclaw CLI binary path (default `openclaw`)
+- `OPENCLAW_GATEWAY_HTTP_URL` (optional): explicit HTTP fallback endpoint, e.g. `http://127.0.0.1:18789/v1/chat/completions`
 - `PORT` (optional): server port (default `3000`)
 
 Run locally

@@ -756,7 +756,7 @@ export function createExecTool(
                   type: "text",
                   text: `${getWarningText()}${outcome.aggregated || "(no output)"}`,
                 },
-                ...collectExecMediaBlocks(outcome.aggregated),
+                ...(collectExecMediaBlocks(outcome.aggregated) as any[]),
               ],
               details: {
                 status: "completed",
