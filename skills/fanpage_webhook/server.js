@@ -69,6 +69,24 @@ function resolveGatewayUrl() {
   return process.env.OPENCLAW_GATEWAY_URL || `ws://127.0.0.1:${port}`;
 }
 
+function resolveGatewayHttpUrl() {
+  if (process.env.OPENCLAW_GATEWAY_HTTP_URL) {
+    return String(process.env.OPENCLAW_GATEWAY_HTTP_URL).trim();
+  }
+  const gatewayUrl = resolveGatewayUrl();
+  try {
+    const parsed = new URL(gatewayUrl);
+    if (parsed.protocol === 'ws:') parsed.protocol = 'http:';
+    else if (parsed.protocol === 'wss:') parsed.protocol = 'https:';
+    parsed.pathname = '/v1/chat/completions';
+    parsed.search = '';
+    parsed.hash = '';
+    return parsed.toString();
+  } catch {
+    return gatewayUrl.replace(/^ws:/i, 'http:').replace(/^wss:/i, 'https:');
+  }
+}
+
 function resolveGatewayToken() {
   if (process.env.OPENCLAW_GATEWAY_TOKEN) {
     return String(process.env.OPENCLAW_GATEWAY_TOKEN).trim();
@@ -120,6 +138,19 @@ const jobQueue = [];
 let processingCount = 0;
 const senderHistory = new Map(); // senderPsid -> [timestamps]
 const globalSentTimestamps = [];
+const lastErrors = [];
+
+function recordError(stage, error, extra = {}) {
+  const entry = {
+    at: new Date().toISOString(),
+    stage,
+    message: error instanceof Error ? error.message : String(error),
+    ...extra,
+  };
+  lastErrors.unshift(entry);
+  if (lastErrors.length > 50) lastErrors.length = 50;
+  return entry;
+}
 
 function cleanSenderHistory(sender) {
   const now = Date.now();
@@ -151,6 +182,13 @@ function enqueueJob(job) {
 function scheduleRetry(job, delayMs, err) {
   job.attempts = (job.attempts || 0) + 1;
   job.lastError = err ? String(err).slice(0, 1000) : null;
+  if (err) {
+    recordError('job.retry', err, {
+      jobId: job.id,
+      senderPsid: job.senderPsid,
+      attempts: job.attempts,
+    });
+  }
   if (job.attempts > MAX_RETRIES) {
     job.failed = true;
     console.warn(`Job ${job.id} failed after ${job.attempts} attempts`);
@@ -175,7 +213,10 @@ async function processQueue() {
     // remove from queue
     jobQueue.splice(i, 1);
     // fire-and-forget
-    processJob(job).catch((e) => console.error('processJob error', e));
+    processJob(job).catch((e) => {
+      recordError('processJob', e, { jobId: job.id, senderPsid: job.senderPsid });
+      console.error('processJob error', e);
+    });
   }
 }
 
@@ -205,7 +246,7 @@ async function processJob(job) {
     // Execute AI call
     let aiReply;
     try {
-      aiReply = await callOpenClaw(job.message);
+      aiReply = await callOpenClaw(job.message, job.senderPsid);
     } catch (err) {
       console.error(`callOpenClaw failed for job ${job.id}:`, err?.message || err);
       scheduleRetry(job, BASE_RETRY_MS * Math.pow(2, job.attempts), err?.message || err);
@@ -247,6 +288,10 @@ app.get('/admin/metrics', (req, res) => {
   res.json({ processingCount, queueLength: jobQueue.length, recentGlobalSent: globalSentTimestamps.length });
 });
 
+app.get('/admin/last-errors', (req, res) => {
+  res.json({ count: lastErrors.length, errors: lastErrors });
+});
+
 function verifySignature(req) {
   if (!FB_APP_SECRET) return true; // skip verification if secret not set (but recommended)
   const signatureHeader = req.headers['x-hub-signature-256'] || req.headers['x-hub-signature'];
@@ -282,6 +327,12 @@ app.get('/webhook', (req, res) => {
 app.post('/webhook', async (req, res) => {
   // Verify signature if secret provided
   if (FB_APP_SECRET && !verifySignature(req)) {
+    recordError('webhook.signature', 'Invalid signature', {
+      headers: {
+        'x-hub-signature-256': req.headers['x-hub-signature-256'] || null,
+        'x-hub-signature': req.headers['x-hub-signature'] || null,
+      },
+    });
     console.warn('Invalid signature on incoming request');
     return res.sendStatus(403);
   }
@@ -315,10 +366,15 @@ app.post('/webhook', async (req, res) => {
                           nextAttemptAt: Date.now(),
                         });
                       } catch (e) {
+                        recordError('webhook.enqueue', e, {
+                          senderPsid,
+                          customerMessage,
+                        });
                         console.error('Failed to enqueue job', e?.message || e);
                       }
           }
         } catch (e) {
+          recordError('webhook.iteration', e);
           console.error('Error iterating messaging event', e?.message || e);
         }
       }
@@ -328,11 +384,74 @@ app.post('/webhook', async (req, res) => {
   }
 });
 
-async function callOpenClaw(message) {
+function buildAgentSessionKey(senderPsid) {
+  const normalizedSender = String(senderPsid || 'unknown').replace(/[^a-zA-Z0-9:_-]/g, '_');
+  return `agent:${OPENCLAW_AGENT_ID}:facebook:${normalizedSender}`;
+}
+
+function extractChatCompletionText(data) {
+  const choices = Array.isArray(data?.choices) ? data.choices : [];
+  for (const choice of choices) {
+    const content = choice?.message?.content;
+    if (typeof content === 'string' && content.trim()) {
+      return content.trim();
+    }
+    if (Array.isArray(content)) {
+      const text = content
+        .map((part) => {
+          if (typeof part === 'string') return part;
+          if (part?.type === 'text' && typeof part?.text === 'string') return part.text;
+          return '';
+        })
+        .filter(Boolean)
+        .join('\n')
+        .trim();
+      if (text) return text;
+    }
+  }
+  return '';
+}
+
+async function callOpenClawViaHttp(message, senderPsid, gatewayToken) {
+  const sessionKey = buildAgentSessionKey(senderPsid);
+  const response = await fetch(resolveGatewayHttpUrl(), {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${gatewayToken}`,
+      'Content-Type': 'application/json',
+      'x-openclaw-agent-id': OPENCLAW_AGENT_ID,
+      'x-openclaw-session-key': sessionKey,
+    },
+    body: JSON.stringify({
+      model: `openclaw:${OPENCLAW_AGENT_ID}`,
+      user: `facebook:${senderPsid}`,
+      messages: [{ role: 'user', content: message }],
+    }),
+  });
+
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    recordError('openclaw.http', `HTTP fallback failed (${response.status})`, {
+      senderPsid,
+      sessionKey,
+      responseStatus: response.status,
+      responseBody: data,
+    });
+    throw new Error(
+      `HTTP fallback failed (${response.status}): ${JSON.stringify(data).slice(0, 500)}`
+    );
+  }
+
+  const text = extractChatCompletionText(data);
+  return text || 'Xin loi, hien tai toi chua co cau tra loi.';
+}
+
+async function callOpenClaw(message, senderPsid) {
   const gatewayToken = resolveGatewayToken();
   if (!gatewayToken) {
     throw new Error('Missing OPENCLAW_GATEWAY_TOKEN and no token found in openclaw.json');
   }
+  const sessionKey = buildAgentSessionKey(senderPsid);
   try {
     const { callGateway } = await loadGatewayCallModule();
     const result = await callGateway({
@@ -342,7 +461,7 @@ async function callOpenClaw(message) {
       params: {
         message,
         agentId: OPENCLAW_AGENT_ID,
-        sessionKey: `agent:${OPENCLAW_AGENT_ID}:main`,
+        sessionKey,
         idempotencyKey: crypto.randomUUID(),
       },
       expectFinal: true,
@@ -378,8 +497,24 @@ async function callOpenClaw(message) {
 
     return out || 'Xin lỗi, tôi không có câu trả lời ngay.';
   } catch (err) {
-    console.error('callOpenClaw failed:', err?.message || err);
-    throw err;
+    console.warn(
+      'callOpenClaw via websocket failed, falling back to HTTP:',
+      err?.message || err
+    );
+    try {
+      return await callOpenClawViaHttp(message, senderPsid, gatewayToken);
+    } catch (fallbackErr) {
+      recordError('openclaw.ws+http', fallbackErr, {
+        senderPsid,
+        sessionKey,
+        websocketError: err?.message || String(err),
+      });
+      console.error('callOpenClaw failed via websocket and HTTP fallback:', {
+        websocket: err?.message || String(err),
+        http: fallbackErr?.message || String(fallbackErr),
+      });
+      throw fallbackErr;
+    }
   }
 }
 
@@ -399,9 +534,17 @@ async function sendMetaMessage(senderPsid, text) {
       body: JSON.stringify(requestBody),
     });
     const data = await resp.json();
-    if (!resp.ok) console.error('Meta API error:', resp.status, data);
+    if (!resp.ok) {
+      recordError('meta.send', `Meta API error (${resp.status})`, {
+        senderPsid,
+        responseStatus: resp.status,
+        responseBody: data,
+      });
+      console.error('Meta API error:', resp.status, data);
+    }
     return data;
   } catch (err) {
+    recordError('meta.fetch', err, { senderPsid });
     console.error('Failed to send message to Meta:', err?.message || err);
     throw err;
   }
