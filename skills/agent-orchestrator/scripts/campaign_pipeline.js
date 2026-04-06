@@ -11,10 +11,10 @@ const { normalizeText } = require("./common");
 const REPO_ROOT = path.resolve(__dirname, "..", "..", "..");
 
 const DEFAULT_MEDIA_CONFIG = {
-  browser_path: "C:/Program Files/CocCoc/Browser/Application/browser.exe",
-  user_data_dir: "C:/Users/Administrator/AppData/Local/CocCoc/Browser/User Data",
+  browser_path: "C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe",
+  user_data_dir: "C:/Users/PHAMDUCLONG/AppData/Local/Microsoft/Edge/User Data/Default",
   profile_name: "Default",
-  target_gemini_image_url: "https://gemini.google.com/app/3f383fca1153c26a",
+  target_gemini_image_url: "https://gemini.google.com/app/f656f2fb0ee3ee9d",
   target_gemini_video_url: "https://gemini.google.com/app",
   page_id: "643048852218433",
   access_token:
