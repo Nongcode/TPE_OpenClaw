@@ -1,4 +1,4 @@
-import { mkdir } from "node:fs/promises";
+import { access, mkdir } from "node:fs/promises";
 import path from "node:path";
 import { chromium } from "playwright-core";
 
@@ -6,7 +6,8 @@ const DEFAULTS = {
   browser_path: "C:/Program Files/CocCoc/Browser/Application/browser.exe",
   user_data_dir: "C:/Users/Administrator/AppData/Local/CocCoc/Browser/User Data",
   profile_name: "Default",
-  target_gemini_url: "https://gemini.google.com/app/2a5b61cc5f1a0e3b",
+  target_gemini_url: "https://gemini.google.com/app",
+  image_paths: [],
   timeout_ms: 480000,
   retry_count: 2,
   dry_run: false,
@@ -20,6 +21,19 @@ function printResult(result) {
   process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
 }
 
+function parseList(value) {
+  if (Array.isArray(value)) {
+    return value.map((item) => String(item).trim()).filter(Boolean);
+  }
+  if (typeof value === "string") {
+    return value
+      .split(/\r?\n|;|,/g)
+      .map((item) => item.trim())
+      .filter(Boolean);
+  }
+  return [];
+}
+
 function parseArgs(argv) {
   const params = { ...DEFAULTS };
   const logs = [];
@@ -31,6 +45,7 @@ function parseArgs(argv) {
       return {
         ...params,
         ...parsed,
+        image_paths: parseList(parsed.image_paths),
         retry_count: Number.isFinite(Number(parsed.retry_count)) ? Number(parsed.retry_count) : params.retry_count,
         timeout_ms: Number.isFinite(Number(parsed.timeout_ms)) ? Number(parsed.timeout_ms) : params.timeout_ms,
         dry_run: parsed.dry_run === true || parsed["dry-run"] === true,
@@ -53,6 +68,11 @@ function parseArgs(argv) {
 
     if (token === "--video_prompt") {
       params.video_prompt = next;
+      index += 1;
+      continue;
+    }
+    if (token === "--image_paths") {
+      params.image_paths = parseList(next);
       index += 1;
       continue;
     }
@@ -99,6 +119,12 @@ function validateInput(params) {
   if (typeof params.user_data_dir !== "string" || params.user_data_dir.trim() === "") missing.push("user_data_dir");
   if (typeof params.profile_name !== "string" || params.profile_name.trim() === "") missing.push("profile_name");
   return missing;
+}
+
+async function ensureReadableFiles(pathsToCheck) {
+  for (const filePath of pathsToCheck) {
+    await access(filePath);
+  }
 }
 
 function nowStamp() {
@@ -218,7 +244,223 @@ async function setPromptRobust(page, prompt, logs) {
   logs.push(`[step3] Prompt set and verified on: ${selector}`);
 }
 
-async function submitPrompt(page, logs) {
+async function openComposerMenu(page, logs, stepLabel) {
+  const menuSelectors = [
+    'button.menu-button',
+    'button[aria-label*="prompt input" i]',
+    'button[aria-label*="\u00f4 nh\u1eadp n\u1ed9i dung"]',
+    'button[aria-label*="Ã´ nháº­p ná»™i dung"]',
+  ];
+
+  for (const selector of menuSelectors) {
+    try {
+      const button = page.locator(selector).first();
+      await button.waitFor({ state: 'visible', timeout: 2000 });
+      await button.click({ force: true, timeout: 3000 });
+      await page.waitForTimeout(500);
+      logs.push(`[${stepLabel}] Opened upload/tools menu via ${selector}`);
+      return;
+    } catch {}
+  }
+
+  throw new Error('Cannot open Gemini upload/tools menu');
+}
+
+async function selectVideoToolMode(page, logs) {
+  await openComposerMenu(page, logs, 'step2');
+
+  const toolSelectors = [
+    'button:has-text("T\u1ea1o video")',
+    'button.toolbox-drawer-item-list-button:has-text("T\u1ea1o video")',
+    'button:has-text("Táº¡o video")',
+    'button.toolbox-drawer-item-list-button:has-text("Táº¡o video")',
+  ];
+
+  for (const selector of toolSelectors) {
+    try {
+      const button = page.locator(selector).first();
+      await button.waitFor({ state: 'visible', timeout: 2000 });
+      await button.click({ force: true, timeout: 3000 });
+      await page.waitForTimeout(300);
+      logs.push(`[step2] Selected Gemini tool mode via ${selector}`);
+      return;
+    } catch {}
+  }
+
+  throw new Error('Cannot select Gemini video tool mode');
+}
+
+async function uploadReferencesIfAny(page, imagePaths, logs) {
+  if (imagePaths.length === 0) {
+    logs.push("[step2] No reference images provided, skip upload");
+    return;
+  }
+
+  const uploadViaAnyFileInput = async (label) => {
+    const fileInputs = page.locator('input[type="file"]');
+    const count = await fileInputs.count().catch(() => 0);
+    for (let index = 0; index < count; index += 1) {
+      try {
+        await fileInputs.nth(index).setInputFiles(imagePaths, { timeout: 15000 });
+        logs.push(
+          `[step2] Uploaded ${imagePaths.length} reference image(s) via ${label} file input #${index + 1}`,
+        );
+        return true;
+      } catch {}
+    }
+    return false;
+  };
+
+  const directInput = page.locator('input[type="file"]').first();
+  if (await uploadViaAnyFileInput("direct")) {
+    return;
+  }
+  try {
+    await directInput.waitFor({ state: "attached", timeout: 1500 });
+    await directInput.setInputFiles(imagePaths, { timeout: 15000 });
+    logs.push(`[step2] Uploaded ${imagePaths.length} reference image(s) via direct file input`);
+    return;
+  } catch {}
+
+  const visibleChooserSelectors = [
+    'button[aria-label^="T\u1ea3i t\u1ec7p l\u00ean"]',
+    'button:has-text("T\u1ea3i t\u1ec7p l\u00ean")',
+    '[role="menuitem"]:has-text("T\u1ea3i t\u1ec7p l\u00ean")',
+    'button[aria-label*="Upload" i]',
+    'button:has-text("Upload")',
+    '[role="menuitem"]:has-text("Upload")',
+    'button:has-text("Them tep")',
+    'button:has-text("Thêm tệp")',
+    'button:has-text("Them anh")',
+    'button:has-text("Thêm ảnh")',
+    'button:has-text("Upload files")',
+    '[role="menuitem"]:has-text("Upload files")',
+  ];
+
+  for (const selector of visibleChooserSelectors) {
+    try {
+      const trigger = page.locator(selector).first();
+      if (!(await trigger.isVisible({ timeout: 500 }).catch(() => false))) {
+        continue;
+      }
+      const chooserPromise = page.waitForEvent("filechooser", { timeout: 10000 });
+      await trigger.click({ force: true, timeout: 5000 });
+      const chooser = await chooserPromise;
+      await chooser.setFiles(imagePaths);
+      logs.push(`[step2] Uploaded ${imagePaths.length} reference image(s) via visible file chooser ${selector}`);
+      return;
+    } catch {}
+  }
+
+  const menuSelectors = [
+    'button.menu-button',
+    'button[aria-label*="prompt input" i]',
+    'button[aria-label*="\u00f4 nh\u1eadp n\u1ed9i dung"]',
+    'button[aria-label*="ô nhập nội dung"]',
+  ];
+
+  for (const selector of menuSelectors) {
+    try {
+      const button = page.locator(selector).first();
+      await button.waitFor({ state: "visible", timeout: 2000 });
+      await button.click({ force: true, timeout: 3000 });
+      await page.waitForTimeout(500);
+      logs.push(`[step2] Opened upload/tools menu via ${selector}`);
+      break;
+    } catch {}
+  }
+
+  const chooserSelectors = [
+    'button[aria-label^="T\u1ea3i t\u1ec7p l\u00ean"]',
+    'button:has-text("T\u1ea3i t\u1ec7p l\u00ean")',
+    '[role="menuitem"]:has-text("T\u1ea3i t\u1ec7p l\u00ean")',
+    'button[aria-label*="Upload" i]',
+    'button:has-text("Upload")',
+    '[role="menuitem"]:has-text("Upload")',
+    'button:has-text("Them tep")',
+    'button:has-text("ThÃªm tá»‡p")',
+    '[role="menuitem"]:has-text("Them tep")',
+    '[role="menuitem"]:has-text("ThÃªm tá»‡p")',
+    'button:has-text("Them anh")',
+    'button:has-text("ThÃªm áº£nh")',
+    'button:has-text("Tải tệp lên")',
+    '[role="menuitem"]:has-text("Tải tệp lên")',
+    'button:has-text("Upload files")',
+    '[role="menuitem"]:has-text("Upload files")',
+  ];
+
+  for (const selector of chooserSelectors) {
+    try {
+      const trigger = page.locator(selector).first();
+      await trigger.waitFor({ state: "visible", timeout: 2000 });
+      const chooserPromise = page.waitForEvent("filechooser", { timeout: 10000 });
+      await trigger.click({ force: true, timeout: 5000 });
+      const chooser = await chooserPromise;
+      await chooser.setFiles(imagePaths);
+      logs.push(`[step2] Uploaded ${imagePaths.length} reference image(s) via file chooser ${selector}`);
+      return;
+    } catch {}
+  }
+
+  if (await uploadViaAnyFileInput("delayed")) {
+    return;
+  }
+
+  const quotaMessage = await detectVideoQuotaLimit(page);
+  if (quotaMessage) {
+    throw new Error(`QUOTA_REACHED: ${quotaMessage}`);
+  }
+
+  throw new Error("Cannot find a working Gemini upload control for reference images");
+}
+
+async function getUserQueryCount(page) {
+  return await page.locator('user-query').count().catch(() => 0);
+}
+
+async function waitForEnabled(locator, timeoutMs) {
+  const startedAt = Date.now();
+  while (Date.now() - startedAt < timeoutMs) {
+    if (await locator.isEnabled().catch(() => false)) {
+      return;
+    }
+    await locator.page().waitForTimeout(250);
+  }
+  throw new Error(`Button stayed disabled for ${timeoutMs}ms`);
+}
+
+async function verifyPromptSubmitted(page, beforeUserCount, logs) {
+  const startedAt = Date.now();
+
+  while (Date.now() - startedAt < 15000) {
+    const currentUserCount = await getUserQueryCount(page);
+    if (currentUserCount > beforeUserCount) {
+      logs.push(`[step4] Prompt submission confirmed by user-query count ${beforeUserCount} -> ${currentUserCount}`);
+      return;
+    }
+
+    try {
+      const { locator } = await locatePromptEditor(page);
+      const handle = await locator.elementHandle();
+      if (handle) {
+        const currentText = normalizeText(await page.evaluate((el) => {
+          if (el.isContentEditable) return el.innerText || el.textContent || '';
+          return el.value || '';
+        }, handle));
+        if (!currentText) {
+          logs.push('[step4] Prompt submission confirmed by cleared editor');
+          return;
+        }
+      }
+    } catch {}
+
+    await page.waitForTimeout(400);
+  }
+
+  throw new Error('Prompt submit did not create a new Gemini user turn');
+}
+
+async function submitPrompt(page, logs, beforeUserCount) {
   const submitCandidates = [
     'button.send-button',
     'button[aria-label="Gửi tin nhắn"]',
@@ -230,14 +472,17 @@ async function submitPrompt(page, logs) {
     try {
       const button = page.locator(selector).first();
       await button.waitFor({ state: 'visible', timeout: 3000 });
+      await waitForEnabled(button, 15000);
       await button.click({ force: true, timeout: 3000 });
       logs.push(`[step4] Prompt submitted by button: ${selector}`);
+      await verifyPromptSubmitted(page, beforeUserCount, logs);
       return;
     } catch {}
   }
 
   await page.keyboard.press('Enter');
   logs.push('[step4] Prompt submitted by Enter key');
+  await verifyPromptSubmitted(page, beforeUserCount, logs);
 }
 
 async function getVideoMenuCount(page) {
@@ -246,9 +491,12 @@ async function getVideoMenuCount(page) {
 
 async function detectQuotaMessage(page) {
   const messageLocators = [
+    page.locator('[role="alert"]').last(),
+    page.locator('[aria-live="polite"]').last(),
     page.locator('message-content').last(),
     page.locator('.model-response-text').last(),
     page.locator('model-response').last(),
+    page.locator('body').first(),
   ];
 
   for (const locator of messageLocators) {
@@ -266,6 +514,39 @@ async function detectQuotaMessage(page) {
   }
 
   return null;
+}
+
+async function detectVideoQuotaLimit(page) {
+  try {
+    const text = await page.locator('body').innerText({ timeout: 1000 });
+    const normalized = normalizeText(text).toLowerCase();
+    if (!normalized) {
+      return null;
+    }
+    const folded = normalized.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+    const limitHints = [
+      'toi da',
+      'gioi han',
+      'het luot',
+      'limit',
+      'quota',
+      'reached',
+      'khong the tao them',
+      'ngay mai',
+      'tomorrow',
+      'wait until tomorrow',
+      'thu lai vao ngay mai',
+      'quay lai vao ngay mai',
+      '3 video',
+      'three videos',
+    ];
+    const mediaHints = ['video', 'veo'];
+    const hasLimit = limitHints.some((kw) => folded.includes(kw) || normalized.includes(kw));
+    const hasMedia = mediaHints.some((kw) => folded.includes(kw) || normalized.includes(kw));
+    return hasLimit && hasMedia ? text : null;
+  } catch {
+    return null;
+  }
 }
 
 async function waitForFreshVideoMenu(page, beforeMenuCount, logs, timeoutMs) {
@@ -386,6 +667,8 @@ async function downloadFreshVideo(page, freshTarget, outputDir, logs) {
   const profileName = parsed.profile_name.trim();
   const targetGeminiUrl = parsed.target_gemini_url.trim();
   const videoPrompt = parsed.video_prompt.trim();
+  const rawImagePaths = parseList(parsed.image_paths).map((item) => path.normalize(item));
+  const imagePaths = rawImagePaths.slice(0, 1);
   const timeoutMs = Number.isFinite(Number(parsed.timeout_ms)) ? Math.max(60000, Number(parsed.timeout_ms)) : DEFAULTS.timeout_ms;
   const retryCount = Number.isFinite(Number(parsed.retry_count)) ? Math.max(1, Math.min(4, Math.floor(Number(parsed.retry_count)))) : DEFAULTS.retry_count;
 
@@ -394,12 +677,16 @@ async function downloadFreshVideo(page, freshTarget, outputDir, logs) {
 
   logs.push(`[input] target_gemini_url=${targetGeminiUrl}`);
   logs.push(`[input] profile_name=${profileName}`);
+  logs.push(`[input] reference_image_count=${imagePaths.length}`);
+  if (rawImagePaths.length > imagePaths.length) {
+    logs.push(`[input] Only the first reference image will be uploaded (${imagePaths[0]}).`);
+  }
 
   if (parsed.dry_run) {
     printResult(buildResult({
       success: true,
       message: 'Dry run completed.',
-      data: { video_prompt: videoPrompt, target_gemini_url: targetGeminiUrl },
+      data: { video_prompt: videoPrompt, target_gemini_url: targetGeminiUrl, image_paths: imagePaths },
       logs,
     }));
     return;
@@ -408,10 +695,15 @@ async function downloadFreshVideo(page, freshTarget, outputDir, logs) {
   let context;
 
   try {
+    if (imagePaths.length > 0) {
+      await ensureReadableFiles(imagePaths);
+      logs.push("[step0] Reference images verified");
+    }
+
     logs.push('[step1] Opening Edge browser...');
     context = await chromium.launchPersistentContext(userDataDir, {
       executablePath: browserPath,
-      headless: true,
+      headless: false,
       acceptDownloads: true,
       args: [`--profile-directory=${profileName}`],
       viewport: { width: 1440, height: 900 },
@@ -421,6 +713,18 @@ async function downloadFreshVideo(page, freshTarget, outputDir, logs) {
     await page.goto(targetGeminiUrl, { waitUntil: 'domcontentloaded', timeout: 45000 });
     await page.waitForLoadState('networkidle', { timeout: 15000 }).catch(() => undefined);
     await dismissPopupsIfAny(page, logs);
+    await selectVideoToolMode(page, logs);
+    const immediateQuotaMessage = await detectVideoQuotaLimit(page);
+    if (immediateQuotaMessage) {
+      printResult(buildResult({
+        success: false,
+        message: 'You have reached your daily limit for Veo video generation.',
+        logs,
+        error: { code: 'QUOTA_EXCEEDED', details: immediateQuotaMessage },
+      }));
+      process.exit(0);
+    }
+    await uploadReferencesIfAny(page, imagePaths, logs);
 
     const screenshotBefore = path.join(artifactsDir, `gemini-video-before-${nowStamp()}.png`);
     await page.screenshot({ path: screenshotBefore, fullPage: true });
@@ -428,10 +732,11 @@ async function downloadFreshVideo(page, freshTarget, outputDir, logs) {
 
     const beforeMenuCount = await getVideoMenuCount(page);
     logs.push(`[step2] Existing video/action menu count before submit: ${beforeMenuCount}`);
+    const beforeUserQueryCount = await getUserQueryCount(page);
 
     await withRetry('step3-4-submit-prompt', retryCount, logs, async () => {
       await setPromptRobust(page, videoPrompt, logs);
-      await submitPrompt(page, logs);
+      await submitPrompt(page, logs, beforeUserQueryCount);
     });
 
     let freshTarget;
@@ -473,6 +778,7 @@ async function downloadFreshVideo(page, freshTarget, outputDir, logs) {
       message: 'Video generated successfully',
       data: {
         video_prompt: videoPrompt,
+        image_paths: imagePaths,
         downloaded_video_path: path.relative(process.cwd(), downloadedPath).replace(/\\/g, '/'),
         target_gemini_url: targetGeminiUrl,
       },

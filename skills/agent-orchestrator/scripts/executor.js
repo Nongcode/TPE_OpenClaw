@@ -1,4 +1,10 @@
 const { normalizeText } = require("./common");
+const { buildPublishTextFromSections, extractContentSections, stripMarkdownFormatting } = require("./content_cleanup");
+const {
+  generateMediaAssets,
+  publishCampaignPosts,
+  toRepoRelative,
+} = require("./campaign_pipeline");
 const { createDemoProductResearchFallback, runProductResearch } = require("./product_research");
 const { createSimulationArtifacts } = require("./simulation_artifacts");
 const { buildTaskEnvelope, buildTaskPrompt, sendToSession } = require("./transport");
@@ -60,7 +66,59 @@ function extractBestContent(reply) {
   if (!text) {
     return "";
   }
-  return extractSection(text, "KET_QUA") || text;
+
+  const explicitFinalContent = extractPromptByLabel(text, [
+    "FINAL_CONTENT",
+    "NOI_DUNG_FINAL",
+    "CAPTION_LONG",
+    "CAPTION_CHINH",
+  ]);
+  if (explicitFinalContent) {
+    return sanitizeContentDraft(buildPublishTextFromSections(extractContentSections(explicitFinalContent)));
+  }
+
+  const structuredContent = buildPublishTextFromSections(extractContentSections(text));
+  if (structuredContent) {
+    return sanitizeContentDraft(structuredContent);
+  }
+
+  const captionProposal = extractCaptionProposal(text);
+  if (captionProposal) {
+    return sanitizeContentDraft(captionProposal);
+  }
+
+  return sanitizeContentDraft(extractSection(text, "KET_QUA") || text);
+}
+
+function extractCaptionProposal(text) {
+  const patterns = [
+    /\*{0,2}Caption đề xuất\*{0,2}\s*:\s*([\s\S]*?)(?=\n\s*\*{0,2}Caption ngắn dự phòng\*{0,2}\s*:|\n\s*\*{0,2}CTA đề xuất\*{0,2}\s*:|\n\s*\*{0,2}Hashtag đề xuất\*{0,2}\s*:|\nRUI_RO\b|\nDE_XUAT_BUOC_TIEP\b|$)/iu,
+    /\*{0,2}Caption de xuat\*{0,2}\s*:\s*([\s\S]*?)(?=\n\s*\*{0,2}Caption ngan du phong\*{0,2}\s*:|\n\s*\*{0,2}CTA de xuat\*{0,2}\s*:|\n\s*\*{0,2}Hashtag de xuat\*{0,2}\s*:|\nRUI_RO\b|\nDE_XUAT_BUOC_TIEP\b|$)/i,
+  ];
+  for (const pattern of patterns) {
+    const match = String(text || "").match(pattern);
+    if (match?.[1]?.trim()) {
+      return match[1].trim();
+    }
+  }
+  return "";
+}
+
+function sanitizeContentDraft(text) {
+  let cleaned = stripMarkdownFormatting(String(text || "")).trim();
+  if (!cleaned) {
+    return "";
+  }
+
+  const noisyPrefixes = [
+    /^(?:-+\s*)?Tôi đã [\s\S]*?bản nháp content Facebook[\s\S]*?(?=\n{2,}|$)/iu,
+    /^(?:-+\s*)?Toi da [\s\S]*?ban nhap content Facebook[\s\S]*?(?=\n{2,}|$)/i,
+  ];
+  for (const pattern of noisyPrefixes) {
+    cleaned = cleaned.replace(pattern, "").trim();
+  }
+
+  return cleaned;
 }
 
 function extractPromptByLabel(reply, labels) {
@@ -126,6 +184,18 @@ function classifyReviewDecision(reply) {
     "khong can sua them",
     "giu nguyen",
   ];
+  const strongApprovalSignals = [
+    "dat yeu cau de chuyen",
+    "du dieu kien chuyen",
+    "co the chuyen",
+    "chuyen sang brief media",
+    "chuyen sang media",
+    "giao sang buoc media",
+    "qua gate noi dung",
+    "qua gate media",
+    "duyet ok",
+    "trang thai san sang dang",
+  ];
   const revisionSignals = [
     "khong duyet",
     "chua duyet",
@@ -148,6 +218,12 @@ function classifyReviewDecision(reply) {
     "phan bien",
   ];
 
+  if (
+    messageMentionsAny(normalizedResult, strongApprovalSignals) ||
+    messageMentionsAny(normalizedNextStep, strongApprovalSignals)
+  ) {
+    return "approved";
+  }
   if (
     messageMentionsAny(normalizedResultForRevision, revisionSignals) ||
     messageMentionsAny(normalizedNextStepForRevision, revisionSignals)
@@ -355,19 +431,7 @@ function formatAssetList(items) {
 }
 
 function shouldForceOriginalImageMedia(step, workflowState, plan) {
-  const imagePaths = getOriginalProductImagePaths(workflowState);
-  if (imagePaths.length === 0) {
-    return false;
-  }
-  if (step.type === "produce" && step.to === "nv_media") {
-    return true;
-  }
-  if (["media_revise", "media_review", "compile_post"].includes(step.type)) {
-    return true;
-  }
-  if (step.type === "final_review") {
-    return Array.isArray(plan?.steps) && plan.steps.some((item) => item?.type === "media_review");
-  }
+  // Legacy shortcut disabled: media now runs through real generation + publish skills.
   return false;
 }
 
@@ -522,6 +586,169 @@ function buildDemoSmoothReply(step, workflowState) {
   ].join("\n");
 }
 
+function formatPathList(items) {
+  if (!Array.isArray(items) || items.length === 0) {
+    return "- (khong co)";
+  }
+  return items.map((item) => `- ${item}`).join("\n");
+}
+
+function safeRepoRelative(filePath) {
+  if (!filePath) {
+    return "";
+  }
+  try {
+    return toRepoRelative(filePath);
+  } catch {
+    return String(filePath);
+  }
+}
+
+function buildMediaProduceReply(workflowState) {
+  const research = workflowState?.productResearch?.data || {};
+  const referenceImages = Array.isArray(workflowState.referenceImages)
+    ? workflowState.referenceImages.map(safeRepoRelative)
+    : [];
+  const generatedImages = Array.isArray(workflowState.generatedImagePaths)
+    ? workflowState.generatedImagePaths.map(safeRepoRelative)
+    : [];
+  const generatedVideos = Array.isArray(workflowState.generatedVideoPaths)
+    ? workflowState.generatedVideoPaths.map(safeRepoRelative)
+    : [];
+  const videoSkippedReason = workflowState.videoGenerationSkipped?.reason || "";
+
+  return [
+    "KET_QUA:",
+    "- Nv_media da nhan content + prompt va tao media that bang skill gemini_generate_image + generate_video.",
+    `- TEN_SAN_PHAM: ${research.product_name || "(khong ro)"}`,
+    `- THU_MUC_ANH_GOC: ${research.image_download_dir || "(khong ro)"}`,
+    `- THU_MUC_MEDIA_DA_TAO: ${safeRepoRelative(workflowState.mediaBundleDir || "") || "(khong ro)"}`,
+    `- FINAL_CONTENT: ${workflowState.finalContent || workflowState.latestContentDraft || ""}`,
+    `- IMAGE_PROMPT: ${workflowState.imagePrompt || ""}`,
+    `- VIDEO_PROMPT: ${workflowState.videoPrompt || ""}`,
+    "- ANH_GOC_THAM_CHIEU:",
+    formatPathList(referenceImages),
+    "- ANH_DA_TAO:",
+    formatPathList(generatedImages),
+    "- VIDEO_DA_TAO:",
+    formatPathList(generatedVideos),
+    videoSkippedReason ? `- VIDEO_SKIP_REASON: ${videoSkippedReason}` : "",
+    "",
+    "RUI_RO:",
+    generatedVideos.length > 0
+      ? "- Can pho_phong kiem nhanh do khop giua content, anh va video truoc khi dang Facebook."
+      : "- Video co the da duoc bo qua do quota/gioi han; workflow van tiep tuc voi image.",
+    "",
+    "DE_XUAT_BUOC_TIEP:",
+    "- Chuyen media_review de pho_phong duyet mac dinh PASS.",
+  ]
+    .filter(Boolean)
+    .join("\n");
+}
+
+function buildMediaReviewApprovedReply(workflowState) {
+  const generatedImages = Array.isArray(workflowState.generatedImagePaths)
+    ? workflowState.generatedImagePaths.map(safeRepoRelative)
+    : [];
+  const generatedVideos = Array.isArray(workflowState.generatedVideoPaths)
+    ? workflowState.generatedVideoPaths.map(safeRepoRelative)
+    : [];
+  const videoSkippedReason = workflowState.videoGenerationSkipped?.reason || "";
+
+  return [
+    "KET_QUA:",
+    "- Pho phong review media: OK. Mac dinh duyet toan bo media hien co.",
+    `- THU_MUC_MEDIA_DA_TAO: ${safeRepoRelative(workflowState.mediaBundleDir || "") || "(khong ro)"}`,
+    `- IMAGE_PROMPT: ${workflowState.imagePrompt || ""}`,
+    `- VIDEO_PROMPT: ${workflowState.videoPrompt || ""}`,
+    "- ANH_DA_DUYET:",
+    formatPathList(generatedImages),
+    "- VIDEO_DA_DUYET:",
+    formatPathList(generatedVideos),
+    videoSkippedReason ? `- VIDEO_SKIP_REASON: ${videoSkippedReason}` : "",
+    "",
+    "RUI_RO:",
+    generatedVideos.length > 0
+      ? "- Khong co blocker o buoc media_review."
+      : "- Video da duoc bo qua hop le; khong block luong dang image.",
+    "",
+    "DE_XUAT_BUOC_TIEP:",
+    "- Chuyen compile_post de pho_phong dong goi ho so dang bai va trinh truong_phong final_review.",
+  ]
+    .filter(Boolean)
+    .join("\n");
+}
+
+function buildCompilePostReply(workflowState) {
+  const generatedImages = Array.isArray(workflowState.generatedImagePaths)
+    ? workflowState.generatedImagePaths.map(safeRepoRelative)
+    : [];
+  const generatedVideos = Array.isArray(workflowState.generatedVideoPaths)
+    ? workflowState.generatedVideoPaths.map(safeRepoRelative)
+    : [];
+  const videoSkippedReason = workflowState.videoGenerationSkipped?.reason || "";
+  const publishState =
+    generatedImages.length > 0 && generatedVideos.length > 0
+      ? "READY_IMAGE_AND_VIDEO"
+      : generatedImages.length > 0
+        ? "READY_IMAGE_ONLY"
+        : "MISSING_IMAGE";
+
+  return [
+    "KET_QUA:",
+    "- Pho phong da dong goi ho so dang bai sau khi content va media da duyet.",
+    `- TRANG_THAI_SAN_SANG_DANG: ${publishState}`,
+    `- THU_MUC_MEDIA_DA_TAO: ${safeRepoRelative(workflowState.mediaBundleDir || "") || "(khong ro)"}`,
+    `- IMAGE_POST_MEDIA: ${generatedImages[0] || "(khong co)"}`,
+    `- VIDEO_POST_MEDIA: ${generatedVideos[0] || "(khong co)"}`,
+    `- IMAGE_POST_CAPTION_SHORT: ${workflowState.mediaSpecificContent?.image?.caption_short || ""}`,
+    `- VIDEO_POST_CAPTION_SHORT: ${workflowState.mediaSpecificContent?.video?.caption_short || ""}`,
+    `- FINAL_CONTENT: ${workflowState.finalContent || workflowState.latestContentDraft || ""}`,
+    `- IMAGE_PROMPT: ${workflowState.imagePrompt || ""}`,
+    `- VIDEO_PROMPT: ${workflowState.videoPrompt || ""}`,
+    videoSkippedReason ? `- VIDEO_SKIP_REASON: ${videoSkippedReason}` : "",
+    "",
+    "RUI_RO:",
+    "- Chua publish Facebook o buoc nay; van co the dung final_review de chan/sua truoc khi dang that.",
+    "",
+    "DE_XUAT_BUOC_TIEP:",
+    "- Trinh truong_phong final_review. Neu truong_phong duyet, he thong moi goi facebook_publish_post de dang that.",
+  ]
+    .filter(Boolean)
+    .join("\n");
+}
+
+function appendPublishResultToFinalReply(reply, workflowState) {
+  const publish = workflowState.publishResults || {};
+  const imageResult = publish.image || {};
+  const videoResult = publish.video || {};
+  const generatedImages = Array.isArray(workflowState.generatedImagePaths)
+    ? workflowState.generatedImagePaths.map(safeRepoRelative)
+    : [];
+  const generatedVideos = Array.isArray(workflowState.generatedVideoPaths)
+    ? workflowState.generatedVideoPaths.map(safeRepoRelative)
+    : [];
+
+  const publishLines = [
+    "PHAT_HANH_FACEBOOK:",
+    "- He thong da goi skill facebook_publish_post sau khi truong_phong duyet.",
+    `- IMAGE_POST_ID: ${imageResult.post_id || "(khong co)"}`,
+    `- IMAGE_POST_MEDIA: ${generatedImages[0] || "(khong co)"}`,
+  ];
+
+  if (videoResult?.skipped) {
+    publishLines.push(`- VIDEO_POST: BO_QUA (${videoResult.reason || "khong co video publishable"})`);
+  } else {
+    publishLines.push(`- VIDEO_POST_ID: ${videoResult.post_id || "(khong co)"}`);
+    publishLines.push(`- VIDEO_POST_MEDIA: ${generatedVideos[0] || "(khong co)"}`);
+  }
+
+  publishLines.push(`- IMAGE_POST_CAPTION_SHORT: ${workflowState.mediaSpecificContent?.image?.caption_short || ""}`);
+  publishLines.push(`- VIDEO_POST_CAPTION_SHORT: ${workflowState.mediaSpecificContent?.video?.caption_short || ""}`);
+
+  return `${String(reply || "").trim()}\n\n${publishLines.join("\n")}`.trim();
+}
+
 async function executePlan(registry, plan, options) {
   const steps = [];
   const reviewLoopCounts = new Map();
@@ -529,8 +756,21 @@ async function executePlan(registry, plan, options) {
   const workflowState = {
     productResearch: null,
     finalContent: "",
+    latestContentDraft: "",
     imagePrompt: "",
     videoPrompt: "",
+    productProfile: null,
+    salesContent: null,
+    mediaSpecificContent: null,
+    sourceArtifacts: {},
+    referenceImages: [],
+    videoReferenceImages: [],
+    generatedImagePaths: [],
+    generatedVideoPaths: [],
+    mediaBundleDir: "",
+    mediaGeneration: null,
+    videoGenerationSkipped: null,
+    publishResults: null,
   };
   const demoSmoothMode = isDemoSmoothModeEnabled(options);
   for (let index = 0; index < plan.steps.length; index += 1) {
@@ -617,6 +857,105 @@ async function executePlan(registry, plan, options) {
         hasFinalContent: Boolean(workflowState.finalContent),
         hasImagePrompt: Boolean(workflowState.imagePrompt),
         hasVideoPrompt: Boolean(workflowState.videoPrompt),
+      });
+      continue;
+    }
+
+    if (
+      (step.type === "produce" || step.type === "media_revise") &&
+      step.to === "nv_media"
+    ) {
+      const mediaResult = await generateMediaAssets(workflowState, options);
+      const mediaReply = buildMediaProduceReply(workflowState);
+      const mediaRecord = {
+        ...step,
+        sessionKey: agent.transport?.sessionKey || agent.sessionKey,
+        envelope: {
+          type: step.type,
+          from: step.from,
+          to: step.to,
+          localSkillPipeline: true,
+        },
+        prompt: "[local] run gemini_generate_image + generate_video with product reference images",
+        reply: mediaReply,
+        mediaResult,
+      };
+      steps.push(mediaRecord);
+      simulation?.addStep(index, {
+        type: step.type,
+        from: step.from,
+        to: step.to,
+        sessionKey: mediaRecord.sessionKey,
+        replyPreview: compactReply(mediaReply, 1200),
+        referenceImages: Array.isArray(workflowState.referenceImages)
+          ? workflowState.referenceImages.map(safeRepoRelative)
+          : [],
+        generatedImages: Array.isArray(workflowState.generatedImagePaths)
+          ? workflowState.generatedImagePaths.map(safeRepoRelative)
+          : [],
+        generatedVideos: Array.isArray(workflowState.generatedVideoPaths)
+          ? workflowState.generatedVideoPaths.map(safeRepoRelative)
+          : [],
+      });
+      continue;
+    }
+
+    if (step.type === "media_review") {
+      const reviewReply = buildMediaReviewApprovedReply(workflowState);
+      const reviewRecord = {
+        ...step,
+        sessionKey: agent.transport?.sessionKey || agent.sessionKey,
+        envelope: {
+          type: "media_review",
+          from: step.from,
+          to: step.to,
+          autoApproved: true,
+        },
+        prompt: "[local] auto-approve media review",
+        reply: reviewReply,
+      };
+      steps.push(reviewRecord);
+      simulation?.addStep(index, {
+        type: step.type,
+        from: step.from,
+        to: step.to,
+        sessionKey: reviewRecord.sessionKey,
+        replyPreview: compactReply(reviewReply, 1200),
+        decision: "approved",
+      });
+      continue;
+    }
+
+    if (step.type === "compile_post") {
+      const compileReply = buildCompilePostReply(workflowState);
+      const compileRecord = {
+        ...step,
+        sessionKey: agent.transport?.sessionKey || agent.sessionKey,
+        envelope: {
+          type: "compile_post",
+          from: step.from,
+          to: step.to,
+          localSkillPipeline: true,
+          published: false,
+        },
+        prompt: "[local] compile reviewed content + media package for final approval",
+        reply: compileReply,
+      };
+      steps.push(compileRecord);
+      simulation?.addStep(index, {
+        type: step.type,
+        from: step.from,
+        to: step.to,
+        sessionKey: compileRecord.sessionKey,
+        replyPreview: compactReply(compileReply, 1200),
+        mediaBundleDir: safeRepoRelative(workflowState.mediaBundleDir || ""),
+        readyState:
+          Array.isArray(workflowState.generatedImagePaths) && workflowState.generatedImagePaths.length > 0
+            ? Array.isArray(workflowState.generatedVideoPaths) &&
+              workflowState.generatedVideoPaths.length > 0
+              ? "READY_IMAGE_AND_VIDEO"
+              : "READY_IMAGE_ONLY"
+            : "MISSING_IMAGE",
       });
       continue;
     }
@@ -768,23 +1107,50 @@ async function executePlan(registry, plan, options) {
       reply,
     });
 
+    let decision =
+      ["content_review", "media_review", "final_review"].includes(step.type)
+        ? demoSmoothMode
+          ? "approved"
+          : classifyReviewDecision(reply)
+        : null;
+
+    if (step.type === "final_review" && decision === "approved") {
+      const publishResult = await publishCampaignPosts(workflowState, options);
+      reply = appendPublishResultToFinalReply(reply, workflowState);
+      steps[steps.length - 1].reply = reply;
+      steps[steps.length - 1].publishResult = publishResult;
+      simulation?.setPublishExecution({
+        image: workflowState.publishResults?.image || null,
+        video: workflowState.publishResults?.video || null,
+        generatedImagePaths: Array.isArray(workflowState.generatedImagePaths)
+          ? workflowState.generatedImagePaths.map(safeRepoRelative)
+          : [],
+        generatedVideoPaths: Array.isArray(workflowState.generatedVideoPaths)
+          ? workflowState.generatedVideoPaths.map(safeRepoRelative)
+          : [],
+        mediaBundleDir: safeRepoRelative(workflowState.mediaBundleDir || ""),
+      });
+    }
+
     const stepRecord = {
       type: step.type,
       from: step.from,
       to: step.to,
       sessionKey: agent.transport?.sessionKey || agent.sessionKey,
       replyPreview: compactReply(reply, 1200),
-      decision:
-        ["content_review", "media_review", "final_review"].includes(step.type)
-          ? classifyReviewDecision(reply)
-          : null,
+      decision,
     };
     simulation?.addStep(index, stepRecord);
 
-    if (step.type === "content_review" || step.type === "final_review") {
+    if (step.to === "nv_content" && ["produce", "content_revise"].includes(step.type)) {
       const candidate = extractBestContent(reply);
       if (candidate) {
-        workflowState.finalContent = candidate;
+        workflowState.latestContentDraft = candidate;
+      }
+    }
+    if (step.type === "content_review") {
+      if (decision === "approved" && workflowState.latestContentDraft) {
+        workflowState.finalContent = workflowState.latestContentDraft;
       }
     }
     if (["produce", "media_review", "compile_post"].includes(step.type)) {
@@ -821,7 +1187,6 @@ async function executePlan(registry, plan, options) {
       }
 
       const loopCount = reviewLoopCounts.get(step.type) || 0;
-      const decision = demoSmoothMode ? "approved" : classifyReviewDecision(reply);
       if (decision !== "approved") {
         reviewLoopCounts.set(step.type, loopCount + 1);
         const revisionSteps = buildRevisionLoop(step, reply, loopCount);
@@ -878,6 +1243,7 @@ async function executePlan(registry, plan, options) {
 }
 
 module.exports = {
+  extractBestContent,
   buildOriginalImageMediaReply,
   shouldForceOriginalImageMedia,
   classifyReviewDecision,

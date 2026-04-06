@@ -2,6 +2,7 @@ const test = require("node:test");
 const assert = require("node:assert/strict");
 
 const {
+  extractBestContent,
   buildOriginalImageMediaReply,
   classifyReviewDecision,
   shouldForceOriginalImageMedia,
@@ -70,7 +71,25 @@ DE_XUAT_BUOC_TIEP:
   assert.equal(classifyReviewDecision(reply), "revise");
 });
 
-test("shouldForceOriginalImageMedia enables forced mode for media pipeline when original images exist", () => {
+test("classifyReviewDecision keeps approval when review has light edit notes but allows media handoff", () => {
+  const reply = `
+KET_QUA:
+- Da duyet ban nhap content va danh gia: dat yeu cau de chuyen sang brief media.
+- Yeu cau chinh sua nhe truoc khi dong goi sang media:
+- Giu giong van gon hon khi len post chinh thuc.
+
+RUI_RO:
+- Chua co thong so ky thuat sau.
+
+DE_XUAT_BUOC_TIEP:
+- Agent tiep theo: nv_media
+- Chuyen sang brief media.
+`;
+
+  assert.equal(classifyReviewDecision(reply), "approved");
+});
+
+test("shouldForceOriginalImageMedia stays disabled because media now uses real generation skills", () => {
   const workflowState = {
     productResearch: {
       data: {
@@ -82,15 +101,15 @@ test("shouldForceOriginalImageMedia enables forced mode for media pipeline when 
 
   assert.equal(
     shouldForceOriginalImageMedia({ type: "produce", to: "nv_media" }, workflowState, plan),
-    true,
+    false,
   );
-  assert.equal(shouldForceOriginalImageMedia({ type: "media_review" }, workflowState, plan), true);
-  assert.equal(shouldForceOriginalImageMedia({ type: "compile_post" }, workflowState, plan), true);
-  assert.equal(shouldForceOriginalImageMedia({ type: "final_review" }, workflowState, plan), true);
+  assert.equal(shouldForceOriginalImageMedia({ type: "media_review" }, workflowState, plan), false);
+  assert.equal(shouldForceOriginalImageMedia({ type: "compile_post" }, workflowState, plan), false);
+  assert.equal(shouldForceOriginalImageMedia({ type: "final_review" }, workflowState, plan), false);
   assert.equal(shouldForceOriginalImageMedia({ type: "produce", to: "nv_content" }, workflowState, plan), false);
 });
 
-test("buildOriginalImageMediaReply emits approval and original image assets for media_review", () => {
+test("buildOriginalImageMediaReply legacy helper still lists prompts and assets", () => {
   const workflowState = {
     finalContent: "Noi dung final",
     imagePrompt: "Prompt anh",
@@ -111,4 +130,31 @@ test("buildOriginalImageMediaReply emits approval and original image assets for 
   assert.match(reply, /b\.jpg/);
   assert.match(reply, /IMAGE_PROMPT:\s*Prompt anh/);
   assert.equal(classifyReviewDecision(reply), "approved");
+});
+
+test("extractBestContent prefers cleaned caption body over draft narration", () => {
+  const reply = `
+KET_QUA
+
+Toi da hoan thanh ban nhap content Facebook cho san pham de pho_phong review, chua chuyen sang media.
+
+**Caption de xuat:**
+
+Gara dang can mot thiet bi lam sach khoang may va noi that nhanh hon?
+
+May rua hoi nuoc nong 27 Lit la lua chon phu hop cho xuong dich vu can quy trinh gon hon.
+
+Inbox ngay de duoc tu van thiet bi phu hop.
+
+**Caption ngan du phong:**
+May rua hoi nuoc nong 27 Lit cho gara.
+
+RUI_RO
+- Chua co gia.
+`;
+
+  const extracted = extractBestContent(reply);
+  assert.doesNotMatch(extracted, /ban nhap content Facebook/i);
+  assert.match(extracted, /Gara dang can/);
+  assert.match(extracted, /Inbox ngay/);
 });

@@ -1,0 +1,3 @@
+display_name: Campaign Artifacts Publisher
+short_description: Continue campaign bundles from artifacts to media and page posting
+default_prompt: Read the latest successful campaign artifacts, reuse product/content outputs, upload original product images for Gemini image and video generation, then prepare or publish Facebook page posts.

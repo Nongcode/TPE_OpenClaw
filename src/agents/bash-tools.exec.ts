@@ -61,14 +61,13 @@ const CHAT_MEDIA_ARTIFACT_TYPES = new Set([
 
 type ExecMediaBlock =
   | {
-      type: "image_url";
-      image_url: { url: string };
+      mediaKind: "image" | "video";
+      source: string;
       filePath?: string;
     }
   | {
-      type: "video_url";
-      video_url: { url: string };
-      filePath?: string;
+      type: "text";
+      text: string;
     };
 
 function normalizeExecMediaString(value: unknown): string | undefined {
@@ -146,22 +145,14 @@ function pushExecMediaBlock(
   }
   emitted.add(dedupeKey);
   const filePath = isRemoteMediaSource(source) || !isAbsoluteLocalPath(source) ? undefined : source;
-  if (isVideoArtifactType(artifactType)) {
-    blocks.push({
-      type: "video_url",
-      video_url: { url: source },
-      ...(filePath ? { filePath } : {}),
-    });
-    return;
-  }
   blocks.push({
-    type: "image_url",
-    image_url: { url: source },
+    mediaKind: isVideoArtifactType(artifactType) ? "video" : "image",
+    source,
     ...(filePath ? { filePath } : {}),
   });
 }
 
-function collectExecMediaBlocks(outputText: string): ExecMediaBlock[] {
+function collectExecMediaBlocks(outputText: string): Array<{ type: "text"; text: string }> {
   const parsed = tryParseExecJsonPayload(outputText);
   if (!parsed) {
     return [];
@@ -224,7 +215,26 @@ function collectExecMediaBlocks(outputText: string): ExecMediaBlock[] {
   );
   pushExecMediaBlock(blocks, emitted, absoluteVideoFallback, "generated_video");
 
-  return blocks;
+  if (blocks.length === 0) {
+    return [];
+  }
+
+  const lines = blocks.map((block) => {
+    if ("type" in block) {
+      return block.text;
+    }
+    if (block.filePath) {
+      return `- ${block.mediaKind}: ${block.source} (local: ${block.filePath})`;
+    }
+    return `- ${block.mediaKind}: ${block.source}`;
+  });
+
+  return [
+    {
+      type: "text",
+      text: `Media artifacts:\n${lines.join("\n")}`,
+    },
+  ];
 }
 
 function extractScriptTargetFromCommand(

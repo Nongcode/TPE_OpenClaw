@@ -7,7 +7,7 @@ const DEFAULTS = {
   browser_path: "C:/Program Files/CocCoc/Browser/Application/browser.exe",
   user_data_dir: "C:/Users/Administrator/AppData/Local/CocCoc/Browser/User Data",
   profile_name: "Default",
-  target_gemini_url: "https://gemini.google.com/app/5037765b9f5baf2a",
+  target_gemini_url: "https://gemini.google.com/app/3f383fca1153c26a",
   image_paths: [],
   timeout_ms: 120000,
   retry_count: 2, 
@@ -240,19 +240,189 @@ async function setPromptRobust(page, prompt, logs) {
   logs.push(`[step4] Prompt set and verified on: ${selector}`);
 }
 
+async function openComposerMenu(page, logs, stepLabel) {
+  const menuSelectors = [
+    'button.menu-button',
+    'button[aria-label*="prompt input" i]',
+    'button[aria-label*="\u00f4 nh\u1eadp n\u1ed9i dung"]',
+    'button[aria-label*="Ã´ nháº­p ná»™i dung"]',
+  ];
+
+  for (const selector of menuSelectors) {
+    try {
+      const button = page.locator(selector).first();
+      await button.waitFor({ state: 'visible', timeout: 2000 });
+      await button.click({ force: true, timeout: 3000 });
+      await page.waitForTimeout(500);
+      logs.push(`[${stepLabel}] Opened upload/tools menu via ${selector}`);
+      return;
+    } catch {}
+  }
+
+  throw new Error('Cannot open Gemini upload/tools menu');
+}
+
+async function selectImageToolMode(page, logs) {
+  await openComposerMenu(page, logs, 'step2');
+
+  const toolSelectors = [
+    'button:has-text("T\u1ea1o h\u00ecnh \u1ea3nh")',
+    'button.toolbox-drawer-item-list-button:has-text("T\u1ea1o h\u00ecnh \u1ea3nh")',
+    'button:has-text("Táº¡o hÃ¬nh áº£nh")',
+    'button.toolbox-drawer-item-list-button:has-text("Táº¡o hÃ¬nh áº£nh")',
+  ];
+
+  for (const selector of toolSelectors) {
+    try {
+      const button = page.locator(selector).first();
+      await button.waitFor({ state: 'visible', timeout: 2000 });
+      await button.click({ force: true, timeout: 3000 });
+      await page.waitForTimeout(300);
+      logs.push(`[step2] Selected Gemini tool mode via ${selector}`);
+      return;
+    } catch {}
+  }
+
+  throw new Error('Cannot select Gemini image tool mode');
+}
+
 async function uploadReferencesIfAny(page, imagePaths, logs) {
   if (imagePaths.length === 0) {
     logs.push('[step3] No reference images provided, skip upload');
     return;
   }
 
-  const fileInput = page.locator('input[type="file"]').first();
-  await fileInput.waitFor({ state: 'attached', timeout: 10000 });
-  await fileInput.setInputFiles(imagePaths, { timeout: 15000 });
-  logs.push(`[step3] Uploaded ${imagePaths.length} reference image(s)`);
+  const directInput = page.locator('input[type="file"]').first();
+  try {
+    await directInput.waitFor({ state: 'attached', timeout: 1500 });
+    await directInput.setInputFiles(imagePaths, { timeout: 15000 });
+    logs.push(`[step3] Uploaded ${imagePaths.length} reference image(s) via direct file input`);
+    return;
+  } catch {}
+
+  const visibleChooserSelectors = [
+    'button[aria-label^="T\u1ea3i t\u1ec7p l\u00ean"]',
+    'button:has-text("T\u1ea3i t\u1ec7p l\u00ean")',
+    '[role="menuitem"]:has-text("T\u1ea3i t\u1ec7p l\u00ean")',
+    'button:has-text("Upload files")',
+    '[role="menuitem"]:has-text("Upload files")',
+  ];
+
+  for (const selector of visibleChooserSelectors) {
+    try {
+      const trigger = page.locator(selector).first();
+      if (!(await trigger.isVisible({ timeout: 500 }).catch(() => false))) {
+        continue;
+      }
+      const chooserPromise = page.waitForEvent('filechooser', { timeout: 10000 });
+      await trigger.click({ force: true, timeout: 5000 });
+      const chooser = await chooserPromise;
+      await chooser.setFiles(imagePaths);
+      logs.push(`[step3] Uploaded ${imagePaths.length} reference image(s) via visible file chooser ${selector}`);
+      return;
+    } catch {}
+  }
+
+  const menuSelectors = [
+    'button.menu-button',
+    'button[aria-label*="prompt input" i]',
+    'button[aria-label*="\u00f4 nh\u1eadp n\u1ed9i dung"]',
+    'button[aria-label*="ô nhập nội dung"]',
+  ];
+
+  for (const selector of menuSelectors) {
+    try {
+      const button = page.locator(selector).first();
+      await button.waitFor({ state: 'visible', timeout: 2000 });
+      await button.click({ force: true, timeout: 3000 });
+      await page.waitForTimeout(500);
+      logs.push(`[step3] Opened upload/tools menu via ${selector}`);
+      break;
+    } catch {}
+  }
+
+  const chooserSelectors = [
+    'button[aria-label^="T\u1ea3i t\u1ec7p l\u00ean"]',
+    'button:has-text("T\u1ea3i t\u1ec7p l\u00ean")',
+    '[role="menuitem"]:has-text("T\u1ea3i t\u1ec7p l\u00ean")',
+    'button:has-text("Tải tệp lên")',
+    '[role="menuitem"]:has-text("Tải tệp lên")',
+    'button:has-text("Upload files")',
+    '[role="menuitem"]:has-text("Upload files")',
+  ];
+
+  for (const selector of chooserSelectors) {
+    try {
+      const trigger = page.locator(selector).first();
+      await trigger.waitFor({ state: 'visible', timeout: 2000 });
+      const chooserPromise = page.waitForEvent('filechooser', { timeout: 10000 });
+      await trigger.click({ force: true, timeout: 5000 });
+      const chooser = await chooserPromise;
+      await chooser.setFiles(imagePaths);
+      logs.push(`[step3] Uploaded ${imagePaths.length} reference image(s) via file chooser ${selector}`);
+      return;
+    } catch {}
+  }
+
+  try {
+    await directInput.waitFor({ state: 'attached', timeout: 3000 });
+    await directInput.setInputFiles(imagePaths, { timeout: 15000 });
+    logs.push(`[step3] Uploaded ${imagePaths.length} reference image(s) via delayed file input`);
+    return;
+  } catch {}
+
+  throw new Error('Cannot find a working Gemini upload control for reference images');
 }
 
-async function submitPrompt(page, logs) {
+async function getUserQueryCount(page) {
+  return await page.locator('user-query').count().catch(() => 0);
+}
+
+async function waitForEnabled(locator, timeoutMs) {
+  const startedAt = Date.now();
+  while (Date.now() - startedAt < timeoutMs) {
+    if (await locator.isEnabled().catch(() => false)) {
+      return;
+    }
+    await locator.page().waitForTimeout(250);
+  }
+  throw new Error(`Button stayed disabled for ${timeoutMs}ms`);
+}
+
+async function verifyPromptSubmitted(page, beforeUserCount, logs) {
+  const startedAt = Date.now();
+
+  while (Date.now() - startedAt < 15000) {
+    const currentUserCount = await getUserQueryCount(page);
+    if (currentUserCount > beforeUserCount) {
+      logs.push(`[step4] Prompt submission confirmed by user-query count ${beforeUserCount} -> ${currentUserCount}`);
+      return;
+    }
+
+    try {
+      const { locator } = await locatePromptEditor(page);
+      const handle = await locator.elementHandle();
+      if (handle) {
+        const currentText = normalizePrompt(await page.evaluate((el) => {
+          if (el.isContentEditable) {
+            return el.innerText || el.textContent || '';
+          }
+          return el.value || '';
+        }, handle));
+        if (!currentText) {
+          logs.push('[step4] Prompt submission confirmed by cleared editor');
+          return;
+        }
+      }
+    } catch {}
+
+    await page.waitForTimeout(400);
+  }
+
+  throw new Error('Prompt submit did not create a new Gemini user turn');
+}
+
+async function submitPrompt(page, logs, beforeUserCount) {
   const submitCandidates = [
     'button.send-button',
     'button[aria-label="Gửi tin nhắn"]',
@@ -264,14 +434,17 @@ async function submitPrompt(page, logs) {
     try {
       const button = page.locator(selector).first();
       await button.waitFor({ state: 'visible', timeout: 3000 });
+      await waitForEnabled(button, 15000);
       await button.click({ force: true, timeout: 3000 });
       logs.push(`[step4] Prompt submitted by button: ${selector}`);
+      await verifyPromptSubmitted(page, beforeUserCount, logs);
       return;
     } catch {}
   }
 
   await page.keyboard.press('Enter');
   logs.push('[step4] Prompt submitted by Enter key');
+  await verifyPromptSubmitted(page, beforeUserCount, logs);
 }
 
 async function getGeneratedImageMenuCount(page) {
@@ -387,7 +560,8 @@ async function downloadFromSpecificBlock(page, freshTarget, outputDir, logs) {
   const userDataDir = path.normalize(parsed.user_data_dir);
   const profileName = parsed.profile_name.trim();
   const targetGeminiUrl = parsed.target_gemini_url.trim();
-  const imagePaths = parseList(parsed.image_paths).map((item) => path.normalize(item));
+  const rawImagePaths = parseList(parsed.image_paths).map((item) => path.normalize(item));
+  const imagePaths = rawImagePaths.slice(0, 1);
   const timeoutMs = Number.isFinite(parsed.timeout_ms) ? Math.max(15000, parsed.timeout_ms) : DEFAULTS.timeout_ms;
   const retryCount = Number.isFinite(parsed.retry_count) ? Math.max(1, Math.min(4, Math.floor(parsed.retry_count))) : DEFAULTS.retry_count;
 
@@ -397,6 +571,9 @@ async function downloadFromSpecificBlock(page, freshTarget, outputDir, logs) {
   logs.push(`[input] target_gemini_url=${targetGeminiUrl}`);
   logs.push(`[input] profile_name=${profileName}`);
   logs.push(`[input] image_paths=${imagePaths.length}`);
+  if (rawImagePaths.length > imagePaths.length) {
+    logs.push(`[input] Only the first reference image will be uploaded (${imagePaths[0]}).`);
+  }
 
   if (parsed.dry_run) {
     logs.push('[dry-run] Skip browser automation flow');
@@ -444,6 +621,7 @@ async function downloadFromSpecificBlock(page, freshTarget, outputDir, logs) {
     await page.goto(targetGeminiUrl, { waitUntil: 'domcontentloaded', timeout: 45000 });
     await page.waitForLoadState('networkidle', { timeout: 15000 }).catch(() => undefined);
     await dismissPopupsIfAny(page, logs);
+    await selectImageToolMode(page, logs);
 
     const screenshotBefore = path.join(artifactsDir, `gemini-before-${nowStamp()}.png`);
     await page.screenshot({ path: screenshotBefore, fullPage: true });
@@ -451,6 +629,7 @@ async function downloadFromSpecificBlock(page, freshTarget, outputDir, logs) {
 
     const beforeMenuCount = await getGeneratedImageMenuCount(page);
     logs.push(`[step4] Existing image menu count before submit: ${beforeMenuCount}`);
+    const beforeUserQueryCount = await getUserQueryCount(page);
 
     await withRetry('step3-upload-references', retryCount, logs, async () => {
       await uploadReferencesIfAny(page, imagePaths, logs);
@@ -458,7 +637,7 @@ async function downloadFromSpecificBlock(page, freshTarget, outputDir, logs) {
 
     await withRetry('step4-submit-prompt', retryCount, logs, async () => {
       await setPromptRobust(page, imagePrompt, logs);
-      await submitPrompt(page, logs);
+      await submitPrompt(page, logs, beforeUserQueryCount);
     });
 
     const freshTarget = await withRetry('step5-wait-result', retryCount, logs, async () => {

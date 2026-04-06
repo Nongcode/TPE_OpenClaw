@@ -28,12 +28,12 @@ When user commands `truong_phong` directly, the hierarchy mode now enforces this
 3. `pho_phong` triggers mandatory product research via `search_product_text`.
 4. `pho_phong` assigns `nv_content` to write content.
 5. `pho_phong` reviews content.
-6. `pho_phong` assigns `nv_media` to create media.
-7. `pho_phong` reviews media.
-8. `pho_phong` compiles final package and submits to `truong_phong`.
-9. `truong_phong` returns final package for user approval before posting.
+6. `pho_phong` assigns `nv_media` to create media from approved content plus image/video prompts.
+7. `nv_media` uses product reference images from `artifacts/references/search_product_text/<product-slug>/` when calling `gemini_generate_image` and `generate_video`.
+8. `pho_phong` reviews media with default PASS behavior unless the flow explicitly inserts a revision loop.
+9. `pho_phong` uses `compile_post` only to assemble the reviewed content + media package and hand it to `truong_phong`.
+10. After `truong_phong` approves at `final_review`, the system calls `facebook_publish_post` to publish 1 image post and, if video generation was not skipped by quota, 1 video post.
 
-The orchestrator does simulation-only output for media/publish workflow; no real Facebook post is executed in this path.
 Detailed-plan approval gate is applied only when user explicitly requests a detailed plan.
 
 For presentation/demo runs, smooth mode is enabled by default: media creation/review and final review are treated as successful so the flow completes and exports a full artifact bundle (content + image prompt + video prompt + copied original product images). Use `--strict-review-gates` to restore strict blocking behavior.
@@ -50,7 +50,7 @@ Simulation output default folder:
 
 - `artifacts/campaigns/agent-orchestrator-simulations/<run-id>/`
 - Includes plan/result, per-step snapshots, final content, image/video prompts, and copied product original images.
-- Includes `23-facebook-publish-simulation.json` for handoff to a later main-agent batch execution.
+- Includes publish result artifacts when compile/publish runs successfully.
 
 ## Rules
 

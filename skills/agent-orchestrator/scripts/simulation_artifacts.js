@@ -1,6 +1,8 @@
 const fs = require("fs");
 const path = require("path");
 
+const REPO_ROOT = path.resolve(__dirname, "..", "..", "..");
+
 function sanitizeSegment(value) {
   return String(value || "run")
     .normalize("NFKD")
@@ -21,7 +23,7 @@ function resolveBaseDir(options) {
   if (options?.artifactsDir) {
     return path.resolve(options.artifactsDir);
   }
-  return path.resolve("artifacts", "campaigns", "agent-orchestrator-simulations");
+  return path.join(REPO_ROOT, "artifacts", "campaigns", "agent-orchestrator-simulations");
 }
 
 function ensureDir(dirPath) {
@@ -134,6 +136,11 @@ function createSimulationArtifacts(plan, options = {}) {
     setPublishSimulation(payload) {
       if (payload && typeof payload === "object") {
         writeJson(path.join(runDir, "23-facebook-publish-simulation.json"), payload);
+      }
+    },
+    setPublishExecution(payload) {
+      if (payload && typeof payload === "object") {
+        writeJson(path.join(runDir, "23-facebook-publish-result.json"), payload);
       }
     },
     setBatchInput(payload) {

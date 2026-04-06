@@ -523,7 +523,7 @@ describe("exec exit codes", () => {
 describe("exec media artifact parsing", () => {
   useCapturedEnv([...SHELL_ENV_KEYS], applyDefaultShellEnv);
 
-  it("adds image_url blocks for skill JSON that returns chat image artifacts", async () => {
+  it("adds media artifact text for skill JSON that returns chat image artifacts", async () => {
     const absoluteImagePath = isWin
       ? "C:/Users/Administrator/.openclaw/workspace/artifacts/images/generated.png"
       : "/tmp/openclaw/artifacts/images/generated.png";
@@ -547,22 +547,13 @@ describe("exec media artifact parsing", () => {
     };
     const command = buildShellJsonEchoCommand(payload);
     const result = await executeExecCommand(execTool, command);
-    const imageBlock = result.content.find(
-      (part) => (part as { type?: string }).type === "image_url",
-    ) as
-      | {
-          type: "image_url";
-          image_url?: { url?: string };
-          filePath?: string;
-        }
-      | undefined;
+    const text = readTextContent(result.content as ToolTextContent) ?? "";
 
-    expect(imageBlock).toBeDefined();
-    expect(imageBlock?.image_url?.url).toBe(absoluteImagePath);
-    expect(imageBlock?.filePath).toBe(absoluteImagePath);
+    expect(text).toContain("Media artifacts:");
+    expect(text).toContain(`- image: ${absoluteImagePath} (local: ${absoluteImagePath})`);
   });
 
-  it("adds video_url blocks for skill JSON that returns chat video artifacts", async () => {
+  it("adds media artifact text for skill JSON that returns chat video artifacts", async () => {
     const absoluteVideoPath = isWin
       ? "C:/Users/Administrator/.openclaw/workspace/artifacts/videos/generated.mp4"
       : "/tmp/openclaw/artifacts/videos/generated.mp4";
@@ -581,19 +572,10 @@ describe("exec media artifact parsing", () => {
     };
     const command = buildShellJsonEchoCommand(payload);
     const result = await executeExecCommand(execTool, command);
-    const videoBlock = result.content.find(
-      (part) => (part as { type?: string }).type === "video_url",
-    ) as
-      | {
-          type: "video_url";
-          video_url?: { url?: string };
-          filePath?: string;
-        }
-      | undefined;
+    const text = readTextContent(result.content as ToolTextContent) ?? "";
 
-    expect(videoBlock).toBeDefined();
-    expect(videoBlock?.video_url?.url).toBe(absoluteVideoPath);
-    expect(videoBlock?.filePath).toBe(absoluteVideoPath);
+    expect(text).toContain("Media artifacts:");
+    expect(text).toContain(`- video: ${absoluteVideoPath} (local: ${absoluteVideoPath})`);
   });
 });
 

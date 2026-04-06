@@ -2,12 +2,39 @@ const { spawnSync } = require("child_process");
 const fs = require("fs");
 const path = require("path");
 
+function extractQuotedKeyword(source) {
+  const match = String(source || "").match(/["“](.+?)["”]/u);
+  return match?.[1]?.trim() || "";
+}
+
+function extractKeywordAfterProductPhrase(source) {
+  const patterns = [
+    /sản phẩm\s+(.+?)(?=$|[.?!,\n])/iu,
+    /san pham\s+(.+?)(?=$|[.?!,\n])/iu,
+    /về\s+(.+?)(?=$|[.?!,\n])/iu,
+    /ve\s+(.+?)(?=$|[.?!,\n])/iu,
+  ];
+
+  for (const pattern of patterns) {
+    const match = String(source || "").match(pattern);
+    if (match?.[1]?.trim()) {
+      return match[1].trim().replace(/^[:\-–]\s*/u, "");
+    }
+  }
+
+  return "";
+}
+
 function resolveKeyword(step, plan, options) {
   if (options?.productKeyword && String(options.productKeyword).trim()) {
     return String(options.productKeyword).trim();
   }
   const source = step?.message || plan?.message || "";
-  return String(source).trim();
+  return (
+    extractQuotedKeyword(source) ||
+    extractKeywordAfterProductPhrase(source) ||
+    String(source).trim()
+  );
 }
 
 function runProductResearch(step, plan, options = {}) {
@@ -19,43 +46,54 @@ function runProductResearch(step, plan, options = {}) {
   const targetSite = String(options.targetSite || "uptek.vn").trim();
   const repoRoot = path.resolve(__dirname, "..", "..", "..");
   const scriptPath = path.join(repoRoot, "skills", "search_product_text", "action.js");
+  const attempts = 3;
+  let lastError = null;
 
-  const run = spawnSync(
-    process.execPath,
-    [scriptPath, "--keyword", keyword, "--target_site", targetSite],
-    {
-      cwd: repoRoot,
-      encoding: "utf8",
-      maxBuffer: 25 * 1024 * 1024,
-    },
-  );
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    const run = spawnSync(
+      process.execPath,
+      [scriptPath, "--keyword", keyword, "--target_site", targetSite],
+      {
+        cwd: repoRoot,
+        encoding: "utf8",
+        maxBuffer: 25 * 1024 * 1024,
+      },
+    );
 
-  if (run.error) {
-    throw run.error;
+    try {
+      if (run.error) {
+        throw run.error;
+      }
+
+      const stdout = String(run.stdout || "").trim();
+      if (!stdout) {
+        throw new Error("search_product_text returned empty stdout.");
+      }
+
+      let payload;
+      try {
+        payload = JSON.parse(stdout);
+      } catch {
+        throw new Error("search_product_text returned non-JSON output.");
+      }
+
+      if (!payload?.success) {
+        throw new Error(payload?.error?.message || "search_product_text failed.");
+      }
+
+      return {
+        command: `${process.execPath} ${scriptPath} --keyword \"${keyword}\" --target_site \"${targetSite}\"`,
+        targetSite,
+        keyword,
+        researchAttempt: attempt,
+        ...payload,
+      };
+    } catch (error) {
+      lastError = error;
+    }
   }
 
-  const stdout = String(run.stdout || "").trim();
-  if (!stdout) {
-    throw new Error("search_product_text returned empty stdout.");
-  }
-
-  let payload;
-  try {
-    payload = JSON.parse(stdout);
-  } catch {
-    throw new Error("search_product_text returned non-JSON output.");
-  }
-
-  if (!payload?.success) {
-    throw new Error(payload?.error?.message || "search_product_text failed.");
-  }
-
-  return {
-    command: `${process.execPath} ${scriptPath} --keyword \"${keyword}\" --target_site \"${targetSite}\"`,
-    targetSite,
-    keyword,
-    ...payload,
-  };
+  throw lastError;
 }
 
 function normalizeSlugToName(value) {
