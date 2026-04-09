@@ -51,7 +51,7 @@ test("hierarchy plan from quan_ly with approved plan returns final package to qu
   const plan = createPlan(registry, {
     mode: "hierarchy",
     from: "quan_ly",
-    message: "Ke hoach da duoc duyet, trien khai chien dich facebook cho cau nang oto",
+    message: "Ke hoach da duoc duyet, trien khai chien dich facebook cho cau nang oto va lam media",
     taskType: "campaign.execute",
   });
 
@@ -76,7 +76,7 @@ test("hierarchy plan from truong_phong with approved plan follows strict flow", 
   const plan = createPlan(registry, {
     mode: "hierarchy",
     from: "truong_phong",
-    message: "Ke hoach da duoc duyet, trien khai theo ke hoach da duyet de dang facebook",
+    message: "Ke hoach da duoc duyet, trien khai theo ke hoach da duyet, viet bai va lam media de dang facebook",
     taskType: "campaign.execute",
   });
 
@@ -155,6 +155,26 @@ test("hierarchy plan from truong_phong executes strict flow when no detailed-pla
     "compile_post",
     "final_review",
   ]);
+});
+
+test("hierarchy plan from truong_phong defaults to content-only when media is not requested", () => {
+  const registry = makeRegistry();
+  const plan = createPlan(registry, {
+    mode: "hierarchy",
+    from: "truong_phong",
+    message: "Trien khai bai viet cho san pham may ra vao lop xe con mau xanh",
+    taskType: "campaign.execute",
+  });
+
+  const stepTypes = plan.steps.map((step) => `${step.type}:${step.to}`);
+  assert.deepEqual(stepTypes, [
+    "plan_execute:pho_phong",
+    "product_research:pho_phong",
+    "produce:nv_content",
+    "content_review:pho_phong",
+    "final_review:truong_phong",
+  ]);
+  assert.equal(plan.steps.at(-1)?.deliverToUser, true);
 });
 
 test("hierarchy plan from nv_content only assigns the content specialist", () => {

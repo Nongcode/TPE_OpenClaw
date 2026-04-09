@@ -1,0 +1,47 @@
+{
+  "agents": {
+    "list": [
+      {
+        "id": "pho_phong",
+        "workspace": "C:\\Users\\Administrator\\.openclaw\\workspace_phophong",
+        "model": "openai-codex/gpt-5.4",
+        "skills": [
+          "agent-orchestrator-test",
+          "search_product_text"
+        ],
+        "subagents": {
+          "allowAgents": [
+            "nv_content",
+            "nv_media"
+          ]
+        }
+      },
+      {
+        "id": "nv_content",
+        "workspace": "C:\\Users\\Administrator\\.openclaw\\workspace_content",
+        "model": "openai-codex/gpt-5.4",
+        "skills": [
+          "search_product_text"
+        ],
+        "subagents": {
+          "allowAgents": [
+            "pho_phong"
+          ]
+        }
+      },
+      {
+        "id": "nv_media",
+        "workspace": "C:\\Users\\Administrator\\.openclaw\\workspace_media",
+        "model": "openai-codex/gpt-5.4",
+        "skills": [
+          "gemini_generate_image"
+        ],
+        "subagents": {
+          "allowAgents": [
+            "pho_phong"
+          ]
+        }
+      }
+    ]
+  }
+}

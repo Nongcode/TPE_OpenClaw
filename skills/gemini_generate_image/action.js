@@ -157,6 +157,19 @@ function normalizePrompt(text) {
     .trim();
 }
 
+function stripDiacritics(text) {
+  return String(text || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "");
+}
+
+function basenameVariants(filePath) {
+  const base = path.basename(String(filePath || "")).trim();
+  if (!base) return [];
+  const stem = base.replace(/\.[^.]+$/, "");
+  return [base, stem].filter(Boolean);
+}
+
 async function dismissPopupsIfAny(page, logs) {
   const selectors = [
     'button[aria-label*="Close" i]',
@@ -292,13 +305,76 @@ async function uploadReferencesIfAny(page, imagePaths, logs) {
     return;
   }
 
-  const directInput = page.locator('input[type="file"]').first();
-  try {
-    await directInput.waitFor({ state: 'attached', timeout: 1500 });
-    await directInput.setInputFiles(imagePaths, { timeout: 15000 });
-    logs.push(`[step3] Uploaded ${imagePaths.length} reference image(s) via direct file input`);
-    return;
-  } catch {}
+  await ensureReadableFiles(imagePaths);
+  logs.push(`[step3] Verified ${imagePaths.length} reference image(s) exist on disk before upload`);
+
+  const waitForUploadAcknowledgement = async () => {
+    const startedAt = Date.now();
+    const probeNames = imagePaths.flatMap((filePath) => basenameVariants(filePath));
+
+    while (Date.now() - startedAt < 15000) {
+      const bodyText = normalizePrompt(
+        await page.locator("body").innerText({ timeout: 1000 }).catch(() => ""),
+      );
+      const folded = stripDiacritics(bodyText).toLowerCase();
+
+      if (folded.includes("tep trong") || folded.includes("empty file") || folded.includes("file is empty")) {
+        throw new Error("UPLOAD_EMPTY_FILE: Gemini reported the uploaded reference file is empty");
+      }
+
+      const hasReferenceName = probeNames.some((name) => {
+        const foldedName = stripDiacritics(name).toLowerCase();
+        return foldedName && folded.includes(foldedName);
+      });
+      if (hasReferenceName) {
+        logs.push("[step3] Gemini acknowledged the uploaded reference image by file name");
+        return;
+      }
+
+      const previewSignals = [
+        'button[aria-label*="remove" i]',
+        'button[aria-label*="xóa" i]',
+        'button[aria-label*="delete" i]',
+        'img[src^="blob:"]',
+        'img[src^="data:"]',
+        '[role="listitem"] img',
+      ];
+      for (const selector of previewSignals) {
+        const count = await page.locator(selector).count().catch(() => 0);
+        if (count > 0) {
+          logs.push(`[step3] Gemini showed attachment preview via ${selector}`);
+          return;
+        }
+      }
+
+      await page.waitForTimeout(500);
+    }
+
+    throw new Error("UPLOAD_NOT_ACKNOWLEDGED: Gemini did not confirm the uploaded reference image");
+  };
+
+  const uploadViaAnyFileInput = async (label) => {
+    const fileInputs = page.locator('input[type="file"]');
+    const count = await fileInputs.count().catch(() => 0);
+    for (let index = count - 1; index >= 0; index -= 1) {
+      try {
+        const input = fileInputs.nth(index);
+        const accept = ((await input.getAttribute("accept").catch(() => "")) || "").toLowerCase();
+        if (accept && !accept.includes("image")) {
+          continue;
+        }
+        await input.setInputFiles(imagePaths, { timeout: 15000 });
+        await waitForUploadAcknowledgement();
+        logs.push(`[step3] Uploaded ${imagePaths.length} reference image(s) via ${label} file input #${index + 1}`);
+        return true;
+      } catch (error) {
+        logs.push(
+          `[step3] File input #${index + 1} upload failed via ${label}: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
+    }
+    return false;
+  };
 
   const visibleChooserSelectors = [
     'button[aria-label^="T\u1ea3i t\u1ec7p l\u00ean"]',
@@ -318,9 +394,14 @@ async function uploadReferencesIfAny(page, imagePaths, logs) {
       await trigger.click({ force: true, timeout: 5000 });
       const chooser = await chooserPromise;
       await chooser.setFiles(imagePaths);
+      await waitForUploadAcknowledgement();
       logs.push(`[step3] Uploaded ${imagePaths.length} reference image(s) via visible file chooser ${selector}`);
       return;
-    } catch {}
+    } catch (error) {
+      logs.push(
+        `[step3] Visible chooser ${selector} failed: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
   }
 
   const menuSelectors = [
@@ -359,17 +440,17 @@ async function uploadReferencesIfAny(page, imagePaths, logs) {
       await trigger.click({ force: true, timeout: 5000 });
       const chooser = await chooserPromise;
       await chooser.setFiles(imagePaths);
+      await waitForUploadAcknowledgement();
       logs.push(`[step3] Uploaded ${imagePaths.length} reference image(s) via file chooser ${selector}`);
       return;
-    } catch {}
+    } catch (error) {
+      logs.push(`[step3] Chooser ${selector} failed: ${error instanceof Error ? error.message : String(error)}`);
+    }
   }
 
-  try {
-    await directInput.waitFor({ state: 'attached', timeout: 3000 });
-    await directInput.setInputFiles(imagePaths, { timeout: 15000 });
-    logs.push(`[step3] Uploaded ${imagePaths.length} reference image(s) via delayed file input`);
+  if (await uploadViaAnyFileInput("fallback")) {
     return;
-  } catch {}
+  }
 
   throw new Error('Cannot find a working Gemini upload control for reference images');
 }

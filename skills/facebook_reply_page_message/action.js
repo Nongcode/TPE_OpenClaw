@@ -1,6 +1,6 @@
 const DEFAULTS = {
   page_id: process.env.FACEBOOK_PAGE_ID || "643048852218433",
-  access_token: process.env.FACEBOOK_PAGE_ACCESS_TOKEN || "EAANUeplbZCAwBRDtmbZCZAXJH6xt1Wavxe0OiZAbIBV2nFwFZApZC6GsP0nKXO1BrMBoBaDUZBMpOjCOZAyUL9zC2iQh9spFumXC2KcT1THFvZCBjLeONUfyw4R7a0ZCn3bZAqNRglxjrh3GOVtZCIObHg3ArMqfOZC7RIJo6rvSn2FszW45e4KZCXfSAwddj5WRXmpnotnmoMzDwf1N6Myc6bb6py",
+  access_token: process.env.FACEBOOK_PAGE_ACCESS_TOKEN || "",
   recipient_id: "",
   reply_text: "",
   dry_run: false,
@@ -25,27 +25,62 @@ function parseBoolean(value, fallback = false) {
   return fallback;
 }
 
+function normalizeCliKey(token) {
+  return String(token || "")
+    .replace(/^--?/, "")
+    .trim()
+    .replace(/-/g, "_");
+}
+
+function tryParseJson(raw) {
+  const text = String(raw || "").trim();
+  if (!text.startsWith("{") || !text.endsWith("}")) {
+    return null;
+  }
+  try {
+    return JSON.parse(text);
+  } catch {
+    return null;
+  }
+}
+
+function parseKeyValueArgs(args) {
+  const parsed = {};
+  for (let index = 0; index < args.length; index += 1) {
+    const token = args[index];
+    if (!String(token).startsWith("-")) {
+      continue;
+    }
+    const key = normalizeCliKey(token);
+    const next = args[index + 1];
+
+    if (!next || String(next).startsWith("-")) {
+      parsed[key] = true;
+      continue;
+    }
+
+    parsed[key] = next;
+    index += 1;
+  }
+  return parsed;
+}
+
 function parseArgs(argv) {
   const params = { ...DEFAULTS };
   const logs = [];
   const args = argv.slice(2);
 
-  if (args.length === 1 && args[0].trim().startsWith("{")) {
-    try {
-      const parsed = JSON.parse(args[0]);
-      return {
-        ...params,
-        ...parsed,
-        dry_run: parseBoolean(parsed.dry_run ?? parsed["dry-run"], false),
-        logs,
-      };
-    } catch (error) {
-      logs.push(`[parse] Invalid JSON input: ${error instanceof Error ? error.message : String(error)}`);
-      return { ...params, logs };
-    }
-  }
+  const jsonFromSingleArg = args.length === 1 ? tryParseJson(args[0]) : null;
+  const jsonFromJoinedArgs = jsonFromSingleArg ? null : tryParseJson(args.join(" "));
+  const cliKeyValues = !jsonFromSingleArg && !jsonFromJoinedArgs ? parseKeyValueArgs(args) : null;
+  const parsed = jsonFromSingleArg || jsonFromJoinedArgs || cliKeyValues || {};
 
-  return { ...params, logs };
+  return {
+    ...params,
+    ...parsed,
+    dry_run: parseBoolean(parsed.dry_run ?? parsed["dry-run"], false),
+    logs,
+  };
 }
 
 function validateInput(params) {
@@ -64,6 +99,11 @@ async function postGraphMessage({ endpoint, body, accessToken, logs }) {
   const url = `https://graph.facebook.com/${endpoint}`;
   logs.push(`[http:post] ${url}`);
 
+  const requestBody = {
+    ...body,
+    access_token: accessToken,
+  };
+
   const response = await fetch(url, {
     method: "POST",
     headers: {
@@ -71,7 +111,7 @@ async function postGraphMessage({ endpoint, body, accessToken, logs }) {
       "Content-Type": "application/json",
       Accept: "application/json",
     },
-    body: JSON.stringify(body),
+    body: JSON.stringify(requestBody),
   });
 
   const payload = await response.json().catch(() => ({}));

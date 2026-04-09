@@ -297,31 +297,51 @@ function buildProductProfileInput(productResearchData) {
 }
 
 function buildImagePrompt(basePrompt, productProfile, referenceImages) {
+  const baseLines = [];
+  if (pickFirstNonEmpty(basePrompt)) {
+    baseLines.push(pickFirstNonEmpty(basePrompt));
+  }
   if (referenceImages.length === 0) {
-    return `Tao anh quang cao cho ${productProfile.product_name}.`;
+    return [
+      ...baseLines,
+      `Tạo ảnh quảng cáo bằng tiếng Việt cho sản phẩm ${productProfile.product_name}.`,
+      "Bố cục rõ ràng, sạch sẽ, chuyên nghiệp, phù hợp đăng Facebook.",
+      'Bắt buộc đặt logo "TÂN PHÁT ETEK" ở góc trái bên trên hình.',
+    ]
+      .filter(Boolean)
+      .join(" ");
   }
   return [
-    `Tao anh quang cao cho ${productProfile.product_name} dua tren anh tham chieu goc da upload.`,
-    "Boi canh gara/cham soc xe sach se, anh sang ro, phu hop bai dang Facebook, khong chen chu.",
-    "Giu dung hinh dang, mau sac, logo va chi tiet that cua san pham.",
+    ...baseLines,
+    `Tạo ảnh quảng cáo bằng tiếng Việt cho sản phẩm ${productProfile.product_name} dựa trên ảnh tham chiếu gốc đã upload.`,
+    "Bối cảnh rửa xe/bảo dưỡng chuyên nghiệp, sạch sẽ, ánh sáng rõ, phù hợp bài đăng Facebook.",
+    "Giữ đúng hình dáng, màu sắc và chi tiết thật của sản phẩm từ ảnh gốc.",
+    'Bắt buộc đặt logo "TÂN PHÁT ETEK" ở góc trái bên trên hình.',
+    "Không chèn chữ quảng cáo khác ngoài logo.",
   ]
     .filter(Boolean)
     .join(" ");
 }
 
 function buildVideoPrompt(basePrompt, productProfile, referenceImages, generatedImages) {
+  const baseLines = [];
+  if (pickFirstNonEmpty(basePrompt)) {
+    baseLines.push(pickFirstNonEmpty(basePrompt));
+  }
   const notes = [];
   if (referenceImages.length > 0) {
     notes.push(
-      `Bat buoc dung cac anh tham chieu da upload lam source-of-truth cho ngoai quan san pham ${productProfile.product_name}.`,
+      `Bắt buộc dùng các ảnh tham chiếu đã upload làm nguồn đúng cho ngoại quan sản phẩm ${productProfile.product_name}.`,
     );
   }
   if (generatedImages.length > 0) {
-    notes.push("Neu co anh key visual da tao, dung no lam tham chieu bo cuc/chien dich cho video.");
+    notes.push("Nếu có ảnh key visual đã tạo, dùng nó làm tham chiếu bố cục cho video.");
   }
-  notes.push("Video ngan 15-20 giay, nhip nhanh, boi canh gara/cham soc xe sach se.");
-  notes.push("Khong tao chi tiet ngoai quan sai khac so voi anh goc.");
-  return [`Tao video quang cao ngan cho ${productProfile.product_name}.`, ...notes]
+  notes.push("Video quảng cáo ngắn 15-20 giây, nhịp nhanh, bối cảnh rửa xe/bảo dưỡng sạch sẽ, chuyên nghiệp.");
+  notes.push("Không tạo chi tiết ngoại quan sai khác so với ảnh gốc.");
+  notes.push('Bắt buộc logo "TÂN PHÁT ETEK" xuất hiện ở góc trái bên trên xuyên suốt video hoặc ở mọi cảnh chính.');
+  notes.push("Ưu tiên prompt tiếng Việt, mô tả rõ chuyển động máy, xe buýt và không gian làm việc.");
+  return [...baseLines, `Tạo video quảng cáo ngắn bằng tiếng Việt cho ${productProfile.product_name}.`, ...notes]
     .filter(Boolean)
     .join(" ");
 }

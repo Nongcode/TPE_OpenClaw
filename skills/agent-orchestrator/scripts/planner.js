@@ -1,7 +1,15 @@
+const { randomUUID } = require("crypto");
 const { normalizeText } = require("./common");
 
 function messageMentionsAny(normalized, patterns) {
-  return patterns.some((pattern) => normalized.includes(pattern));
+  const normalizePhrase = (value) =>
+    ` ${String(value || "")
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, " ")
+      .replace(/\s+/g, " ")
+      .trim()} `;
+  const haystack = normalizePhrase(normalized);
+  return patterns.some((pattern) => haystack.includes(normalizePhrase(pattern)));
 }
 
 function classifyApprovalPolicy(message, fromAgentId) {
@@ -145,23 +153,25 @@ function classifyWorkflow(normalized, fromAgentId) {
     messageMentionsAny(normalized, ["viet", "content", "facebook", "bai", "caption", "copy"]);
   const wantsMedia =
     !forbidsMedia &&
-    (wantsCampaign ||
-      messageMentionsAny(normalized, [
-        "image",
-        "anh",
-        "hinh",
-        "hinh anh",
-        "banner",
-        "media",
-        "video",
-        "visual",
-        "kem anh",
-        "kem hinh",
-        "tao anh",
-        "lam anh",
-        "tao video",
-        "lam video",
-      ]));
+    messageMentionsAny(normalized, [
+      "image",
+      "anh",
+      "hinh",
+      "hinh anh",
+      "banner",
+      "media",
+      "video",
+      "visual",
+      "kem anh",
+      "kem hinh",
+      "kem video",
+      "tao anh",
+      "lam anh",
+      "tao video",
+      "lam video",
+      "goi media",
+      "visual key",
+    ]);
   const wantsPublish =
     messageMentionsAny(normalized, ["dang bai", "dang facebook", "facebook", "post", "xuat ban"]);
 
@@ -240,6 +250,80 @@ function createStep(params) {
     ...(params.deliverToUser ? { deliverToUser: true } : {}),
     ...(params.requiresPlanApproval ? { requiresPlanApproval: true } : {}),
     ...(params.simulateOnly ? { simulateOnly: true } : {}),
+  };
+}
+
+function buildResponseSchemaForStep(step) {
+  const baseSchema = {
+    sections: ["WORKFLOW_META", "TRANG_THAI", "KET_QUA", "RUI_RO", "DE_XUAT_BUOC_TIEP"],
+    workflow_meta: ["workflow_id", "step_id", "action"],
+  };
+
+  if (["content_review", "media_review", "final_review"].includes(step.type)) {
+    return {
+      ...baseSchema,
+      review_decision: ["approve", "reject"],
+    };
+  }
+
+  if (step.type === "product_research") {
+    return {
+      ...baseSchema,
+      required_fields: ["product_name", "product_url", "specifications_text", "images"],
+    };
+  }
+
+  if (step.to === "nv_media" || step.type === "publish") {
+    return {
+      ...baseSchema,
+      required_fields: ["asset_paths", "tool_result"],
+    };
+  }
+
+  return baseSchema;
+}
+
+function getStepLifecyclePolicy(step, steps, index) {
+  const nextStep = steps[index + 1];
+
+  if (["content_review", "media_review", "final_review"].includes(step.type)) {
+    return {
+      requires_response: true,
+      response_schema: buildResponseSchemaForStep(step),
+      on_approve: nextStep ? `advance:${nextStep.type}` : "complete_workflow",
+      on_reject: "request_revision",
+      max_retries: 2,
+    };
+  }
+
+  return {
+    requires_response: true,
+    response_schema: buildResponseSchemaForStep(step),
+    on_approve: nextStep ? `advance:${nextStep.type}` : "complete_workflow",
+    on_reject: "fail_workflow",
+    max_retries: 1,
+  };
+}
+
+function attachWorkflowMetadata(plan) {
+  const workflowId = plan.workflow_id || `wf_${randomUUID()}`;
+  const enrichedSteps = plan.steps.map((step, index, steps) => {
+    const lifecycle = getStepLifecyclePolicy(step, steps, index);
+    return {
+      ...step,
+      workflow_id: workflowId,
+      step_id: step.step_id || `step_${String(index + 1).padStart(2, "0")}`,
+      from_agent: step.from,
+      to_agent: step.to,
+      action: step.action || step.type,
+      ...lifecycle,
+    };
+  });
+
+  return {
+    ...plan,
+    workflow_id: workflowId,
+    steps: enrichedSteps,
   };
 }
 
@@ -446,7 +530,6 @@ function buildHierarchyPlan(registry, fromAgentId, message, taskType) {
           taskType,
           message,
           requiresExecutiveApproval,
-          simulateOnly: true,
         },
       ],
     };
@@ -716,7 +799,7 @@ function createPlan(registry, options) {
   const mode = options.mode || "direct";
 
   if (mode === "direct") {
-    return {
+    return attachWorkflowMetadata({
       mode,
       from: options.from,
       taskType: options.taskType || null,
@@ -730,12 +813,12 @@ function createPlan(registry, options) {
           message: options.message,
         },
       ],
-    };
+    });
   }
 
   if (mode === "auto") {
     const best = chooseBestAllowedChild(registry, options.from, options.message, options.taskType);
-    return {
+    return attachWorkflowMetadata({
       mode,
       from: options.from,
       taskType: options.taskType || null,
@@ -751,11 +834,13 @@ function createPlan(registry, options) {
           score: best.score,
         },
       ],
-    };
+    });
   }
 
   if (mode === "hierarchy") {
-    return buildHierarchyPlan(registry, options.from, options.message, options.taskType || null);
+    return attachWorkflowMetadata(
+      buildHierarchyPlan(registry, options.from, options.message, options.taskType || null),
+    );
   }
 
   throw new Error(`Unsupported mode: ${mode}`);

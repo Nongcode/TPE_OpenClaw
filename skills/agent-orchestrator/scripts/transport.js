@@ -3,17 +3,72 @@ const path = require("path");
 const { randomUUID } = require("crypto");
 const { pathToFileURL } = require("url");
 const { loadOpenClawConfig, resolveGatewayToken } = require("./common");
+const REPO_ROOT = path.resolve(__dirname, "..", "..", "..");
+
+function resolveSessionKey(agentId, sessionKey) {
+  if (typeof sessionKey === "string" && sessionKey.trim()) {
+    return sessionKey.trim();
+  }
+  return `agent:${agentId}:main`;
+}
+
+function resolveSkillHints(step) {
+  if (step.type === "product_research") {
+    return [
+      {
+        skill: "search_product_text",
+        owner: step.to,
+        command: `node ${path.join(REPO_ROOT, "skills", "search_product_text", "action.js").replace(/\\/g, "/")} --keyword "<ten san pham hoac keyword sach>" --target_site "uptek.vn"`,
+      },
+    ];
+  }
+
+  if (step.to === "nv_media" && ["produce", "media_revise"].includes(step.type)) {
+    return [
+      {
+        skill: "gemini_generate_image",
+        owner: step.to,
+        command: `node ${path.join(REPO_ROOT, "skills", "gemini_generate_image", "action.js").replace(/\\/g, "/")} '{"image_prompt":"...","image_paths":["<anh_goc>"]}'`,
+      },
+      {
+        skill: "generate_video",
+        owner: step.to,
+        command: `node ${path.join(REPO_ROOT, "skills", "generate_video", "action.js").replace(/\\/g, "/")} '{"video_prompt":"...","image_paths":["<anh_goc>"]}'`,
+      },
+    ];
+  }
+
+  if (step.type === "publish") {
+    return [
+      {
+        skill: "facebook_publish_post",
+        owner: step.to,
+        command: `node ${path.join(REPO_ROOT, "skills", "facebook_publish_post", "action.js").replace(/\\/g, "/")} '{"caption_long":"...","media_paths":["<asset>"]}'`,
+      },
+    ];
+  }
+
+  return [];
+}
 
 function buildTaskEnvelope(step, registry, index, total, context = {}) {
   const source = registry.byId[step.from];
   const target = registry.byId[step.to];
+  const workflowId = step.workflow_id || context.workflowId || `wf_${Date.now()}`;
+  const stepId = step.step_id || `step_${index + 1}`;
+  const action = step.action || step.type || "task.generic";
 
   return {
-    taskId: `task_${Date.now()}_${index + 1}`,
-    parentTaskId: null,
+    workflowId,
+    stepId,
+    action,
+    taskId: step.task_id || `task_${workflowId}_${stepId}`,
+    parentTaskId: step.parent_task_id || null,
     type: step.taskType || step.type || "task.generic",
     from: step.from,
     to: step.to,
+    fromAgent: step.from_agent || step.from,
+    toAgent: step.to_agent || step.to,
     sourceRole: source?.role || step.from,
     targetRole: target?.role || step.to,
     sourceLabel: source?.label || step.from,
@@ -30,181 +85,155 @@ function buildTaskEnvelope(step, registry, index, total, context = {}) {
         : target?.requiresReviewBy || null,
     deliverToUser: Boolean(step.deliverToUser),
     requiresExecutiveApproval: Boolean(step.requiresExecutiveApproval),
+    requiresResponse:
+      Object.prototype.hasOwnProperty.call(step, "requires_response")
+        ? Boolean(step.requires_response)
+        : true,
+    responseSchema: step.response_schema || null,
+    skillHints: Array.isArray(step.skill_hints) ? step.skill_hints : resolveSkillHints(step),
+    onApprove: step.on_approve || null,
+    onReject: step.on_reject || null,
+    maxRetries:
+      Number.isInteger(step.max_retries) && step.max_retries > 0 ? step.max_retries : 1,
     rules: [
       "Respect your role and permission boundaries.",
-      "If the task requires escalation, name the next agent explicitly.",
-      "Routine department execution should be approved at the department-head level and must not wait for executive approval unless the task is flagged as exceptional.",
-      "Respond with sections: KET_QUA, RUI_RO, DE_XUAT_BUOC_TIEP.",
+      "Every reply must keep workflow_id and step_id for traceability.",
+      "Do not pretend another agent completed work that you did not do yourself.",
+      "If your lane uses a skill, call it from your own lane and report the real result.",
+      "Respond with sections: WORKFLOW_META, TRANG_THAI, KET_QUA, RUI_RO, DE_XUAT_BUOC_TIEP.",
     ],
   };
 }
 
 function buildTaskPrompt(envelope, registry) {
-  const source = registry.byId[envelope.from];
-  const target = registry.byId[envelope.to];
-  const normalizedGoal = String(envelope.goal || "").toLowerCase();
+  const shortGoal = String(envelope.goal || "").trim();
+  const compactEnvelope = {
+    workflow_id: envelope.workflowId,
+    step_id: envelope.stepId,
+    action: envelope.action,
+    from_agent: envelope.fromAgent,
+    to_agent: envelope.toAgent,
+    step_index: envelope.stepIndex,
+    total_steps: envelope.totalSteps,
+    requires_response: envelope.requiresResponse,
+    response_schema: envelope.responseSchema,
+    skill_hints: envelope.skillHints,
+    on_approve: envelope.onApprove,
+    on_reject: envelope.onReject,
+    max_retries: envelope.maxRetries,
+  };
+
+  function truncateText(text, limit = 3200) {
+    const raw = String(text || "").trim();
+    if (!raw) {
+      return "";
+    }
+    if (raw.length <= limit) {
+      return raw;
+    }
+    return `${raw.slice(0, limit)}\n...[rut gon]`;
+  }
+
   const lines = [
-    `[HE THONG DIEU PHOI] Buoc ${envelope.stepIndex}/${envelope.totalSteps}`,
+    `Ban dang xu ly buoc ${envelope.stepIndex}/${envelope.totalSteps} cua workflow.`,
+    `Nguoi giao: ${envelope.sourceLabel || envelope.from}. Nguoi nhan: ${envelope.targetLabel || envelope.to}.`,
+    `Cong viec can lam: ${shortGoal}`,
     "",
-    `${envelope.sourceLabel || envelope.from} (${envelope.from}) dang giao viec cho ${envelope.targetLabel || envelope.to} (${envelope.to}).`,
-    "",
-    "NHIEM VU:",
-    envelope.goal,
-    "",
-    "THONG TIN DIEU PHOI:",
-    `- Nguoi giao viec: ${envelope.sourceLabel || envelope.from}`,
-    `- Vai tro nguoi giao: ${envelope.sourceRole}`,
-    `- Nguoi nhan viec: ${envelope.targetLabel || envelope.to}`,
-    `- Vai tro nguoi nhan: ${envelope.targetRole}`,
-    `- Loai buoc: ${envelope.type}`,
+    "Thong tin truy vet:",
+    `- workflow_id: ${envelope.workflowId}`,
+    `- step_id: ${envelope.stepId}`,
+    `- action: ${envelope.action}`,
+    `- loai_buoc: ${envelope.type}`,
+    `- so_lan_thu_toi_da: ${envelope.maxRetries}`,
   ];
 
-  if (source?.canDelegateTo?.length) {
-    lines.push(`- Nguon co the giao cho: ${source.canDelegateTo.join(", ")}`);
-  }
-  if (target?.canDelegateTo?.length) {
-    lines.push(`- Dich co the giao tiep cho: ${target.canDelegateTo.join(", ")}`);
-  }
   if (envelope.requiresReviewBy) {
-    lines.push(`- Ket qua can duoc review boi: ${envelope.requiresReviewBy}`);
-  }
-  if (envelope.deliverToUser) {
-    lines.push("- Sau khi buoc nay dat, ban phai tong hop ket qua va tra thang cho nguoi dung trong chinh khung chat nay.");
+    lines.push(`- Can review boi: ${envelope.requiresReviewBy}`);
   }
   if (envelope.reportsTo) {
-    lines.push(`- Cap tren truc tiep cua ban: ${envelope.reportsTo}`);
+    lines.push(`- Cap tren truc tiep: ${envelope.reportsTo}`);
   }
-  lines.push(
-    `- Co can phe duyet cap quan ly khong: ${envelope.requiresExecutiveApproval ? "co" : "khong"}`,
-  );
-  if (!envelope.requiresExecutiveApproval) {
-    lines.push(
-      "- Viec nam trong tham quyen van hanh thuong ngay cua phong. Truong phong duoc quyen tu duyet va cho trien khai.",
-    );
-  }
+
+  lines.push("", "Canh tay xu ly cho buoc nay:");
   if (envelope.type === "propose") {
-    lines.push(
-      "- Day la buoc LAP KE HOACH DE XIN DUYET. Tuyet doi KHONG tu trien khai, KHONG tu viet bai dang hoan chinh, KHONG tu tao media, KHONG tu dang bai.",
-    );
+    lines.push("- Day la buoc lap ke hoach de xin duyet, chua duoc trien khai san xuat.");
+  } else if (envelope.type === "plan_execute") {
+    lines.push("- Lap ke hoach thuc thi chi tiet cho doi ngay trong lane cua ban.");
+    lines.push("- Khong duoc goi lai bo dieu phoi workflow tu ben trong mot workflow dang chay.");
+  } else if (envelope.type === "product_research") {
+    lines.push("- Tu lane cua ban, truy cap web va dung skill search_product_text de lay du lieu san pham that.");
+    lines.push("- Khong duoc goi wrapper noi bo hay goi lai bo dieu phoi workflow.");
+    lines.push("- Bao ro ten san pham, URL, thong so chinh, thu muc anh goc va muc do khop.");
+  } else if (envelope.type === "content_revise") {
+    lines.push("- Sua content theo review that, giu nguyen workflow_id va step_id trong reply.");
+  } else if (envelope.type === "media_revise") {
+    lines.push("- Sua media theo review that; neu can goi skill thi goi tu lane cua ban.");
+  } else if (envelope.to === "nv_media") {
+    lines.push("- Nhan content da duyet va tao media that bang skill trong lane cua ban.");
+    lines.push("- Tra ve duong dan tai nguyen that va ghi chu do khop voi content.");
+    lines.push('- Prompt tao anh va video bat buoc viet bang tieng Viet.');
+    lines.push('- Bat buoc dat logo "TÂN PHÁT ETEK" o goc trai ben tren anh va video.');
+    lines.push("- Bat buoc uu tien dung anh goc san pham/anh tham chieu da duoc ban giao.");
+  } else if (envelope.to === "nv_content") {
+    lines.push("- Viet content that tu lane cua ban; neu thieu du lieu thi tu research truoc khi viet.");
+  } else if (envelope.type === "content_review") {
+    lines.push("- Review content that. Phai tra QUYET_DINH: approve hoac reject.");
+  } else if (envelope.type === "media_review") {
+    lines.push("- Review media that. Phai tra QUYET_DINH: approve hoac reject.");
+  } else if (envelope.type === "compile_post") {
+    lines.push("- Tu lane cua ban, dong goi content + media da duyet thanh bo publish that.");
+    lines.push("- Khong duoc mo phong local pipeline ben ngoai lane nay.");
+  } else if (envelope.type === "final_review") {
+    lines.push("- Day la final review that cua truong_phong. Phai tra QUYET_DINH: approve hoac reject.");
+  } else if (envelope.type === "publish") {
+    lines.push("- Day la buoc publish that. Neu du dieu kien thi goi skill publish tu lane cua ban.");
+    lines.push("- Tra ve ket qua publish that: post id, media da dang, loi neu co.");
+  } else if (envelope.type === "report") {
+    lines.push("- Tong hop ket qua workflow va bao cao cho cap tren.");
   }
-  if (envelope.type === "plan") {
-    lines.push(
-      "- Day la buoc pho phong boc tach ke hoach da duoc truong phong chot thanh dau viec thuc thi cho doi san xuat.",
-    );
-    lines.push(
-      "- Sau khi nhan lenh nay, pho phong phai brief cho nv_content viet bai. Chua duoc giao media truoc khi content da duoc pho phong duyet.",
-    );
+
+  if (envelope.deliverToUser) {
+    lines.push("- Buoc nay can tong hop ket qua de tra truc tiep nguoi dung.");
   }
-  if (envelope.type === "plan_execute") {
-    lines.push(
-      "- Day la buoc pho phong mo pha trien khai theo ke hoach da duoc truong phong va nguoi dung chot. Bat dau tu content, khong duoc nhay thang sang media.",
-    );
-  }
-  if (envelope.type === "product_research") {
-    lines.push(
-      "- Day la buoc thu thap du lieu san pham bat buoc cho content. Hay su dung skill search_product_text de lay text day du + anh goc san pham.",
-    );
-    lines.push(
-      "- Ket qua phai neu ro: ten san pham, url, thong so chinh, duong dan thu muc anh goc, danh sach anh tai ve.",
-    );
-  }
-  if (envelope.type === "content_revise") {
-    lines.push(
-      "- Day la buoc nhan vien content sua lai noi dung theo nhan xet review. Chua duoc nhay sang media cho den khi content duoc duyet lai.",
-    );
-  }
-  if (envelope.type === "media_revise") {
-    lines.push(
-      "- Day la buoc nhan vien media sua lai media theo nhan xet review. Chi tap trung sua media bi loi.",
-    );
-  }
-  if (envelope.to === "nv_media") {
-    lines.push(
-      "- Quy dinh bat buoc cho nhan vien media: nhan content da duyet + image_prompt + video_prompt, sau do goi skill gemini_generate_image va generate_video de tao media that.",
-    );
-    lines.push(
-      "- Bat buoc dung anh goc san pham trong THU_MUC_ANH_GOC / danh sach anh da research lam anh tham chieu cho ca tao anh va tao video.",
-    );
-  }
-  if (envelope.type === "content_review") {
-    lines.push(
-      "- Day la buoc duyet noi dung. Neu content chua dat, yeu cau lam lai dung vao phan noi dung, chua chuyen sang media. Neu content da dat, luc do moi duoc brief media.",
-    );
-    if (envelope.deliverToUser) {
-      lines.push(
-        "- Day la diem ket thuc workflow cho yeu cau chi can content. Neu content dat, tra truc tiep ban content final cho nguoi dung, khong trinh truong_phong.",
-      );
+
+  if (Array.isArray(envelope.skillHints) && envelope.skillHints.length > 0) {
+    lines.push("", "Skill bat buoc:");
+    lines.push("- Chi duoc dung cac skill duoi day cho buoc nay.");
+    lines.push("- Khong duoc dung wrapper/script noi bo khac de gia lap ket qua.");
+    for (const item of envelope.skillHints) {
+      lines.push(`- skill: ${item.skill}`);
+      lines.push(`  owner_lane: ${item.owner}`);
+      lines.push(`  command_mau: ${item.command}`);
     }
   }
-  if (envelope.type === "media_review") {
-    lines.push(
-      "- Day la buoc duyet media. Chi xac nhan dat khi media khop voi content da duoc duyet.",
-    );
-    if (envelope.deliverToUser) {
-      lines.push(
-        "- Day la diem ket thuc workflow cho yeu cau nguoi dung giao truc tiep cho pho_phong. Neu media dat, tra truc tiep goi ket qua gom content va anh cho nguoi dung, khong trinh truong_phong.",
-      );
-    }
-  }
-  if (envelope.type === "compile_post") {
-    lines.push(
-      "- Day la buoc pho phong tong hop content da duyet + media da duyet thanh ho so san sang dang.",
-    );
-    lines.push(
-      "- KHONG dang Facebook o buoc nay. Ket qua phai neu ro media da chot, caption tom tat, prompt da chot va trang thai san sang de truong_phong final_review.",
-    );
-  }
-  if (envelope.type === "final_review") {
-    lines.push(
-      "- Day la buoc truong phong review goi bai viet cuoi cung truoc khi he thong goi facebook_publish_post.",
-    );
-    lines.push(
-      "- Neu truong_phong duyet PASS, he thong se dang bai that sau buoc nay: uu tien 1 bai image, va 1 bai video neu video da tao thanh cong; neu video bi quota thi chi dang image.",
-    );
-  }
-  if (envelope.type === "publish") {
-    lines.push(
-      "- Day la buoc mo phong dang bai sau khi nguoi dung da xac nhan ro rang rang duoc phep dang.",
-    );
-    lines.push(
-      "- KHONG dang that. Chi tao bao cao mo phong dang bai va luu thong tin can post de he thong main xu ly sau.",
-    );
-  }
+
   if (envelope.handoffContext) {
-    const handoffHeading =
-      envelope.type === "content_review"
-          ? "BAN NHAP CONTENT TU BUOC TRUOC:"
-          : envelope.type === "media_review"
-            ? "BAN NHAP MEDIA TU BUOC TRUOC:"
-            : "BAN GIAO TU BUOC TRUOC:";
-    lines.push("", handoffHeading, envelope.handoffContext);
+    lines.push("", "Tom tat ban giao tu buoc truoc:", truncateText(envelope.handoffContext, 5000));
   }
+
   if (Array.isArray(envelope.completedSteps) && envelope.completedSteps.length > 0) {
-    lines.push("", "TOM TAT CAC BUOC DA HOAN THANH:");
-    for (const item of envelope.completedSteps) {
-      lines.push(`- ${item.stepIndex}. ${item.from} -> ${item.to} [${item.type}]`);
-      if (item.summary && (envelope.type === "final_review" || !envelope.type.endsWith("_review"))) {
-        lines.push(`  ${item.summary}`);
+    lines.push("", "Cac buoc da xong gan day:");
+    for (const item of envelope.completedSteps.slice(-5)) {
+      lines.push(`- ${item.stepIndex || "?"}. ${item.from} -> ${item.to} [${item.type}]`);
+      if (item.summary) {
+        lines.push(`  ${truncateText(item.summary, 320)}`);
       }
     }
   }
 
   lines.push(
     "",
-    "YEU CAU TRA LOI:",
-    "- Lam dung vai tro cua ban.",
-    "- Neu can giao tiep cho cap duoi hoac cap tren, neu ro ten agent tiep theo trong phan DE_XUAT_BUOC_TIEP.",
-    "- Neu task KHONG can phe duyet cap quan ly, khong de xuat xin duyet len quan_ly chi de cho phe duyet hinh thuc.",
-    "- Neu dang o buoc propose, chi tra ban ke hoach de xin duyet va dung lai cho quyet dinh cua cap tren.",
-    "- Khong duoc bo qua thu tu: truong phong lap ke hoach va cho nguoi dung duyet -> pho phong brief content -> phe duyet content -> media -> phe duyet media -> pho phong dong goi ho so dang -> truong phong final_review -> he thong moi dang Facebook that.",
-    "- Truong phong khong duoc tu san xuat noi dung, prompt anh, prompt video, caption, hay bai dang hoan chinh cho dau viec nhieu buoc. Truong phong phai giao xuong pho phong de trien khai.",
-    "- Tra loi bang tieng Viet.",
-    "- Bat buoc dung 3 muc: KET_QUA, RUI_RO, DE_XUAT_BUOC_TIEP.",
-    "- Khi step type la compile_post, ket qua phai phan anh trang thai san sang dang, KHONG duoc bao la da publish.",
-    "",
-    "TASK_ENVELOPE_JSON:",
-    JSON.stringify(envelope, null, 2),
+    "Cach phan hoi:",
+    "- Reply phai bat dau ngay bang WORKFLOW_META, khong duoc co loi mo dau hay giai thich trung gian.",
+    "- Bat buoc giu nguyen workflow_id va step_id.",
+    "- Bat buoc co WORKFLOW_META va TRANG_THAI trong reply.",
+    "- Neu day la buoc review/final_review, them dong QUYET_DINH: approve hoac reject.",
+    "- Neu co goi skill, noi ro ten skill, dau vao chinh, va ket qua that.",
+    "- Tra loi tieng Viet voi cac muc: WORKFLOW_META, TRANG_THAI, KET_QUA, RUI_RO, DE_XUAT_BUOC_TIEP.",
   );
+
+  lines.push("", "Thong tin cau truc tom tat:");
+  lines.push(JSON.stringify(compactEnvelope, null, 2));
 
   return lines.join("\n");
 }
@@ -245,62 +274,223 @@ async function loadGatewayCallModule() {
   return gatewayCallModulePromise;
 }
 
-async function sendToSession(options) {
+async function callGatewayMethod(options) {
   const gatewayUrl = resolveGatewayUrl(options.openClawHome);
   const gatewayToken = resolveGatewayToken({ openClawHome: options.openClawHome });
   if (!gatewayToken) {
     throw new Error("Missing OPENCLAW_GATEWAY_TOKEN.");
   }
   const { callGateway } = await loadGatewayCallModule();
-  const result = await callGateway({
+  return callGateway({
     url: gatewayUrl,
     token: gatewayToken,
-    method: "agent",
-    params: {
-      message: options.prompt,
-      agentId: options.agentId,
-      sessionKey: `agent:${options.agentId}:main`,
-      idempotencyKey: randomUUID(),
-    },
-    expectFinal: true,
-    timeoutMs: options.timeoutMs || 900000,
+    method: options.method,
+    params: options.params,
+    expectFinal: options.expectFinal !== false,
+    timeoutMs:
+      Number.isFinite(options.timeoutMs) && options.timeoutMs > 1000 ? options.timeoutMs : 180000,
   });
-  const payloads = Array.isArray(result?.result?.payloads) ? result.result.payloads : [];
+}
 
-  function extractTextFromPayload(item) {
-    if (!item) return "";
-    if (typeof item.text === "string" && item.text.trim()) return item.text.trim();
-    if (typeof item.assistantText === "string" && item.assistantText.trim()) return item.assistantText.trim();
-    if (typeof item.message === "string" && item.message.trim()) return item.message.trim();
-    if (item.data && typeof item.data.assistant_text === "string" && item.data.assistant_text.trim()) return item.data.assistant_text.trim();
-    if (item.data && typeof item.data.assistantText === "string" && item.data.assistantText.trim()) return item.data.assistantText.trim();
-    if (Array.isArray(item.content)) {
-      return item.content
-        .map((c) => {
-          if (!c) return "";
-          if (typeof c.text === "string") return c.text;
-          if (typeof c.message === "string") return c.message;
-          if (typeof c.content === "string") return c.content;
-          return "";
-        })
-        .filter(Boolean)
-        .join("\n\n");
-    }
-    if (item.data && typeof item.data === "string") return item.data;
-    return "";
+function extractTextFromPayload(item) {
+  if (!item) return "";
+  if (typeof item.text === "string" && item.text.trim()) return item.text.trim();
+  if (typeof item.assistantText === "string" && item.assistantText.trim()) {
+    return item.assistantText.trim();
   }
+  if (typeof item.message === "string" && item.message.trim()) return item.message.trim();
+  if (item.data && typeof item.data.assistant_text === "string" && item.data.assistant_text.trim()) {
+    return item.data.assistant_text.trim();
+  }
+  if (item.data && typeof item.data.assistantText === "string" && item.data.assistantText.trim()) {
+    return item.data.assistantText.trim();
+  }
+  if (Array.isArray(item.content)) {
+    return item.content
+      .map((contentItem) => {
+        if (!contentItem) return "";
+        if (typeof contentItem.text === "string") return contentItem.text;
+        if (typeof contentItem.message === "string") return contentItem.message;
+        if (typeof contentItem.content === "string") return contentItem.content;
+        return "";
+      })
+      .filter(Boolean)
+      .join("\n\n");
+  }
+  if (item.data && typeof item.data === "string") return item.data;
+  return "";
+}
 
+function extractTextFromGatewayResult(result) {
+  const payloads = Array.isArray(result?.result?.payloads) ? result.result.payloads : [];
   const text = payloads
     .map(extractTextFromPayload)
     .filter(Boolean)
     .join("\n\n")
     .trim();
-
   return text || result?.summary || "";
 }
 
+function correlateByWorkflowIdAndStepId(params) {
+  const text = String(params.text || "");
+  const workflowRegex = /workflow_id\s*[:=-]\s*([A-Za-z0-9._-]+)/i;
+  const stepRegex = /step_id\s*[:=-]\s*([A-Za-z0-9._-]+)/i;
+  const workflowMatch = text.match(workflowRegex);
+  const stepMatch = text.match(stepRegex);
+  const responseWorkflowId = workflowMatch?.[1] || params.workflowId;
+  const responseStepId = stepMatch?.[1] || params.stepId;
+  const matchedBy =
+    workflowMatch?.[1] === params.workflowId && stepMatch?.[1] === params.stepId
+      ? "reply_text"
+      : "request_context";
+
+  return {
+    ok: responseWorkflowId === params.workflowId && responseStepId === params.stepId,
+    workflowId: responseWorkflowId,
+    stepId: responseStepId,
+    matchedBy,
+  };
+}
+
+function buildProgressMessage(options) {
+  const lines = [`${options.title || options.message || "Cap nhat workflow"}`.trim()];
+  if (options.message && options.message !== options.title) {
+    lines.push(options.message);
+  }
+  lines.push(
+    `Ma workflow: ${options.workflowId} | Buoc: ${options.stepId} | Nhan su: ${options.agentId} | Trang thai: ${options.state}`,
+  );
+  if (options.detail) {
+    lines.push("Chi tiet:");
+    lines.push(String(options.detail).trim());
+  }
+  return lines.join("\n");
+}
+
+async function appendSystemEnvelopeToLane(options) {
+  return callGatewayMethod({
+    openClawHome: options.openClawHome,
+    method: "chat.inject",
+    params: {
+      sessionKey: resolveSessionKey(options.agentId, options.sessionKey),
+      message: options.message,
+      label: options.label || "workflow-system",
+    },
+    timeoutMs: options.timeoutMs || 30000,
+  });
+}
+
+async function appendProgressEventToLane(options) {
+  return appendSystemEnvelopeToLane({
+    openClawHome: options.openClawHome,
+    agentId: options.agentId,
+    sessionKey: options.sessionKey,
+    label: options.label || "workflow-progress",
+    message: buildProgressMessage(options),
+    timeoutMs: options.timeoutMs || 30000,
+  });
+}
+
+async function emitProgressEvent(options) {
+  return appendProgressEventToLane(options);
+}
+
+async function markStepStarted(options) {
+  return appendProgressEventToLane({
+    ...options,
+    state: "started",
+    eventType: options.eventType || "task_received",
+  });
+}
+
+async function markStepCompleted(options) {
+  return appendProgressEventToLane({
+    ...options,
+    state: "completed",
+    eventType: options.eventType || "completed",
+  });
+}
+
+async function markStepFailed(options) {
+  return appendProgressEventToLane({
+    ...options,
+    state: "failed",
+    eventType: options.eventType || "failed",
+  });
+}
+
+function sendTaskToAgentLane(options) {
+  const sessionKey = resolveSessionKey(options.agentId, options.sessionKey);
+  const runId = options.runId || randomUUID();
+  const timeoutMs = Number(options.timeoutMs || process.env.OPENCLAW_ORCHESTRATOR_TIMEOUT_MS || 180000);
+  const pending = callGatewayMethod({
+    openClawHome: options.openClawHome,
+    method: "agent",
+    params: {
+      message: options.prompt,
+      agentId: options.agentId,
+      sessionKey,
+      idempotencyKey: runId,
+    },
+    expectFinal: true,
+    timeoutMs: Number.isFinite(timeoutMs) && timeoutMs > 10000 ? timeoutMs : 180000,
+  });
+
+  return {
+    runId,
+    agentId: options.agentId,
+    sessionKey,
+    workflowId: options.workflowId,
+    stepId: options.stepId,
+    pending,
+  };
+}
+
+async function waitForAgentResponse(task) {
+  const result = await task.pending;
+  const text = extractTextFromGatewayResult(result);
+  const correlation = correlateByWorkflowIdAndStepId({
+    workflowId: task.workflowId,
+    stepId: task.stepId,
+    text,
+  });
+  return {
+    runId: task.runId,
+    agentId: task.agentId,
+    sessionKey: task.sessionKey,
+    text,
+    result,
+    correlation,
+  };
+}
+
+async function sendToSession(options) {
+  const task = sendTaskToAgentLane({
+    agentId: options.agentId,
+    openClawHome: options.openClawHome,
+    sessionKey: options.sessionKey,
+    prompt: options.prompt,
+    workflowId: options.envelope?.workflowId,
+    stepId: options.envelope?.stepId,
+    timeoutMs: options.timeoutMs,
+  });
+  const response = await waitForAgentResponse(task);
+  return response.text;
+}
+
 module.exports = {
+  appendProgressEventToLane,
+  appendSystemEnvelopeToLane,
   buildTaskEnvelope,
   buildTaskPrompt,
+  callGatewayMethod,
+  correlateByWorkflowIdAndStepId,
+  emitProgressEvent,
+  extractTextFromGatewayResult,
+  markStepCompleted,
+  markStepFailed,
+  markStepStarted,
+  sendTaskToAgentLane,
   sendToSession,
+  waitForAgentResponse,
 };
