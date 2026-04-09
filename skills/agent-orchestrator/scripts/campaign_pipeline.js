@@ -11,14 +11,15 @@ const { normalizeText } = require("./common");
 const REPO_ROOT = path.resolve(__dirname, "..", "..", "..");
 
 const DEFAULT_MEDIA_CONFIG = {
-  browser_path: "C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe",
-  user_data_dir: "C:/Users/PHAMDUCLONG/AppData/Local/Microsoft/Edge/User Data/Default",
-  profile_name: "Default",
-  target_gemini_image_url: "https://gemini.google.com/app/f656f2fb0ee3ee9d",
-  target_gemini_video_url: "https://gemini.google.com/app",
-  page_id: "643048852218433",
+  browser_path: process.env.OPENCLAW_MEDIA_BROWSER_PATH || "C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe",
+  user_data_dir:
+    process.env.OPENCLAW_MEDIA_USER_DATA_DIR || "C:/Users/PHAMDUCLONG/AppData/Local/Microsoft/Edge/User Data/Default",
+  profile_name: process.env.OPENCLAW_MEDIA_PROFILE || "Default",
+  target_gemini_image_url: process.env.OPENCLAW_GEMINI_IMAGE_URL || "https://gemini.google.com/app/f656f2fb0ee3ee9d",
+  target_gemini_video_url: process.env.OPENCLAW_GEMINI_VIDEO_URL || "https://gemini.google.com/app",
+  page_id: process.env.OPENCLAW_FACEBOOK_PAGE_ID || process.env.FACEBOOK_PAGE_ID || "",
   access_token:
-    "EAANUeplbZCAwBRDtmbZCZAXJH6xt1Wavxe0OiZAbIBV2nFwFZApZC6GsP0nKXO1BrMBoBaDUZBMpOjCOZAyUL9zC2iQh9spFumXC2KcT1THFvZCBjLeONUfyw4R7a0ZCn3bZAqNRglxjrh3GOVtZCIObHg3ArMqfOZC7RIJo6rvSn2FszW45e4KZCXfSAwddj5WRXmpnotnmoMzDwf1N6Myc6bb6py",
+    process.env.OPENCLAW_FACEBOOK_ACCESS_TOKEN || process.env.FACEBOOK_PAGE_ACCESS_TOKEN || "",
   timeout_ms: 420000,
 };
 
@@ -658,6 +659,19 @@ async function publishCampaignPosts(workflowState, options = {}) {
   const logs = [];
   const stepReports = {};
   const config = resolveMediaConfig(options);
+
+  if (!config.dry_run) {
+    if (!config.access_token) {
+      throw new Error(
+        "Missing Facebook access token. Set OPENCLAW_FACEBOOK_ACCESS_TOKEN or pass options.accessToken (or run with dry_run=true).",
+      );
+    }
+    if (!config.page_id) {
+      throw new Error(
+        "Missing Facebook page id. Set OPENCLAW_FACEBOOK_PAGE_ID or pass options.pageId (or run with dry_run=true).",
+      );
+    }
+  }
 
   if (!Array.isArray(workflowState.generatedImagePaths) || workflowState.generatedImagePaths.length === 0) {
     throw new Error("Missing generated image for publish step.");

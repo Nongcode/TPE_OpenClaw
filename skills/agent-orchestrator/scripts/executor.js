@@ -5,15 +5,27 @@ const {
   publishCampaignPosts,
   toRepoRelative,
 } = require("./campaign_pipeline");
-const { createDemoProductResearchFallback, runProductResearch } = require("./product_research");
+const { publishViaAutoContent } = require("./auto_content_pipeline");
+const { createDemoProductResearchFallback, runProductResearch } = require("./product_research_runtime");
 const { createSimulationArtifacts } = require("./simulation_artifacts");
 const { buildTaskEnvelope, buildTaskPrompt, sendToSession } = require("./transport");
+const {
+  clearPhoPhongWorkflowState,
+  loadPhoPhongWorkflowState,
+  savePhoPhongWorkflowState,
+} = require("./workflow_state");
 
 function compactReply(reply, limit = 320) {
   return String(reply || "")
     .replace(/\s+/g, " ")
     .trim()
     .slice(0, limit);
+}
+
+function reportProgress(options, payload) {
+  if (typeof options?.onProgress === "function") {
+    options.onProgress(payload);
+  }
 }
 
 function buildCompletedStepSummary(reply, targetStepType) {
@@ -242,6 +254,27 @@ function classifyReviewDecision(reply) {
   return "unknown";
 }
 
+function isReviewStepType(stepType) {
+  return ["content_review", "media_review", "consultant_review", "final_review"].includes(
+    stepType,
+  );
+}
+
+function isEmailWorkflowStep(step) {
+  return (
+    [
+      "customer_data_research",
+      "consultant_produce",
+      "consultant_revise",
+      "consultant_review",
+      "email_send",
+    ].includes(step?.type) ||
+    step?.from === "pho_phong_cskh" ||
+    step?.to === "pho_phong_cskh" ||
+    step?.to === "nv_consultant"
+  );
+}
+
 function buildRevisionLoop(step, reply, loopCount) {
   if (loopCount >= 2) {
     return [];
@@ -285,9 +318,63 @@ function buildRevisionLoop(step, reply, loopCount) {
     ];
   }
 
+  if (step.type === "consultant_review") {
+    return [
+      {
+        ...step,
+        type: "consultant_revise",
+        from: step.to,
+        to: "nv_consultant",
+        message: `Pho phong CSKH chua duyet noi dung email/tu van. Nhan vien tu van phai sua theo nhan xet sau: ${compactReply(reply)}`,
+      },
+      {
+        ...step,
+        type: "consultant_review",
+        from: "nv_consultant",
+        to: step.to,
+        message: `Nhan vien tu van da sua noi dung email/tu van theo nhan xet truoc do. Pho phong CSKH hay duyet lai. Nhan xet truoc: ${compactReply(reply)}`,
+      },
+    ];
+  }
+
   if (step.type === "final_review") {
     const normalized = normalizeText(reply);
+    const targetsConsultant =
+      step.from === "pho_phong_cskh" ||
+      messageMentionsAny(normalized, [
+        "email",
+        "mail",
+        "khach hang",
+        "tu van",
+        "cskh",
+        "noi dung email",
+      ]);
     const targetsMedia = messageMentionsAny(normalized, ["media", "video", "anh", "hinh"]);
+    if (targetsConsultant) {
+      return [
+        {
+          ...step,
+          type: "consultant_revise",
+          from: step.to,
+          to: "nv_consultant",
+          message: `Truong phong yeu cau sua noi dung email/tu van theo nhan xet sau: ${compactReply(reply)}`,
+        },
+        {
+          ...step,
+          type: "consultant_review",
+          from: "nv_consultant",
+          to: "pho_phong_cskh",
+          message: `Nhan vien tu van da sua noi dung email/tu van theo nhan xet cua truong phong. Pho phong CSKH hay duyet lai.`,
+        },
+        {
+          ...step,
+          type: "final_review",
+          from: "pho_phong_cskh",
+          to: "truong_phong",
+          message: `Pho phong CSKH trinh lai goi email/tu van sau khi da sua theo nhan xet truoc do. Nhan xet truoc: ${compactReply(reply)}`,
+        },
+      ];
+    }
     if (targetsMedia) {
       return [
         {
@@ -604,6 +691,29 @@ function safeRepoRelative(filePath) {
   }
 }
 
+function buildDryRunProductResearchPayload(step, plan, options = {}) {
+  const keyword = String(options.productKeyword || step?.message || plan?.message || "san pham")
+    .trim()
+    .slice(0, 200);
+  const targetSite = String(options.targetSite || "uptek.vn").trim();
+
+  return {
+    command: "[dry-run] skip search_product_text execution",
+    targetSite,
+    keyword,
+    success: true,
+    dryRun: true,
+    data: {
+      product_name: keyword || "san pham",
+      product_url: `https://${targetSite}`,
+      specifications_text: "[dry-run] Chua thu thap du lieu san pham that.",
+      images: [],
+      primary_image: null,
+      image_download_dir: "",
+    },
+  };
+}
+
 function buildMediaProduceReply(workflowState) {
   const research = workflowState?.productResearch?.data || {};
   const referenceImages = Array.isArray(workflowState.referenceImages)
@@ -644,6 +754,25 @@ function buildMediaProduceReply(workflowState) {
   ]
     .filter(Boolean)
     .join("\n");
+}
+
+function buildDryRunMediaProduceReply(workflowState) {
+  const research = workflowState?.productResearch?.data || {};
+
+  return [
+    "KET_QUA:",
+    "- Dry-run: bo qua gemini_generate_image + generate_video, chi lap mo phong handoff media.",
+    `- TEN_SAN_PHAM: ${research.product_name || "(khong ro)"}`,
+    `- FINAL_CONTENT: ${workflowState.finalContent || workflowState.latestContentDraft || ""}`,
+    `- IMAGE_PROMPT: ${workflowState.imagePrompt || ""}`,
+    `- VIDEO_PROMPT: ${workflowState.videoPrompt || ""}`,
+    "",
+    "RUI_RO:",
+    "- Chua co media that vi dang chay dry-run.",
+    "",
+    "DE_XUAT_BUOC_TIEP:",
+    "- Neu can chay that, tat --dry-run de nv_media tao anh/video.",
+  ].join("\n");
 }
 
 function buildMediaReviewApprovedReply(workflowState) {
@@ -749,6 +878,37 @@ function appendPublishResultToFinalReply(reply, workflowState) {
   return `${String(reply || "").trim()}\n\n${publishLines.join("\n")}`.trim();
 }
 
+function buildAutoContentPublishReply(workflowState, publishResult) {
+  const generatedImages = Array.isArray(workflowState.generatedImagePaths)
+    ? workflowState.generatedImagePaths.map(safeRepoRelative)
+    : [];
+  const generatedVideos = Array.isArray(workflowState.generatedVideoPaths)
+    ? workflowState.generatedVideoPaths.map(safeRepoRelative)
+    : [];
+
+  return [
+    "KET_QUA:",
+    `- Pho phong da goi skill auto-content de dang Facebook toi: ${publishResult.targetPages || "ALL"}.`,
+    `- IMAGE_POST_ID: ${publishResult.image?.post_id || "(khong co)"}`,
+    `- IMAGE_POST_MEDIA: ${generatedImages[0] || "(khong co)"}`,
+    `- VIDEO_POST_ID: ${publishResult.video?.post_id || "(khong co)"}`,
+    `- VIDEO_POST_MEDIA: ${generatedVideos[0] || "(khong co)"}`,
+    publishResult.video?.skipped ? `- VIDEO_POST: BO_QUA (${publishResult.video.reason || "khong co video"})` : "",
+    "",
+    "RUI_RO:",
+    "- Can kiem tra lai tren fanpage de xac nhan hien thi dung caption va media.",
+    "",
+    "DE_XUAT_BUOC_TIEP:",
+    "- Neu can, tiep tuc do luong tuong tac hoac chinh sua bai dang sau phat hanh.",
+  ]
+    .filter(Boolean)
+    .join("\n");
+}
+
+function snapshotWorkflowState(workflowState) {
+  return JSON.parse(JSON.stringify(workflowState));
+}
+
 async function executePlan(registry, plan, options) {
   const steps = [];
   const reviewLoopCounts = new Map();
@@ -773,8 +933,27 @@ async function executePlan(registry, plan, options) {
     publishResults: null,
   };
   const demoSmoothMode = isDemoSmoothModeEnabled(options);
-  for (let index = 0; index < plan.steps.length; index += 1) {
-    const step = plan.steps[index];
+  try {
+    if (plan.from === "pho_phong" && plan.resumeWorkflowState) {
+      const savedState = loadPhoPhongWorkflowState();
+      if (!savedState?.workflowState) {
+        throw new Error("Khong tim thay workflow dang cho duyet cua pho_phong de tiep tuc.");
+      }
+      Object.assign(workflowState, savedState.workflowState);
+    }
+
+    for (let index = 0; index < plan.steps.length; index += 1) {
+      const step = plan.steps[index];
+      reportProgress(options, {
+        phase: "step-start",
+        stepIndex: index + 1,
+        totalSteps: plan.steps.length,
+        stepType: step.type,
+        from: step.from,
+        to: step.to,
+        message: `Bat dau buoc ${index + 1}/${plan.steps.length}: ${step.type} (${step.from} -> ${step.to}).`,
+      });
+      
     const agent = registry.byId[step.to];
     if (!agent) {
       throw new Error(`Unknown target agent: ${step.to}`);
@@ -782,16 +961,31 @@ async function executePlan(registry, plan, options) {
 
     if (step.type === "product_research") {
       let payload;
-      try {
-        payload = runProductResearch(step, plan, options);
-      } catch (error) {
-        if (!demoSmoothMode) {
-          throw error;
+      if (options.dryRun) {
+        payload = buildDryRunProductResearchPayload(step, plan, options);
+      } else {
+        try {
+          payload = runProductResearch(step, plan, {
+            ...options,
+            onProgress: (progressPayload) =>
+              reportProgress(options, {
+                ...progressPayload,
+                stepIndex: index + 1,
+                totalSteps: plan.steps.length,
+                stepType: step.type,
+                from: step.from,
+                to: step.to,
+              }),
+          });
+        } catch (error) {
+          if (!demoSmoothMode) {
+            throw error;
+          }
+          payload = createDemoProductResearchFallback(step, plan, options);
+          simulation?.addNote(
+            `Demo smooth fallback at step ${index + 1} (${step.type}): ${error?.message || error}`,
+          );
         }
-        payload = createDemoProductResearchFallback(step, plan, options);
-        simulation?.addNote(
-          `Demo smooth fallback at step ${index + 1} (${step.type}): ${error?.message || error}`,
-        );
       }
       workflowState.productResearch = payload;
       const summary = [
@@ -815,6 +1009,15 @@ async function executePlan(registry, plan, options) {
         productResearch: payload,
       };
       steps.push(record);
+      reportProgress(options, {
+        phase: "step-done",
+        stepIndex: index + 1,
+        totalSteps: plan.steps.length,
+        stepType: step.type,
+        from: step.from,
+        to: step.to,
+        message: `Da xong buoc ${index + 1}/${plan.steps.length}: ${step.type}.`,
+      });
       simulation?.setProductResearch(payload);
       simulation?.addStep(index, {
         type: step.type,
@@ -843,6 +1046,15 @@ async function executePlan(registry, plan, options) {
         reply: publishReply,
       };
       steps.push(publishRecord);
+      reportProgress(options, {
+        phase: "step-done",
+        stepIndex: index + 1,
+        totalSteps: plan.steps.length,
+        stepType: step.type,
+        from: step.from,
+        to: step.to,
+        message: `Da xong buoc ${index + 1}/${plan.steps.length}: ${step.type}.`,
+      });
       simulation?.setPublishSimulation({
         status: "SIMULATED",
         finalContent: workflowState.finalContent || "",
@@ -865,8 +1077,16 @@ async function executePlan(registry, plan, options) {
       (step.type === "produce" || step.type === "media_revise") &&
       step.to === "nv_media"
     ) {
-      const mediaResult = await generateMediaAssets(workflowState, options);
-      const mediaReply = buildMediaProduceReply(workflowState);
+      const mediaResult = options.dryRun
+        ? {
+            dryRun: true,
+            generatedImagePaths: [],
+            generatedVideoPaths: [],
+          }
+        : await generateMediaAssets(workflowState, options);
+      const mediaReply = options.dryRun
+        ? buildDryRunMediaProduceReply(workflowState)
+        : buildMediaProduceReply(workflowState);
       const mediaRecord = {
         ...step,
         sessionKey: agent.transport?.sessionKey || agent.sessionKey,
@@ -881,6 +1101,15 @@ async function executePlan(registry, plan, options) {
         mediaResult,
       };
       steps.push(mediaRecord);
+      reportProgress(options, {
+        phase: "step-done",
+        stepIndex: index + 1,
+        totalSteps: plan.steps.length,
+        stepType: step.type,
+        from: step.from,
+        to: step.to,
+        message: `Da xong buoc ${index + 1}/${plan.steps.length}: ${step.type}.`,
+      });
       simulation?.addStep(index, {
         type: step.type,
         from: step.from,
@@ -915,6 +1144,15 @@ async function executePlan(registry, plan, options) {
         reply: reviewReply,
       };
       steps.push(reviewRecord);
+      reportProgress(options, {
+        phase: "step-done",
+        stepIndex: index + 1,
+        totalSteps: plan.steps.length,
+        stepType: step.type,
+        from: step.from,
+        to: step.to,
+        message: `Da xong buoc ${index + 1}/${plan.steps.length}: ${step.type}.`,
+      });
       simulation?.addStep(index, {
         type: step.type,
         from: step.from,
@@ -942,6 +1180,15 @@ async function executePlan(registry, plan, options) {
         reply: compileReply,
       };
       steps.push(compileRecord);
+      reportProgress(options, {
+        phase: "step-done",
+        stepIndex: index + 1,
+        totalSteps: plan.steps.length,
+        stepType: step.type,
+        from: step.from,
+        to: step.to,
+        message: `Da xong buoc ${index + 1}/${plan.steps.length}: ${step.type}.`,
+      });
       simulation?.addStep(index, {
         type: step.type,
         from: step.from,
@@ -957,6 +1204,51 @@ async function executePlan(registry, plan, options) {
               : "READY_IMAGE_ONLY"
             : "MISSING_IMAGE",
       });
+      continue;
+    }
+
+    if (step.type === "auto_content_publish") {
+      const publishResult = await publishViaAutoContent(workflowState, options);
+      workflowState.publishResults = publishResult;
+      const publishReply = buildAutoContentPublishReply(workflowState, publishResult);
+      const publishRecord = {
+        ...step,
+        sessionKey: agent.transport?.sessionKey || agent.sessionKey,
+        envelope: {
+          type: "auto_content_publish",
+          from: step.from,
+          to: step.to,
+          localSkillPipeline: true,
+        },
+        prompt: "[local] run auto-content/post_fb.js with approved content and media",
+        reply: publishReply,
+        publishResult,
+      };
+      steps.push(publishRecord);
+      reportProgress(options, {
+        phase: "step-done",
+        stepIndex: index + 1,
+        totalSteps: plan.steps.length,
+        stepType: step.type,
+        from: step.from,
+        to: step.to,
+        message: `Da xong buoc ${index + 1}/${plan.steps.length}: ${step.type}.`,
+      });
+      simulation?.setPublishExecution({
+        channel: "auto-content",
+        targetPages: publishResult.targetPages,
+        image: publishResult.image || null,
+        video: publishResult.video || null,
+        generatedImagePaths: Array.isArray(workflowState.generatedImagePaths)
+          ? workflowState.generatedImagePaths.map(safeRepoRelative)
+          : [],
+        generatedVideoPaths: Array.isArray(workflowState.generatedVideoPaths)
+          ? workflowState.generatedVideoPaths.map(safeRepoRelative)
+          : [],
+      });
+      if (!options.dryRun) {
+        clearPhoPhongWorkflowState();
+      }
       continue;
     }
 
@@ -982,10 +1274,7 @@ async function executePlan(registry, plan, options) {
         to: step.to,
         sessionKey: forcedRecord.sessionKey,
         replyPreview: compactReply(forcedReply, 1200),
-        decision:
-          ["content_review", "media_review", "final_review"].includes(step.type)
-            ? classifyReviewDecision(forcedReply)
-            : null,
+        decision: isReviewStepType(step.type) ? classifyReviewDecision(forcedReply) : null,
       };
       simulation?.addStep(index, forcedStepRecord);
 
@@ -1017,9 +1306,7 @@ async function executePlan(registry, plan, options) {
       type: item.type,
       summary: buildCompletedStepSummary(item.reply, step.type),
     }));
-    const isReviewStep = ["content_review", "media_review", "final_review"].includes(
-      step.type,
-    );
+    const isReviewStep = isReviewStepType(step.type);
     const previousReply = steps.length > 0 ? steps[steps.length - 1]?.reply : null;
     let handoffContext = buildHandoffContext(step.type, previousReply);
     if (
@@ -1066,6 +1353,15 @@ async function executePlan(registry, plan, options) {
         prompt,
         reply: "[dry-run] Khong goi gateway.",
       });
+      reportProgress(options, {
+        phase: "step-done",
+        stepIndex: index + 1,
+        totalSteps: plan.steps.length,
+        stepType: step.type,
+        from: step.from,
+        to: step.to,
+        message: `Da xong buoc ${index + 1}/${plan.steps.length}: ${step.type} (dry-run).`,
+      });
       continue;
     }
 
@@ -1077,6 +1373,15 @@ async function executePlan(registry, plan, options) {
         sessionKey: agent.transport?.sessionKey || agent.sessionKey,
         envelope,
         prompt,
+        onProgress: (payload) =>
+          reportProgress(options, {
+            ...payload,
+            stepIndex: index + 1,
+            totalSteps: plan.steps.length,
+            stepType: step.type,
+            from: step.from,
+            to: step.to,
+          }),
       });
     } catch (error) {
       if (!demoSmoothMode) {
@@ -1106,15 +1411,24 @@ async function executePlan(registry, plan, options) {
       prompt,
       reply,
     });
+    reportProgress(options, {
+      phase: "step-done",
+      stepIndex: index + 1,
+      totalSteps: plan.steps.length,
+      stepType: step.type,
+      from: step.from,
+      to: step.to,
+      message: `Da xong buoc ${index + 1}/${plan.steps.length}: ${step.type}.`,
+    });
 
     let decision =
-      ["content_review", "media_review", "final_review"].includes(step.type)
+      isReviewStepType(step.type)
         ? demoSmoothMode
           ? "approved"
           : classifyReviewDecision(reply)
         : null;
 
-    if (step.type === "final_review" && decision === "approved") {
+    if (step.type === "final_review" && decision === "approved" && !isEmailWorkflowStep(step)) {
       const publishResult = await publishCampaignPosts(workflowState, options);
       reply = appendPublishResultToFinalReply(reply, workflowState);
       steps[steps.length - 1].reply = reply;
@@ -1181,7 +1495,7 @@ async function executePlan(registry, plan, options) {
       ensureDemoWorkflowBundle(workflowState);
     }
 
-    if (["content_review", "media_review", "final_review"].includes(step.type)) {
+    if (isReviewStepType(step.type)) {
       if (options.dryRun) {
         continue;
       }
@@ -1199,47 +1513,83 @@ async function executePlan(registry, plan, options) {
         }
       }
     }
+
+    const isLastStep = index === plan.steps.length - 1;
+    if (plan.from === "pho_phong" && isLastStep && step.deliverToUser === true) {
+      if (step.approvalGate === "content") {
+        savePhoPhongWorkflowState({
+          stage: "awaiting_content_approval",
+          taskType: plan.taskType || null,
+          message: plan.message || "",
+          workflowState: snapshotWorkflowState(workflowState),
+        });
+      }
+      if (step.approvalGate === "media") {
+        savePhoPhongWorkflowState({
+          stage: "awaiting_media_approval",
+          taskType: plan.taskType || null,
+          message: plan.message || "",
+          workflowState: snapshotWorkflowState(workflowState),
+        });
+      }
+    }
   }
 
   if (demoSmoothMode) {
-    ensureDemoWorkflowBundle(workflowState);
+      ensureDemoWorkflowBundle(workflowState);
+    }
+
+    simulation?.setFinalContent(workflowState.finalContent);
+    simulation?.setImagePrompt(workflowState.imagePrompt);
+    simulation?.setVideoPrompt(workflowState.videoPrompt);
+    simulation?.setBatchInput({
+      workflowMode: plan.mode,
+      fromAgent: plan.from,
+      taskType: plan.taskType || null,
+      message: plan.message || "",
+      finalContent: workflowState.finalContent || "",
+      imagePrompt: workflowState.imagePrompt || "",
+      videoPrompt: workflowState.videoPrompt || "",
+      productResearch: workflowState.productResearch?.data || null,
+      productOriginalImages: Array.isArray(workflowState.productResearch?.data?.images)
+        ? workflowState.productResearch.data.images
+            .map((item) => item?.file_path)
+            .filter(Boolean)
+        : [],
+      readyForBatchExecution:
+        Boolean(String(workflowState.finalContent || "").trim()) &&
+        (Boolean(String(workflowState.imagePrompt || "").trim()) ||
+          Boolean(String(workflowState.videoPrompt || "").trim())),
+    });
+
+    const result = {
+      ...plan,
+      executedSteps: steps,
+      finalReply: steps[steps.length - 1]?.reply || "",
+      simulationArtifacts: simulation ? { runDir: simulation.runDir } : null,
+    };
+
+    simulation?.finalize(result);
+
+    return {
+      ...result,
+    };
+  } catch (err) {
+    try {
+      if (simulation) {
+        simulation.addNote(`Fatal error: ${err && err.stack ? err.stack : String(err)}`);
+        simulation.finalize({
+          mode: plan.mode,
+          from: plan.from,
+          totalExecutedSteps: Array.isArray(steps) ? steps.length : 0,
+          finalReplyPreview: String(steps[steps.length - 1]?.reply || "").slice(0, 2000),
+        });
+      }
+    } catch (writeErr) {
+      // best-effort: ignore errors while trying to write artifacts
+    }
+    throw err;
   }
-
-  simulation?.setFinalContent(workflowState.finalContent);
-  simulation?.setImagePrompt(workflowState.imagePrompt);
-  simulation?.setVideoPrompt(workflowState.videoPrompt);
-  simulation?.setBatchInput({
-    workflowMode: plan.mode,
-    fromAgent: plan.from,
-    taskType: plan.taskType || null,
-    message: plan.message || "",
-    finalContent: workflowState.finalContent || "",
-    imagePrompt: workflowState.imagePrompt || "",
-    videoPrompt: workflowState.videoPrompt || "",
-    productResearch: workflowState.productResearch?.data || null,
-    productOriginalImages: Array.isArray(workflowState.productResearch?.data?.images)
-      ? workflowState.productResearch.data.images
-          .map((item) => item?.file_path)
-          .filter(Boolean)
-      : [],
-    readyForBatchExecution:
-      Boolean(String(workflowState.finalContent || "").trim()) &&
-      (Boolean(String(workflowState.imagePrompt || "").trim()) ||
-        Boolean(String(workflowState.videoPrompt || "").trim())),
-  });
-
-  const result = {
-    ...plan,
-    executedSteps: steps,
-    finalReply: steps[steps.length - 1]?.reply || "",
-    simulationArtifacts: simulation ? { runDir: simulation.runDir } : null,
-  };
-
-  simulation?.finalize(result);
-
-  return {
-    ...result,
-  };
 }
 
 module.exports = {
@@ -1247,5 +1597,7 @@ module.exports = {
   buildOriginalImageMediaReply,
   shouldForceOriginalImageMedia,
   classifyReviewDecision,
+  isEmailWorkflowStep,
+  isReviewStepType,
   executePlan,
 };

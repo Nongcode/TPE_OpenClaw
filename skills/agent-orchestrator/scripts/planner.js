@@ -1,4 +1,5 @@
 const { normalizeText } = require("./common");
+const { loadPhoPhongWorkflowState } = require("./workflow_state");
 
 function messageMentionsAny(normalized, patterns) {
   return patterns.some((pattern) => normalized.includes(pattern));
@@ -54,6 +55,39 @@ function classifyApprovalPolicy(message, fromAgentId) {
 }
 
 function classifyWorkflow(normalized, fromAgentId) {
+  const wantsEmailWorkflow =
+    messageMentionsAny(normalized, [
+      "gui mail",
+      "gui email",
+      "gửi mail",
+      "gửi email",
+      "email khach hang",
+      "mail khach hang",
+      "cham soc khach hang qua email",
+      "tri an khach hang qua email",
+      "khach hang mua nhieu nhat",
+      "khach mua nhieu nhat",
+      "khach mua nhieu hang nhat",
+      "khach hang than thiet",
+      "khach hang vip",
+    ]) ||
+    (messageMentionsAny(normalized, ["email", "mail"]) &&
+      messageMentionsAny(normalized, ["khach hang", "mua nhieu", "tri an", "cham soc", "tư vấn", "tu van"]));
+  const wantsSendEmail =
+    messageMentionsAny(normalized, [
+      "xac nhan gui email",
+      "xac nhan gui mail",
+      "duyet gui email",
+      "duyet gui mail",
+      "duyet noi dung mail va gui",
+      "duyet noi dung email va gui",
+      "gui email nay di",
+      "gui mail nay di",
+      "gui di email",
+      "gui di mail",
+      "tien hanh gui email",
+      "tien hanh gui mail",
+    ]);
   const forbidsMedia = messageMentionsAny(normalized, [
     "khong can anh",
     "khong can hinh",
@@ -166,6 +200,8 @@ function classifyWorkflow(normalized, fromAgentId) {
     messageMentionsAny(normalized, ["dang bai", "dang facebook", "facebook", "post", "xuat ban"]);
 
   return {
+    wantsEmailWorkflow,
+    wantsSendEmail,
     forbidsMedia,
     wantsExplicitPublish,
     wantsPlanOnly,
@@ -176,6 +212,133 @@ function classifyWorkflow(normalized, fromAgentId) {
     wantsMedia,
     wantsPublish,
   };
+}
+
+function classifyPhoPhongApprovalIntent(normalized) {
+  const mediaApprovalSignals = [
+    "duyet media",
+    "duyet anh",
+    "duyet hinh",
+    "duyet hinh anh",
+    "duyet video",
+    "media da duyet",
+    "anh da duyet",
+    "video da duyet",
+    "duyet ca content va media",
+    "duyet ca noi dung va media",
+    "duyet toan bo media",
+  ];
+  const publishSignals = [
+    "dang facebook di",
+    "dang bai di",
+    "tien hanh dang bai",
+    "tien hanh dang facebook",
+    "xac nhan dang bai",
+    "xac nhan dang facebook",
+    "post len facebook",
+    "dang di",
+  ];
+  const contentApprovalSignals = [
+    "duyet content",
+    "duyet noi dung",
+    "duyet bai viet",
+    "duyet ban content",
+    "duyet ban nhap content",
+    "noi dung da duyet",
+    "content da duyet",
+    "bai viet da duyet",
+  ];
+  const approvesMedia = messageMentionsAny(normalized, mediaApprovalSignals);
+  const wantsPublish = messageMentionsAny(normalized, publishSignals);
+  const approvesContent =
+    !approvesMedia &&
+    messageMentionsAny(normalized, contentApprovalSignals);
+
+  return {
+    approvesContent,
+    approvesMedia,
+    wantsPublish,
+  };
+}
+
+function buildCustomerCareEmailSteps(params) {
+  const {
+    fromAgentId,
+    taskType,
+    message,
+    requiresExecutiveApproval,
+    finalDeliverAgentId,
+    sendMode,
+  } = params;
+
+  if (sendMode) {
+    return [
+      createStep({
+        type: "email_send",
+        from: fromAgentId,
+        to: "pho_phong_cskh",
+        taskType,
+        message,
+        requiresExecutiveApproval,
+      }),
+      createStep({
+        type: "report",
+        from: "pho_phong_cskh",
+        to: finalDeliverAgentId,
+        taskType,
+        message,
+        requiresExecutiveApproval,
+        deliverToUser: true,
+      }),
+    ];
+  }
+
+  const steps = [
+    createStep({
+      type: "customer_data_research",
+      from: fromAgentId,
+      to: "pho_phong_cskh",
+      taskType,
+      message,
+      requiresExecutiveApproval,
+    }),
+    createStep({
+      type: "consultant_produce",
+      from: "pho_phong_cskh",
+      to: "nv_consultant",
+      taskType,
+      message,
+      requiresExecutiveApproval,
+    }),
+    createStep({
+      type: "consultant_review",
+      from: "nv_consultant",
+      to: "pho_phong_cskh",
+      taskType,
+      message,
+      requiresExecutiveApproval,
+      requiresReviewBy: "pho_phong_cskh",
+      deliverToUser: finalDeliverAgentId === "pho_phong_cskh",
+    }),
+  ];
+
+  if (finalDeliverAgentId === "pho_phong_cskh") {
+    return steps;
+  }
+
+  steps.push(
+    createStep({
+      type: "final_review",
+      from: "pho_phong_cskh",
+      to: finalDeliverAgentId,
+      taskType,
+      message,
+      requiresExecutiveApproval,
+      deliverToUser: true,
+    }),
+  );
+
+  return steps;
 }
 
 function scoreAgent(agent, taskText, taskType) {
@@ -240,6 +403,7 @@ function createStep(params) {
     ...(params.deliverToUser ? { deliverToUser: true } : {}),
     ...(params.requiresPlanApproval ? { requiresPlanApproval: true } : {}),
     ...(params.simulateOnly ? { simulateOnly: true } : {}),
+    ...(params.approvalGate ? { approvalGate: params.approvalGate } : {}),
   };
 }
 
@@ -253,6 +417,7 @@ function buildDepartmentExecutionSteps(params) {
     includeDepartmentFinalReview,
     finalDeliverAgentId,
     wantsMedia,
+    stopAfterContentReview,
   } = params;
   const steps = [];
 
@@ -294,9 +459,16 @@ function buildDepartmentExecutionSteps(params) {
       message,
       requiresExecutiveApproval,
       requiresReviewBy: "pho_phong",
-      deliverToUser: !wantsMedia && finalDeliverAgentId === "pho_phong",
+      deliverToUser:
+        (stopAfterContentReview || !wantsMedia) && finalDeliverAgentId === "pho_phong",
+      approvalGate:
+        stopAfterContentReview && finalDeliverAgentId === "pho_phong" ? "content" : null,
     }),
   );
+
+  if (stopAfterContentReview) {
+    return steps;
+  }
 
   if (!wantsMedia) {
     if (includeDepartmentFinalReview) {
@@ -358,6 +530,7 @@ function buildDepartmentExecutionSteps(params) {
         message,
         requiresExecutiveApproval,
         deliverToUser: true,
+        approvalGate: "media",
       }),
     );
     return steps;
@@ -400,6 +573,39 @@ function buildDepartmentExecutionSteps(params) {
   return steps;
 }
 
+function buildPhoPhongMediaContinuationSteps(params) {
+  const { taskType, message, requiresExecutiveApproval } = params;
+  return [
+    createStep({
+      type: "produce",
+      from: "pho_phong",
+      to: "nv_media",
+      taskType,
+      message,
+      requiresExecutiveApproval,
+    }),
+    createStep({
+      type: "media_review",
+      from: "nv_media",
+      to: "pho_phong",
+      taskType,
+      message,
+      requiresExecutiveApproval,
+      requiresReviewBy: "pho_phong",
+    }),
+    createStep({
+      type: "compile_post",
+      from: "pho_phong",
+      to: "pho_phong",
+      taskType,
+      message,
+      requiresExecutiveApproval,
+      deliverToUser: true,
+      approvalGate: "media",
+    }),
+  ];
+}
+
 function buildHierarchyPlan(registry, fromAgentId, message, taskType) {
   const fromAgent = registry.byId[fromAgentId];
   if (!fromAgent) {
@@ -411,6 +617,8 @@ function buildHierarchyPlan(registry, fromAgentId, message, taskType) {
     fromAgentId,
   );
   const {
+    wantsEmailWorkflow,
+    wantsSendEmail,
     wantsExplicitPublish,
     wantsPlanOnly,
     asksDetailedPlan,
@@ -419,6 +627,47 @@ function buildHierarchyPlan(registry, fromAgentId, message, taskType) {
     wantsContent,
     wantsMedia,
   } = classifyWorkflow(normalized, fromAgentId);
+  const phoPhongState = fromAgentId === "pho_phong" ? loadPhoPhongWorkflowState() : null;
+  const phoPhongApprovalIntent =
+    fromAgentId === "pho_phong" ? classifyPhoPhongApprovalIntent(normalized) : null;
+
+  if (fromAgentId === "truong_phong" && wantsEmailWorkflow) {
+    return {
+      mode: "hierarchy",
+      from: fromAgentId,
+      taskType,
+      message,
+      requiresExecutiveApproval,
+      reportBackToOrigin: false,
+      steps: buildCustomerCareEmailSteps({
+        fromAgentId: "truong_phong",
+        taskType,
+        message,
+        requiresExecutiveApproval,
+        finalDeliverAgentId: "truong_phong",
+        sendMode: wantsSendEmail,
+      }),
+    };
+  }
+
+  if (fromAgentId === "pho_phong_cskh" && wantsEmailWorkflow) {
+    return {
+      mode: "hierarchy",
+      from: fromAgentId,
+      taskType,
+      message,
+      requiresExecutiveApproval,
+      reportBackToOrigin: false,
+      steps: buildCustomerCareEmailSteps({
+        fromAgentId: "pho_phong_cskh",
+        taskType,
+        message,
+        requiresExecutiveApproval,
+        finalDeliverAgentId: "pho_phong_cskh",
+        sendMode: wantsSendEmail,
+      }),
+    };
+  }
 
   const steps = [];
   let currentOwner = fromAgentId;
@@ -527,6 +776,50 @@ function buildHierarchyPlan(registry, fromAgentId, message, taskType) {
     };
   }
 
+  if (fromAgentId === "pho_phong" && phoPhongState?.stage === "awaiting_content_approval" && phoPhongApprovalIntent?.approvesContent) {
+    return {
+      mode: "hierarchy",
+      from: fromAgentId,
+      taskType,
+      message,
+      requiresExecutiveApproval,
+      reportBackToOrigin: false,
+      resumeWorkflowState: true,
+      steps: buildPhoPhongMediaContinuationSteps({
+        taskType,
+        message,
+        requiresExecutiveApproval,
+      }),
+    };
+  }
+
+  if (
+    fromAgentId === "pho_phong" &&
+    phoPhongState?.stage === "awaiting_media_approval" &&
+    (phoPhongApprovalIntent?.approvesMedia || phoPhongApprovalIntent?.wantsPublish)
+  ) {
+    return {
+      mode: "hierarchy",
+      from: fromAgentId,
+      taskType,
+      message,
+      requiresExecutiveApproval,
+      reportBackToOrigin: false,
+      resumeWorkflowState: true,
+      steps: [
+        createStep({
+          type: "auto_content_publish",
+          from: "pho_phong",
+          to: "pho_phong",
+          taskType,
+          message,
+          requiresExecutiveApproval,
+          deliverToUser: true,
+        }),
+      ],
+    };
+  }
+
   if (fromAgentId === "pho_phong" && wantsCampaign) {
     return {
       mode: "hierarchy",
@@ -544,6 +837,7 @@ function buildHierarchyPlan(registry, fromAgentId, message, taskType) {
         includeDepartmentFinalReview: false,
         finalDeliverAgentId: "pho_phong",
         wantsMedia,
+        stopAfterContentReview: wantsMedia,
       }),
     };
   }

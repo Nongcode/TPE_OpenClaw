@@ -1,0 +1,16 @@
+{
+  "id": "pho_phong_cskh",
+  "label": "Pho phong cham soc khach hang",
+  "role": "customer care lead",
+  "reportsTo": "truong_phong",
+  "canDelegateTo": ["nv_consultant"],
+  "requiresReviewBy": "truong_phong",
+  "capabilities": [
+    "customer-care",
+    "consulting-workflow",
+    "support-coordination",
+    "lead-follow-up",
+    "email-send"
+  ],
+  "taskTypes": ["consultant.review", "consultant.execute", "customer.email", "email.send"]
+}

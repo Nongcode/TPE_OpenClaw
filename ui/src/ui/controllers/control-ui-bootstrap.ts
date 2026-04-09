@@ -40,8 +40,21 @@ export async function loadControlUiBootstrapConfig(state: ControlUiBootstrapStat
     "employeeName",
     "autoConnect",
   ];
+  function getParamCaseInsensitive(params: URLSearchParams, key: string) {
+    if (params.has(key)) {
+      return params.get(key);
+    }
+    const lower = key.toLowerCase();
+    for (const [k, v] of params) {
+      if (k.toLowerCase() === lower) {
+        return v;
+      }
+    }
+    return null;
+  }
+
   for (const key of passthroughKeys) {
-    const value = current.searchParams.get(key);
+    const value = getParamCaseInsensitive(current.searchParams, key);
     if (value) {
       url.searchParams.set(key, value);
     }
@@ -49,7 +62,7 @@ export async function loadControlUiBootstrapConfig(state: ControlUiBootstrapStat
   if (current.hash.startsWith("#")) {
     const hashParams = new URLSearchParams(current.hash.slice(1));
     for (const key of passthroughKeys) {
-      const value = hashParams.get(key);
+      const value = getParamCaseInsensitive(hashParams, key);
       if (value && !url.searchParams.has(key)) {
         url.searchParams.set(key, value);
       }

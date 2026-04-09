@@ -3,7 +3,7 @@
   "label": "Truong phong",
   "role": "department head",
   "reportsTo": "quan_ly",
-  "canDelegateTo": ["pho_phong"],
+  "canDelegateTo": ["pho_phong", "pho_phong_cskh"],
   "capabilities": [
     "review",
     "approval",

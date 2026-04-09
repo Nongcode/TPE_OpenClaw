@@ -342,6 +342,15 @@ export class GatewayBrowserClient {
       locale: navigator.language,
     };
 
+    // Debug: log the control UI access payload being sent during connect
+    try {
+      if (typeof console !== "undefined" && console.debug) {
+        console.debug("[control-ui] connect params controlUiAccess:", params.controlUiAccess);
+      }
+    } catch {
+      // ignore logging failures
+    }
+
     void this.request<GatewayHelloOk>("connect", params)
       .then((hello) => {
         this.pendingDeviceTokenRetry = false;

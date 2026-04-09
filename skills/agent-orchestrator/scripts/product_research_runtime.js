@@ -24,6 +24,66 @@ const PRODUCT_STOP_PHRASES = [
   "de trinh duyet",
 ];
 
+function resolveCacheDir(options = {}) {
+  if (options.productResearchCacheDir) {
+    return path.resolve(options.productResearchCacheDir);
+  }
+  const repoRoot = path.resolve(__dirname, "..", "..", "..");
+  return path.join(repoRoot, "artifacts", "cache", "product-research");
+}
+
+function ensureDir(dirPath) {
+  fs.mkdirSync(dirPath, { recursive: true });
+}
+
+function buildCacheKey(keyword, targetSite) {
+  return normalizeText(`${targetSite} ${keyword}`)
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 160);
+}
+
+function readCachedResearch(keyword, targetSite, options = {}) {
+  if (options.disableProductResearchCache) {
+    return null;
+  }
+  const ttlMs =
+    Number.isFinite(Number(options.productResearchCacheTtlMs)) && Number(options.productResearchCacheTtlMs) >= 0
+      ? Number(options.productResearchCacheTtlMs)
+      : 6 * 60 * 60 * 1000;
+  const cacheFile = path.join(resolveCacheDir(options), `${buildCacheKey(keyword, targetSite)}.json`);
+  if (!fs.existsSync(cacheFile)) {
+    return null;
+  }
+  try {
+    const stat = fs.statSync(cacheFile);
+    if (ttlMs === 0 || Date.now() - stat.mtimeMs > ttlMs) {
+      return null;
+    }
+    const payload = JSON.parse(fs.readFileSync(cacheFile, "utf8"));
+    if (!payload?.success || !payload?.data?.product_name) {
+      return null;
+    }
+    return {
+      ...payload,
+      cacheHit: true,
+      cacheFile,
+    };
+  } catch {
+    return null;
+  }
+}
+
+function writeCachedResearch(keyword, targetSite, payload, options = {}) {
+  if (options.disableProductResearchCache) {
+    return;
+  }
+  const cacheDir = resolveCacheDir(options);
+  ensureDir(cacheDir);
+  const cacheFile = path.join(cacheDir, `${buildCacheKey(keyword, targetSite)}.json`);
+  fs.writeFileSync(cacheFile, `${JSON.stringify(payload, null, 2)}\n`, "utf8");
+}
+
 function extractQuotedKeyword(source) {
   const match = String(source || "").match(/["“](.+?)["”]/u);
   return match?.[1]?.trim() || "";
@@ -33,7 +93,7 @@ function sanitizeKeywordCandidate(value) {
   let cleaned = String(value || "")
     .replace(/\s+/g, " ")
     .trim()
-    .replace(/^[:\-â€“,\s]+/u, "")
+    .replace(/^[:\-,\s]+/u, "")
     .replace(/[.?!,\s]+$/u, "");
 
   for (const phrase of PRODUCT_STOP_PHRASES) {
@@ -41,7 +101,7 @@ function sanitizeKeywordCandidate(value) {
     const normalizedPhrase = normalizeText(phrase);
     const index = normalizedCleaned.indexOf(normalizedPhrase);
     if (index > 0) {
-      cleaned = cleaned.slice(0, index).trim().replace(/[,:;\-â€“\s]+$/u, "");
+      cleaned = cleaned.slice(0, index).trim().replace(/[,:;\-\s]+$/u, "");
     }
   }
 
@@ -66,6 +126,19 @@ function looksLikeProductKeyword(value) {
   return !banned.some((phrase) => normalized === phrase || normalized.startsWith(`${phrase} `));
 }
 
+function extractKeywordByIntentPatterns(source) {
+  for (const pattern of PRODUCT_INTRO_PATTERNS) {
+    const match = String(source || "").match(pattern);
+    if (match?.[1]) {
+      const candidate = sanitizeKeywordCandidate(match[1]);
+      if (looksLikeProductKeyword(candidate)) {
+        return candidate;
+      }
+    }
+  }
+  return "";
+}
+
 function extractKeywordAfterProductPhrase(source) {
   const patterns = [
     /sản phẩm\s+(.+?)(?=$|[.?!,\n])/iu,
@@ -77,7 +150,10 @@ function extractKeywordAfterProductPhrase(source) {
   for (const pattern of patterns) {
     const match = String(source || "").match(pattern);
     if (match?.[1]?.trim()) {
-      return match[1].trim().replace(/^[:\-–]\s*/u, "");
+      const candidate = sanitizeKeywordCandidate(match[1]);
+      if (looksLikeProductKeyword(candidate)) {
+        return candidate;
+      }
     }
   }
 
@@ -86,13 +162,14 @@ function extractKeywordAfterProductPhrase(source) {
 
 function resolveKeyword(step, plan, options) {
   if (options?.productKeyword && String(options.productKeyword).trim()) {
-    return String(options.productKeyword).trim();
+    return sanitizeKeywordCandidate(String(options.productKeyword).trim());
   }
   const source = step?.message || plan?.message || "";
   return (
     extractQuotedKeyword(source) ||
+    extractKeywordByIntentPatterns(source) ||
     extractKeywordAfterProductPhrase(source) ||
-    String(source).trim()
+    sanitizeKeywordCandidate(String(source).trim())
   );
 }
 
@@ -103,6 +180,17 @@ function runProductResearch(step, plan, options = {}) {
   }
 
   const targetSite = String(options.targetSite || "uptek.vn").trim();
+  const cached = readCachedResearch(keyword, targetSite, options);
+  if (cached) {
+    options.onProgress?.({
+      phase: "product-research-cache-hit",
+      message: `Product research cache hit cho "${keyword}" (${targetSite}).`,
+      keyword,
+      targetSite,
+      cacheFile: cached.cacheFile,
+    });
+    return cached;
+  }
   const repoRoot = path.resolve(__dirname, "..", "..", "..");
   const scriptPath = path.join(repoRoot, "skills", "search_product_text", "action.js");
   const attempts = 3;
@@ -138,7 +226,7 @@ function runProductResearch(step, plan, options = {}) {
       let payload;
       try {
         payload = JSON.parse(stdout);
-      } catch (err) {
+      } catch {
         const e = new Error("search_product_text returned non-JSON output.");
         e.stdout = stdout;
         e.stderr = run.stderr;
@@ -152,13 +240,15 @@ function runProductResearch(step, plan, options = {}) {
         throw e;
       }
 
-      return {
-        command: `${process.execPath} ${scriptPath} --keyword \"${keyword}\" --target_site \"${targetSite}\"`,
+      const result = {
+        command: `${process.execPath} ${scriptPath} --keyword "${keyword}" --target_site "${targetSite}"`,
         targetSite,
         keyword,
         researchAttempt: attempt,
         ...payload,
       };
+      writeCachedResearch(keyword, targetSite, result, options);
+      return result;
     } catch (error) {
       lastError = error;
     }
@@ -281,5 +371,8 @@ function createDemoProductResearchFallback(step, plan, options = {}) {
 
 module.exports = {
   createDemoProductResearchFallback,
+  readCachedResearch,
+  resolveKeyword,
   runProductResearch,
+  writeCachedResearch,
 };

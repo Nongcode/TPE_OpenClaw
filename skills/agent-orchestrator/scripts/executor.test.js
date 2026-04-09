@@ -5,6 +5,8 @@ const {
   extractBestContent,
   buildOriginalImageMediaReply,
   classifyReviewDecision,
+  isEmailWorkflowStep,
+  isReviewStepType,
   shouldForceOriginalImageMedia,
 } = require("./executor");
 
@@ -130,6 +132,17 @@ test("buildOriginalImageMediaReply legacy helper still lists prompts and assets"
   assert.match(reply, /b\.jpg/);
   assert.match(reply, /IMAGE_PROMPT:\s*Prompt anh/);
   assert.equal(classifyReviewDecision(reply), "approved");
+});
+
+test("review step detection includes consultant review", () => {
+  assert.equal(isReviewStepType("consultant_review"), true);
+  assert.equal(isReviewStepType("email_send"), false);
+});
+
+test("email workflow detection marks customer-care review and send steps", () => {
+  assert.equal(isEmailWorkflowStep({ type: "consultant_review", from: "nv_consultant", to: "pho_phong_cskh" }), true);
+  assert.equal(isEmailWorkflowStep({ type: "final_review", from: "pho_phong_cskh", to: "truong_phong" }), true);
+  assert.equal(isEmailWorkflowStep({ type: "final_review", from: "pho_phong", to: "truong_phong" }), false);
 });
 
 test("extractBestContent prefers cleaned caption body over draft narration", () => {

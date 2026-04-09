@@ -1022,6 +1022,16 @@ export function attachGatewayWsMessageHandler(params: {
           resolvedAuth,
           trustedProxies,
         });
+        // Debug: log declared controlUiAccess from client and resolved policy
+        try {
+          logWs("in", "connect.control-ui", {
+            connId,
+            controlUiAccessDeclared: connectParams.controlUiAccess,
+            resolvedControlUiPolicy: controlUiAccessPolicy,
+          });
+        } catch {
+          // ignore logging failures during handshake
+        }
         const scopedCanvasHostUrl =
           canvasHostUrl && canvasCapability
             ? (buildCanvasScopedHostUrl(canvasHostUrl, canvasCapability) ?? canvasHostUrl)

@@ -4,10 +4,10 @@ import { chromium } from "playwright-core";
 import { buildChatImageReplyPayload } from "../shared/chat-image-result.js";
 
 const DEFAULTS = {
-  browser_path: "C:/Program Files/CocCoc/Browser/Application/browser.exe",
-  user_data_dir: "C:/Users/Administrator/AppData/Local/CocCoc/Browser/User Data",
+  browser_path: "C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe",
+  user_data_dir: "C:/Users/PHAMDUCLONG/AppData/Local/Microsoft/Edge/User Data",
   profile_name: "Default",
-  target_gemini_url: "https://gemini.google.com/app/3f383fca1153c26a",
+  target_gemini_url: "https://gemini.google.com/app/6db6710e653d9645",
   image_paths: [],
   timeout_ms: 120000,
   retry_count: 2, 
@@ -125,6 +125,21 @@ function nowStamp() {
   return new Date().toISOString().replace(/[:.]/g, "-");
 }
 
+function resolveEdgeUserDataDir(inputPath, profileName) {
+  const normalizedPath = path.normalize(String(inputPath || "").trim());
+  const normalizedProfile = path.normalize(String(profileName || "").trim());
+  const baseName = path.basename(normalizedPath).toLowerCase();
+
+  if (
+    baseName === normalizedProfile.toLowerCase() ||
+    ["default", "profile 1", "profile 2", "profile 3"].includes(baseName)
+  ) {
+    return path.dirname(normalizedPath);
+  }
+
+  return normalizedPath;
+}
+
 async function ensureReadableFiles(pathsToCheck) {
   for (const filePath of pathsToCheck) {
     await access(filePath);
@@ -175,6 +190,15 @@ async function dismissPopupsIfAny(page, logs) {
       }
     } catch {}
   }
+}
+
+async function openGeminiTargetPage(context, targetGeminiUrl, logs) {
+  const page = await context.newPage();
+  logs.push("[step2] Opened a fresh browser tab for Gemini target URL");
+  await page.goto(targetGeminiUrl, { waitUntil: "domcontentloaded", timeout: 45000 });
+  await page.waitForLoadState("networkidle", { timeout: 15000 }).catch(() => undefined);
+  logs.push(`[step2] Current page URL after navigation: ${page.url()}`);
+  return page;
 }
 
 async function locatePromptEditor(page) {
@@ -557,7 +581,7 @@ async function downloadFromSpecificBlock(page, freshTarget, outputDir, logs) {
 
   const imagePrompt = parsed.image_prompt.trim();
   const browserPath = path.normalize(parsed.browser_path);
-  const userDataDir = path.normalize(parsed.user_data_dir);
+  const userDataDir = resolveEdgeUserDataDir(parsed.user_data_dir, parsed.profile_name);
   const profileName = parsed.profile_name.trim();
   const targetGeminiUrl = parsed.target_gemini_url.trim();
   const rawImagePaths = parseList(parsed.image_paths).map((item) => path.normalize(item));
@@ -615,11 +639,8 @@ async function downloadFromSpecificBlock(page, freshTarget, outputDir, logs) {
       viewport: { width: 1440, height: 900 },
     });
 
-    const page = context.pages()[0] ?? await context.newPage();
-
     logs.push('[step2] Navigating to Gemini workspace/chat URL');
-    await page.goto(targetGeminiUrl, { waitUntil: 'domcontentloaded', timeout: 45000 });
-    await page.waitForLoadState('networkidle', { timeout: 15000 }).catch(() => undefined);
+    const page = await openGeminiTargetPage(context, targetGeminiUrl, logs);
     await dismissPopupsIfAny(page, logs);
     await selectImageToolMode(page, logs);
 

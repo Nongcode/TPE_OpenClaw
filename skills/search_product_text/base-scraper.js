@@ -424,6 +424,69 @@ async function collectSearchEngineCandidates(page, targetSite) {
   );
 }
 
+async function collectLooseSearchEngineCandidates(page, targetSite) {
+  return await page.evaluate(
+    ({ currentTargetSite }) => {
+      const normalizeCandidate = (rawHref) => {
+        if (!rawHref) return "";
+        try {
+          const parsed = new URL(rawHref, "https://www.google.com");
+          if (parsed.hostname.includes("google.") && parsed.pathname === "/url") {
+            return parsed.searchParams.get("q") || "";
+          }
+          if (parsed.hostname.includes("duckduckgo.com") && parsed.pathname.startsWith("/l/")) {
+            return parsed.searchParams.get("uddg") || "";
+          }
+          return parsed.href;
+        } catch {
+          return "";
+        }
+      };
+
+      const cleanText = (value) =>
+        String(value || "")
+          .replace(/\u00A0/g, " ")
+          .replace(/\s+/g, " ")
+          .trim();
+
+      const results = [];
+      const seen = new Set();
+      for (const anchor of Array.from(document.querySelectorAll("a[href]"))) {
+        const candidateUrl = normalizeCandidate(anchor.getAttribute("href") || "");
+        if (!candidateUrl || seen.has(candidateUrl)) {
+          continue;
+        }
+        try {
+          const parsed = new URL(candidateUrl);
+          const hostname = parsed.hostname;
+          if (
+            !(hostname === currentTargetSite || hostname.endsWith(`.${currentTargetSite}`)) ||
+            !/\/shop\/(?!category\/)(?!cart(?:\/|$))(?!wishlist(?:\/|$))(?!all-brands(?:\/|$))/.test(
+              parsed.pathname,
+            )
+          ) {
+            continue;
+          }
+        } catch {
+          continue;
+        }
+
+        results.push({
+          url: candidateUrl,
+          title:
+            cleanText(anchor.closest("div, li, article")?.textContent || "") ||
+            cleanText(anchor.getAttribute("title") || "") ||
+            cleanText(anchor.textContent || ""),
+          category: null,
+        });
+        seen.add(candidateUrl);
+      }
+      return results;
+    },
+    { currentTargetSite: targetSite },
+  );
+}
+
 export class BaseScraper {
   constructor(options = {}) {
     this.keyword = String(options.keyword || "").trim();
@@ -500,14 +563,19 @@ export class BaseScraper {
       return rankedCandidates[0].url;
     }
 
-    const fallbackAnchors = await page.locator("a[href]").evaluateAll((nodes) =>
-      nodes.map((node) => node.getAttribute("href") || ""),
-    );
-    for (const href of fallbackAnchors) {
-      const normalized = normalizeUrlCandidate(href);
-      if (isProductUrl(normalized, this.targetSite)) {
-        return normalized;
-      }
+    const looseCandidates = (await collectLooseSearchEngineCandidates(page, this.targetSite))
+      .map((candidate) => ({
+        ...candidate,
+        score: scoreProductCandidate(candidate, keywordSignals),
+      }))
+      .sort((left, right) => right.score - left.score);
+
+    if (
+      looseCandidates[0] &&
+      looseCandidates[0].score > 0 &&
+      hasStrongKeywordMatch(looseCandidates[0], keywordSignals)
+    ) {
+      return looseCandidates[0].url;
     }
 
     throw new Error(`No ${engineName} result matched target site ${this.targetSite}`);

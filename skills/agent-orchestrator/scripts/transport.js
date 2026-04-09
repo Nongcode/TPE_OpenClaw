@@ -100,6 +100,35 @@ function buildTaskPrompt(envelope, registry) {
       "- Day la buoc pho phong mo pha trien khai theo ke hoach da duoc truong phong va nguoi dung chot. Bat dau tu content, khong duoc nhay thang sang media.",
     );
   }
+  if (envelope.type === "customer_data_research") {
+    lines.push(
+      "- Day la buoc pho_phong_cskh lay du lieu khach hang muc tieu. Bat buoc dung skill db-reader de truy cap database, tim khach hang mua nhieu hang nhat va tong hop email + danh sach san pham da mua.",
+    );
+    lines.push(
+      "- Ket qua phai neu ro: ten khach, email, cac san pham da mua, tong quan mua hang, ly do de xuat gui email cham soc/ban tiep.",
+    );
+  }
+  if (envelope.type === "consultant_produce") {
+    lines.push(
+      "- Day la buoc nv_consultant soan noi dung email dua tren du lieu khach hang da duoc pho_phong_cskh tong hop.",
+    );
+    lines.push(
+      "- Noi dung phai la BAN NHAP EMAIL de trinh duyet, KHONG duoc tu gui mail o buoc nay.",
+    );
+    lines.push(
+      "- Hay viet day du: SUBJECT, LOI CHAO, NOI DUNG CHINH, CTA, va ghi ro ly do email nay phu hop voi lich su mua hang cua khach.",
+    );
+  }
+  if (envelope.type === "consultant_revise") {
+    lines.push(
+      "- Day la buoc nv_consultant sua lai ban nhap email/tu van theo nhan xet review. Van chi trinh ban nhap, KHONG duoc tu gui mail.",
+    );
+  }
+  if (envelope.type === "consultant_review") {
+    lines.push(
+      "- Day la buoc pho_phong_cskh review ban nhap email cua nv_consultant. Neu chua dat thi tra lai nv_consultant sua. Neu dat thi moi duoc trinh truong_phong duyet.",
+    );
+  }
   if (envelope.type === "product_research") {
     lines.push(
       "- Day la buoc thu thap du lieu san pham bat buoc cho content. Hay su dung skill search_product_text de lay text day du + anh goc san pham.",
@@ -130,7 +159,11 @@ function buildTaskPrompt(envelope, registry) {
     lines.push(
       "- Day la buoc duyet noi dung. Neu content chua dat, yeu cau lam lai dung vao phan noi dung, chua chuyen sang media. Neu content da dat, luc do moi duoc brief media.",
     );
-    if (envelope.deliverToUser) {
+    if (envelope.deliverToUser && envelope.approvalGate === "content") {
+      lines.push(
+        "- Day la diem dung tam thoi de tra ban content ve cho nguoi dung phe duyet. KHONG duoc tu y mo lane media cho den khi nguoi dung xac nhan duyet content.",
+      );
+    } else if (envelope.deliverToUser) {
       lines.push(
         "- Day la diem ket thuc workflow cho yeu cau chi can content. Neu content dat, tra truc tiep ban content final cho nguoi dung, khong trinh truong_phong.",
       );
@@ -150,9 +183,15 @@ function buildTaskPrompt(envelope, registry) {
     lines.push(
       "- Day la buoc pho phong tong hop content da duyet + media da duyet thanh ho so san sang dang.",
     );
-    lines.push(
-      "- KHONG dang Facebook o buoc nay. Ket qua phai neu ro media da chot, caption tom tat, prompt da chot va trang thai san sang de truong_phong final_review.",
-    );
+    if (envelope.approvalGate === "media") {
+      lines.push(
+        "- Day la diem dung tam thoi de tra goi media da chot ve cho nguoi dung phe duyet. KHONG dang Facebook o buoc nay; phai cho nguoi dung xac nhan media dat truoc khi goi auto-content.",
+      );
+    } else {
+      lines.push(
+        "- KHONG dang Facebook o buoc nay. Ket qua phai neu ro media da chot, caption tom tat, prompt da chot va trang thai san sang de truong_phong final_review.",
+      );
+    }
   }
   if (envelope.type === "final_review") {
     lines.push(
@@ -160,6 +199,22 @@ function buildTaskPrompt(envelope, registry) {
     );
     lines.push(
       "- Neu truong_phong duyet PASS, he thong se dang bai that sau buoc nay: uu tien 1 bai image, va 1 bai video neu video da tao thanh cong; neu video bi quota thi chi dang image.",
+    );
+    if (envelope.from === "pho_phong_cskh") {
+      lines.push(
+        "- Day la buoc truong_phong duyet NOI DUNG EMAIL/TU VAN. Neu duyet PASS thi chi moi mo buoc email_send; KHONG duoc tu gui mail o buoc nay.",
+      );
+    }
+  }
+  if (envelope.type === "email_send") {
+    lines.push(
+      "- Day la buoc pho_phong_cskh gui email that sau khi truong_phong da duyet noi dung.",
+    );
+    lines.push(
+      "- Bat buoc dung skill auto-email de gui mail. Khong duoc tuyen bo da gui neu chua co ket qua terminal thanh cong.",
+    );
+    lines.push(
+      "- Ket qua phai neu ro: email da gui cho ai, tieu de mail, trang thai gui, va bang chung thanh cong/that bai.",
     );
   }
   if (envelope.type === "publish") {
@@ -213,10 +268,43 @@ function resolveRepoRoot() {
   return path.resolve(__dirname, "..", "..", "..");
 }
 
+function resolveGatewayRuntimeHome() {
+  return path.join(resolveRepoRoot(), "artifacts", "agent-orchestrator", "gateway-runtime");
+}
+
+async function withGatewayRuntimeHome(fn) {
+  const runtimeHome = resolveGatewayRuntimeHome();
+  const runtimeStateDir = path.join(runtimeHome, ".openclaw");
+  fs.mkdirSync(runtimeStateDir, { recursive: true });
+  const previousHome = process.env.OPENCLAW_HOME;
+  const previousStateDir = process.env.OPENCLAW_STATE_DIR;
+  process.env.OPENCLAW_HOME = runtimeHome;
+  process.env.OPENCLAW_STATE_DIR = runtimeStateDir;
+  try {
+    return await fn(runtimeHome, runtimeStateDir);
+  } finally {
+    if (previousHome === undefined) {
+      delete process.env.OPENCLAW_HOME;
+    } else {
+      process.env.OPENCLAW_HOME = previousHome;
+    }
+    if (previousStateDir === undefined) {
+      delete process.env.OPENCLAW_STATE_DIR;
+    } else {
+      process.env.OPENCLAW_STATE_DIR = previousStateDir;
+    }
+  }
+}
+
 function resolveGatewayUrl(openClawHome) {
   const config = loadOpenClawConfig(openClawHome);
+  const remoteUrl = config?.gateway?.mode === "remote" ? config?.gateway?.remote?.url : null;
+  if (typeof remoteUrl === "string" && remoteUrl.trim()) {
+    return remoteUrl.trim();
+  }
   const port = Number(config?.gateway?.port) || 18789;
-  return process.env.OPENCLAW_GATEWAY_URL || `ws://127.0.0.1:${port}`;
+  const protocol = config?.gateway?.tls?.enabled === true ? "wss" : "ws";
+  return process.env.OPENCLAW_GATEWAY_URL || `${protocol}://127.0.0.1:${port}`;
 }
 
 let gatewayCallModulePromise = null;
@@ -237,6 +325,23 @@ function resolveGatewayCallModulePath() {
   throw new Error("Cannot locate built gateway call module in dist/.");
 }
 
+function ensureGatewayAvailable(openClawHome) {
+  const token = resolveGatewayToken({ openClawHome });
+  if (!token) {
+    throw new Error(
+      "Missing OPENCLAW_GATEWAY_TOKEN. Set env OPENCLAW_GATEWAY_TOKEN or gateway.auth.token in openclaw.json",
+    );
+  }
+  try {
+    // This will throw if the built module is not present or not matching.
+    resolveGatewayCallModulePath();
+  } catch (err) {
+    throw new Error(
+      `Gateway call module missing or invalid in dist/. Run 'pnpm build' at repository root. Underlying: ${err?.message || err}`,
+    );
+  }
+}
+
 async function loadGatewayCallModule() {
   if (!gatewayCallModulePromise) {
     const moduleUrl = pathToFileURL(resolveGatewayCallModulePath()).href;
@@ -245,62 +350,129 @@ async function loadGatewayCallModule() {
   return gatewayCallModulePromise;
 }
 
-async function sendToSession(options) {
-  const gatewayUrl = resolveGatewayUrl(options.openClawHome);
-  const gatewayToken = resolveGatewayToken({ openClawHome: options.openClawHome });
-  if (!gatewayToken) {
-    throw new Error("Missing OPENCLAW_GATEWAY_TOKEN.");
-  }
-  const { callGateway } = await loadGatewayCallModule();
-  const result = await callGateway({
-    url: gatewayUrl,
-    token: gatewayToken,
+function buildGatewayAgentRequest(options) {
+  const timeoutMs = options.timeoutMs || 900000;
+  const configPath = path.join(options.openClawHome || "", "openclaw.json");
+  return {
+    url: resolveGatewayUrl(options.openClawHome),
+    token: resolveGatewayToken({ openClawHome: options.openClawHome }),
+    config: loadOpenClawConfig(options.openClawHome),
+    configPath,
     method: "agent",
     params: {
       message: options.prompt,
       agentId: options.agentId,
-      sessionKey: `agent:${options.agentId}:main`,
+      sessionKey: options.sessionKey || `agent:${options.agentId}:main`,
+      timeout: Math.max(10, Math.ceil(timeoutMs / 1000)),
       idempotencyKey: randomUUID(),
     },
     expectFinal: true,
-    timeoutMs: options.timeoutMs || 900000,
-  });
-  const payloads = Array.isArray(result?.result?.payloads) ? result.result.payloads : [];
+    timeoutMs,
+  };
+}
 
-  function extractTextFromPayload(item) {
-    if (!item) return "";
-    if (typeof item.text === "string" && item.text.trim()) return item.text.trim();
-    if (typeof item.assistantText === "string" && item.assistantText.trim()) return item.assistantText.trim();
-    if (typeof item.message === "string" && item.message.trim()) return item.message.trim();
-    if (item.data && typeof item.data.assistant_text === "string" && item.data.assistant_text.trim()) return item.data.assistant_text.trim();
-    if (item.data && typeof item.data.assistantText === "string" && item.data.assistantText.trim()) return item.data.assistantText.trim();
-    if (Array.isArray(item.content)) {
-      return item.content
-        .map((c) => {
-          if (!c) return "";
-          if (typeof c.text === "string") return c.text;
-          if (typeof c.message === "string") return c.message;
-          if (typeof c.content === "string") return c.content;
-          return "";
-        })
-        .filter(Boolean)
-        .join("\n\n");
-    }
-    if (item.data && typeof item.data === "string") return item.data;
-    return "";
+async function sendToSession(options) {
+  const request = buildGatewayAgentRequest(options);
+  if (!request.token) {
+    throw new Error("Missing OPENCLAW_GATEWAY_TOKEN.");
   }
+  options.onProgress?.({
+    phase: "gateway-send",
+    agentId: options.agentId,
+    sessionKey: request.params.sessionKey,
+    message: `Dang gui yeu cau toi ${options.agentId} (${request.params.sessionKey}).`,
+  });
+  const heartbeatMs =
+    Number.isFinite(Number(options.heartbeatMs)) && Number(options.heartbeatMs) >= 5000
+      ? Number(options.heartbeatMs)
+      : 15000;
+  const softTimeoutSec =
+    Number.isFinite(Number(options.softTimeoutSec)) && Number(options.softTimeoutSec) >= 10
+      ? Number(options.softTimeoutSec)
+      : 45;
+  const startedAt = Date.now();
+  let heartbeat = null;
+  let slowWarningSent = false;
+  try {
+    heartbeat = setInterval(() => {
+      const elapsedSec = Math.max(1, Math.round((Date.now() - startedAt) / 1000));
+      if (!slowWarningSent && elapsedSec >= softTimeoutSec) {
+        slowWarningSent = true;
+        options.onProgress?.({
+          phase: "gateway-slow",
+          agentId: options.agentId,
+          sessionKey: request.params.sessionKey,
+          elapsedSec,
+          softTimeoutSec,
+          message: `Canh bao: ${options.agentId} da cham hon nguong mem ${softTimeoutSec}s (${elapsedSec}s).`,
+        });
+      }
+      options.onProgress?.({
+        phase: "gateway-wait",
+        agentId: options.agentId,
+        sessionKey: request.params.sessionKey,
+        elapsedSec,
+        message: `Van dang cho ${options.agentId} phan hoi (${elapsedSec}s).`,
+      });
+    }, heartbeatMs);
+    const result = await withGatewayRuntimeHome(async () => {
+      const { callGateway } = await loadGatewayCallModule();
+      return await callGateway(request);
+    });
+    const payloads = Array.isArray(result?.result?.payloads) ? result.result.payloads : [];
 
-  const text = payloads
-    .map(extractTextFromPayload)
-    .filter(Boolean)
-    .join("\n\n")
-    .trim();
+    function extractTextFromPayload(item) {
+      if (!item) return "";
+      if (typeof item.text === "string" && item.text.trim()) return item.text.trim();
+      if (typeof item.assistantText === "string" && item.assistantText.trim()) return item.assistantText.trim();
+      if (typeof item.message === "string" && item.message.trim()) return item.message.trim();
+      if (item.data && typeof item.data.assistant_text === "string" && item.data.assistant_text.trim()) return item.data.assistant_text.trim();
+      if (item.data && typeof item.data.assistantText === "string" && item.data.assistantText.trim()) return item.data.assistantText.trim();
+      if (Array.isArray(item.content)) {
+        return item.content
+          .map((c) => {
+            if (!c) return "";
+            if (typeof c.text === "string") return c.text;
+            if (typeof c.message === "string") return c.message;
+            if (typeof c.content === "string") return c.content;
+            return "";
+          })
+          .filter(Boolean)
+          .join("\n\n");
+      }
+      if (item.data && typeof item.data === "string") return item.data;
+      return "";
+    }
 
-  return text || result?.summary || "";
+    const text = payloads
+      .map(extractTextFromPayload)
+      .filter(Boolean)
+      .join("\n\n")
+      .trim();
+
+    const elapsedSec = Math.max(1, Math.round((Date.now() - startedAt) / 1000));
+    options.onProgress?.({
+      phase: "gateway-done",
+      agentId: options.agentId,
+      sessionKey: request.params.sessionKey,
+      elapsedSec,
+      message: `${options.agentId} da tra loi sau ${elapsedSec}s.`,
+    });
+
+    return text || result?.summary || "";
+  } finally {
+    if (heartbeat) {
+      clearInterval(heartbeat);
+    }
+  }
 }
 
 module.exports = {
   buildTaskEnvelope,
   buildTaskPrompt,
+  buildGatewayAgentRequest,
   sendToSession,
+  ensureGatewayAvailable,
+  resolveGatewayUrl,
+  withGatewayRuntimeHome,
 };

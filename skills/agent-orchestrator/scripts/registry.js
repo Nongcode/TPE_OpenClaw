@@ -43,7 +43,7 @@ function inferManifest(agentId) {
       label: "Truong phong",
       role: "department head",
       reportsTo: "quan_ly",
-      canDelegateTo: ["pho_phong"],
+      canDelegateTo: ["pho_phong", "pho_phong_cskh"],
       capabilities: ["review", "approval", "publish-decision"],
     };
   }
@@ -56,6 +56,18 @@ function inferManifest(agentId) {
       canDelegateTo: ["nv_content", "nv_media"],
       requiresReviewBy: "truong_phong",
       capabilities: ["workflow", "coordination", "task-splitting"],
+    };
+  }
+  if (agentId === "pho_phong_cskh") {
+    return {
+      ...defaults,
+      label: "Pho phong cham soc khach hang",
+      role: "customer care lead",
+      reportsTo: "truong_phong",
+      canDelegateTo: ["nv_consultant"],
+      requiresReviewBy: "truong_phong",
+      capabilities: ["customer-care", "consulting-workflow", "support-coordination", "email-send"],
+      taskTypes: ["consultant.review", "consultant.execute", "customer.email", "email.send"],
     };
   }
   if (agentId === "nv_content") {
@@ -78,6 +90,17 @@ function inferManifest(agentId) {
       requiresReviewBy: "pho_phong",
       capabilities: ["image", "visual", "design", "creative"],
       taskTypes: ["media.create"],
+    };
+  }
+  if (agentId === "nv_consultant") {
+    return {
+      ...defaults,
+      label: "Nhan vien tu van khach hang",
+      role: "customer support specialist",
+      reportsTo: "pho_phong_cskh",
+      requiresReviewBy: "pho_phong_cskh",
+      capabilities: ["customer-support", "chat-reply", "product-consulting", "sales-closing"],
+      taskTypes: ["consultant.reply", "consultant.research", "consultant.email_draft"],
     };
   }
 
@@ -135,7 +158,19 @@ function discoverRegistry(options = {}) {
   const openClawHome = resolveOpenClawHome(options.openClawHome);
   const manifestDir =
     options.manifestDir || path.join(__dirname, "..", "manifests");
-  const agentIds = unique(listDirectories(path.join(openClawHome, "agents")));
+  // Prefer union of runtime agent folders and manifest-declared agents so
+  // plans referencing manifest-only agents are resolved.
+  const runtimeAgentIds = listDirectories(path.join(openClawHome, "agents"));
+  let manifestAgentIds = [];
+  try {
+    manifestAgentIds = fs
+      .readdirSync(manifestDir, { withFileTypes: true })
+      .filter((entry) => entry.isFile() && entry.name.endsWith(".json"))
+      .map((entry) => entry.name.replace(/\.json$/i, ""));
+  } catch {
+    manifestAgentIds = [];
+  }
+  const agentIds = unique([...(runtimeAgentIds || []), ...(manifestAgentIds || [])]);
 
   const agents = agentIds.map((agentId) => {
     const runtime = loadAgentRuntime(openClawHome, agentId);

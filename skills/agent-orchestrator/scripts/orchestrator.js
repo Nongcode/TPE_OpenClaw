@@ -1,6 +1,7 @@
 const { discoverRegistry } = require("./registry");
 const { createPlan } = require("./planner");
 const { executePlan } = require("./executor");
+const { ensureGatewayAvailable } = require("./transport");
 
 function parseArgs(argv) {
   const options = {
@@ -17,6 +18,10 @@ function parseArgs(argv) {
     manifestDir: null,
     productKeyword: null,
     targetSite: "uptek.vn",
+    heartbeatMs: 15000,
+    softTimeoutSec: 45,
+    productResearchCacheTtlMs: 6 * 60 * 60 * 1000,
+    disableProductResearchCache: false,
     artifactsDir: null,
     disableSimulationArtifacts: false,
     demoSmoothMode: true,
@@ -69,6 +74,26 @@ function parseArgs(argv) {
     if (token === "--target-site") {
       options.targetSite = argv[index + 1] || options.targetSite;
       index += 1;
+      continue;
+    }
+    if (token === "--heartbeat-ms") {
+      options.heartbeatMs = Number(argv[index + 1]) || options.heartbeatMs;
+      index += 1;
+      continue;
+    }
+    if (token === "--soft-timeout-sec") {
+      options.softTimeoutSec = Number(argv[index + 1]) || options.softTimeoutSec;
+      index += 1;
+      continue;
+    }
+    if (token === "--product-cache-ttl-sec") {
+      options.productResearchCacheTtlMs =
+        (Number(argv[index + 1]) || Math.round(options.productResearchCacheTtlMs / 1000)) * 1000;
+      index += 1;
+      continue;
+    }
+    if (token === "--no-product-cache") {
+      options.disableProductResearchCache = true;
       continue;
     }
     if (token === "--artifacts-dir") {
@@ -153,6 +178,24 @@ function printResult(result, asJson) {
   }
 }
 
+function buildConsoleProgressReporter(enabled) {
+  if (!enabled) {
+    return null;
+  }
+  return (payload) => {
+    const prefix = payload?.stepIndex
+      ? `[PROGRESS ${payload.stepIndex}/${payload.totalSteps}]`
+      : "[PROGRESS]";
+    if (payload?.message) {
+      console.log(`${prefix} ${payload.message}`);
+      return;
+    }
+    console.log(
+      `${prefix} ${payload?.phase || "update"} ${payload?.stepType || ""} ${payload?.from || ""} -> ${payload?.to || ""}`.trim(),
+    );
+  };
+}
+
 async function runCli(argv = process.argv.slice(2)) {
   const options = parseArgs(argv);
   const registry = discoverRegistry({
@@ -178,14 +221,32 @@ async function runCli(argv = process.argv.slice(2)) {
     return;
   }
 
-  const result = await executePlan(registry, plan, options);
+  // Validate plan targets exist in registry before executing.
+  const missingTargets = (plan.steps || [])
+    .map((s) => s.to)
+    .filter((to) => to && !registry.byId[to]);
+  if (missingTargets.length > 0) {
+    throw new Error(
+      `Plan references unknown agents: ${[...new Set(missingTargets)].join(", ")}`,
+    );
+  }
+
+  // Perform gateway availability checks when actually executing (not dry-run/list/plan-only).
+  if (!options.dryRun && !options.planOnly && !options.list) {
+    ensureGatewayAvailable(options.openClawHome);
+  }
+
+  const result = await executePlan(registry, plan, {
+    ...options,
+    onProgress: buildConsoleProgressReporter(!options.json),
+  });
   printResult(result, options.json);
 }
 
 if (require.main === module) {
   runCli().catch((error) => {
     console.error("\n[ORCHESTRATOR ERROR]");
-    console.error(error.message);
+    console.error(error && error.stack ? error.stack : error.message || error);
     process.exit(1);
   });
 }
