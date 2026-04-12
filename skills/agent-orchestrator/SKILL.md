@@ -18,25 +18,24 @@ Build or operate a reusable orchestration layer above OpenClaw agents. Prefer th
    - hierarchy: walk the org tree for review/delegation chains
 5. Execute through the transport layer using each agent's real session key.
 6. Keep wrappers thin. Feature skills should call the orchestrator, not reimplement routing.
+7. When invoking the CLI from an agent lane on Windows, prefer `--message-file` with a UTF-8 brief file instead of passing raw Vietnamese text directly in shell arguments.
 
 ## Fixed Department Flow (Facebook Campaign)
 
-When user commands `truong_phong` directly, the hierarchy mode now enforces this exact order:
+When user commands `truong_phong` directly, hierarchy mode should behave like this:
 
-1. `truong_phong` creates detailed plan (proposal only) and returns for user approval.
-2. After user approval signal, `truong_phong` hands off execution to `pho_phong`.
-3. `pho_phong` triggers mandatory product research via `search_product_text`.
-4. `pho_phong` assigns `nv_content` to write content.
-5. `pho_phong` reviews content.
-6. `pho_phong` assigns `nv_media` to create media from approved content plus image/video prompts.
-7. `nv_media` uses product reference images from `artifacts/references/search_product_text/<product-slug>/` when calling `gemini_generate_image` and `generate_video`.
-8. `pho_phong` reviews media with default PASS behavior unless the flow explicitly inserts a revision loop.
-9. `pho_phong` uses `compile_post` only to assemble the reviewed content + media package and hand it to `truong_phong`.
-10. After `truong_phong` approves at `final_review`, the system calls `facebook_publish_post` to publish 1 image post and, if video generation was not skipped by quota, 1 video post.
+1. If user explicitly asks for a detailed plan first, `truong_phong` returns a proposal for approval.
+2. If user asks to "trien khai bai viet", "viet bai", or "soan bai" for a product, `truong_phong` must execute immediately instead of asking whether to draft or publish.
+3. The default scope for the case above is content-only so user can review the draft first.
+4. `pho_phong` triggers mandatory product research via `search_product_text`.
+5. `pho_phong` assigns `nv_content` to write content.
+6. `pho_phong` reviews content.
+7. Only if the brief explicitly asks for image/video/media does `pho_phong` open `nv_media`, review media, and compile the package.
+8. `nv_media` uses product reference images from `artifacts/references/search_product_text/<product-slug>/` when calling `gemini_generate_image` and `generate_video`.
+9. `truong_phong` performs the real `final_review`.
+10. Publishing with `facebook_publish_post` happens only after explicit user confirmation to publish.
 
-Detailed-plan approval gate is applied only when user explicitly requests a detailed plan.
-
-For presentation/demo runs, smooth mode is enabled by default: media creation/review and final review are treated as successful so the flow completes and exports a full artifact bundle (content + image prompt + video prompt + copied original product images). Use `--strict-review-gates` to restore strict blocking behavior.
+Detailed-plan approval gate is applied only when user explicitly requests planning before execution.
 
 ## CLI Notes
 
@@ -44,7 +43,7 @@ For presentation/demo runs, smooth mode is enabled by default: media creation/re
 - `--target-site`: target domain for product research (default `uptek.vn`).
 - `--artifacts-dir`: custom output folder for simulation artifacts.
 - `--no-simulation-artifacts`: disable artifact writing.
-- `--strict-review-gates`: disable demo smooth mode and enforce strict review blocking.
+- `--strict-review-gates`: enforce strict blocking review behavior.
 
 Simulation output default folder:
 

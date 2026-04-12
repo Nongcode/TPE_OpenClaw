@@ -69,6 +69,18 @@ function loadOpenClawConfig(explicitHome) {
   return readJsonIfExists(path.join(openClawHome, "openclaw.json"), {});
 }
 
+function listConfiguredAgentIds(explicitHome) {
+  const config = loadOpenClawConfig(explicitHome);
+  if (!Array.isArray(config?.agents?.list)) {
+    return [];
+  }
+  return unique(
+    config.agents.list
+      .map((agent) => (typeof agent?.id === "string" ? agent.id.trim() : ""))
+      .filter(Boolean),
+  );
+}
+
 function resolveGatewayToken(options = {}) {
   if (options.gatewayToken) {
     return String(options.gatewayToken).trim();
@@ -83,6 +95,7 @@ function resolveGatewayToken(options = {}) {
 
 module.exports = {
   listDirectories,
+  listConfiguredAgentIds,
   loadOpenClawConfig,
   normalizeText,
   readJsonIfExists,

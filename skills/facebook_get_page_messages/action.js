@@ -1,6 +1,6 @@
 const DEFAULTS = {
   page_id: process.env.FACEBOOK_PAGE_ID || "643048852218433",
-  access_token: process.env.FACEBOOK_PAGE_ACCESS_TOKEN || "EAANUeplbZCAwBRDtmbZCZAXJH6xt1Wavxe0OiZAbIBV2nFwFZApZC6GsP0nKXO1BrMBoBaDUZBMpOjCOZAyUL9zC2iQh9spFumXC2KcT1THFvZCBjLeONUfyw4R7a0ZCn3bZAqNRglxjrh3GOVtZCIObHg3ArMqfOZC7RIJo6rvSn2FszW45e4KZCXfSAwddj5WRXmpnotnmoMzDwf1N6Myc6bb6py",
+  access_token: process.env.FACEBOOK_PAGE_ACCESS_TOKEN || "",
   limit: 10,
   mode: "recent",
   include_messages: true,
@@ -34,29 +34,64 @@ function parsePositiveInt(value, fallback) {
   return normalized;
 }
 
+function normalizeCliKey(token) {
+  return String(token || "")
+    .replace(/^--?/, "")
+    .trim()
+    .replace(/-/g, "_");
+}
+
+function tryParseJson(raw) {
+  const text = String(raw || "").trim();
+  if (!text.startsWith("{") || !text.endsWith("}")) {
+    return null;
+  }
+  try {
+    return JSON.parse(text);
+  } catch {
+    return null;
+  }
+}
+
+function parseKeyValueArgs(args) {
+  const parsed = {};
+  for (let index = 0; index < args.length; index += 1) {
+    const token = args[index];
+    if (!String(token).startsWith("-")) {
+      continue;
+    }
+    const key = normalizeCliKey(token);
+    const next = args[index + 1];
+
+    if (!next || String(next).startsWith("-")) {
+      parsed[key] = true;
+      continue;
+    }
+
+    parsed[key] = next;
+    index += 1;
+  }
+  return parsed;
+}
+
 function parseArgs(argv) {
   const params = { ...DEFAULTS };
   const logs = [];
   const args = argv.slice(2);
 
-  if (args.length === 1 && args[0].trim().startsWith("{")) {
-    try {
-      const parsed = JSON.parse(args[0]);
-      return {
-        ...params,
-        ...parsed,
-        limit: parsePositiveInt(parsed.limit, params.limit),
-        message_limit: parsePositiveInt(parsed.message_limit, params.message_limit),
-        include_messages: parseBoolean(parsed.include_messages, params.include_messages),
-        logs,
-      };
-    } catch (error) {
-      logs.push(`[parse] Invalid JSON input: ${error instanceof Error ? error.message : String(error)}`);
-      return { ...params, logs };
-    }
-  }
+  const jsonFromSingleArg = args.length === 1 ? tryParseJson(args[0]) : null;
+  const jsonFromJoinedArgs = jsonFromSingleArg ? null : tryParseJson(args.join(" "));
+  const cliKeyValues = !jsonFromSingleArg && !jsonFromJoinedArgs ? parseKeyValueArgs(args) : null;
+  const parsed = jsonFromSingleArg || jsonFromJoinedArgs || cliKeyValues || {};
 
-  return { ...params, logs };
+  return {
+    ...params,
+    ...parsed,
+    limit: parsePositiveInt(parsed.limit, params.limit),
+    message_limit: parsePositiveInt(parsed.message_limit, params.message_limit),
+    include_messages: parseBoolean(parsed.include_messages, params.include_messages),
+    logs,
+  };
 }
 
 function validateInput(params) {
@@ -95,6 +130,9 @@ async function fetchGraphJson({ endpoint, params, accessToken, logs }) {
   for (const [key, value] of Object.entries(params || {})) {
     if (value === undefined || value === null || value === "") continue;
     url.searchParams.set(key, String(value));
+  }
+  if (!url.searchParams.has("access_token")) {
+    url.searchParams.set("access_token", accessToken);
   }
 
   logs.push(`[http:get] ${url.origin}${url.pathname}`);
