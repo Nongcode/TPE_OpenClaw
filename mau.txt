@@ -1,0 +1,1162 @@
+bỘ GIÁO DỤC VÀ ĐÀO TẠOBỘ NÔNG NGHIỆP VÀ MÔI TRƯỜNGTRƯỜNG ĐẠI HỌC THỦY LỢINguyễn HỮU THÀNH XÂY DỰNG hệ thống điều khiển xe tự hànhĐỒ ÁN TỐT NGHIỆPHÀ NỘI, NĂM 2025HÀ NỘI, NĂM 2023bỘ GIÁO DỤC VÀ ĐÀO TẠOBỘ NÔNG NGHIỆP VÀ MÔI TRƯỜNGTRƯỜNG ĐẠI HỌC THỦY LỢINguyễn HỮU THÀNH XÂY DỰNG hệ thống điều khiển xe tự hànhĐỒ ÁN TỐT NGHIỆPHÀ NỘI, NĂM 2025HÀ NỘI, NĂM 2023
+bỘ GIÁO DỤC VÀ ĐÀO TẠO
+BỘ NÔNG NGHIỆP VÀ MÔI TRƯỜNG
+TRƯỜNG ĐẠI HỌC THỦY LỢI
+Nguyễn HỮU THÀNH
+ XÂY DỰNG hệ thống điều khiển xe tự hành
+ĐỒ ÁN TỐT NGHIỆP
+HÀ NỘI, NĂM 2025
+HÀ NỘI, NĂM 2023
+bỘ GIÁO DỤC VÀ ĐÀO TẠO
+BỘ NÔNG NGHIỆP VÀ MÔI TRƯỜNG
+TRƯỜNG ĐẠI HỌC THỦY LỢI
+Nguyễn HỮU THÀNH
+ XÂY DỰNG hệ thống điều khiển xe tự hành
+ĐỒ ÁN TỐT NGHIỆP
+HÀ NỘI, NĂM 2025
+HÀ NỘI, NĂM 2023
+bỘ GIÁO DỤC VÀ ĐÀO TẠO
+BỘ NÔNG NGHIỆP VÀ MÔI TRƯỜNG
+TRƯỜNG ĐẠI HỌC THỦY LỢI
+NGUYỄN HỮU THÀNH
+XÂY DỰNG hệ thống điều khiển xe tự hành
+Ngành :
+Kỹ thuật phần mềm
+Mã số:
+2251172501
+NGƯỜI HƯỚNG DẪN
+1. TS Lê Nguyễn Tuấn Thành
+HÀ NỘI, NĂM 2025
+GÁY BÌA ĐỒ ÁN TỐT NGHIỆP, KHÓA LUẬN TỐT NGHIỆP
+NGUYỄN HỮU THÀNH                                                  ĐỒ ÁN                                                    HÀ NỘI, NĂM 2025NGUYỄN HỮU THÀNH                                                  ĐỒ ÁN                                                    HÀ NỘI, NĂM 2025
+NGUYỄN HỮU THÀNH                                                  ĐỒ ÁN                                                    HÀ NỘI, NĂM 2025
+NGUYỄN HỮU THÀNH                                                  ĐỒ ÁN                                                    HÀ NỘI, NĂM 2025
+CỘNG HOÀ XÃ HỘI CHỦ NGHĨA VIỆT NAM
+Độc lập - Tự do - Hạnh phúc
+--------------------
+NHIỆM VỤ ĐỒ ÁN TỐT NGHIỆP
+Họ tên sinh viên: Nguyễn Hữu ThànhHệ đào tạo: Đại học chính quy
+Lớp:  64KTPM1Ngành:  Kỹ Thuật Phần Mềm
+Khoa:  Công nghệ thông tin
+1- TÊN ĐỀ TÀI:
+XÂY DỰNG HỆ THỐNG ĐIỀU KHIỂN XE TỰ HÀNH
+2- CÁC TÀI LIỆU CƠ BẢN:
+[1] 
+Dosovitskiy, A., Ros, G., Codevilla, F., López, A., & Koltun, V. (2017).
+CARLA: An Open Urban Driving Simulator. Conference on Robot Learning (CoRL): https://arxiv.org/abs/1711.03938
+[2] 
+Schulman, J., Wolski, F., Dhariwal, P., Radford, A., & Klimov, O. (2017).
+Proximal Policy Optimization Algorithms. arXiv preprint arXiv:1707.06347: https://arxiv.org/abs/1707.06347
+[3] 
+Schulman, J., Levine, S., Moritz, P., Jordan, M., & Abbeel, P. (2015).
+Trust Region Policy Optimization. International Conference on Machine Learning (ICML): https://arxiv.org/abs/1502.05477
+[4] 
+Sutton, R. S., & Barto, A. G. (2018).
+Reinforcement Learning: An Introduction (2nd Edition). MIT Press: http://incompleteideas.net/book/the-book-2nd.html
+[5] 
+OpenAI SpinningUp (2018).
+Proximal Policy Optimization (PPO) Documentation: https://spinningup.openai.com/en/latest/algorithms/ppo.html
+[6] 
+Raffin, A., Hill, A., Ernestus, M., Gleave, A., Kanervisto, A., Dormann, N., & Plappert, M. (2021).
+Stable-Baselines3: Reliable Reinforcement Learning Implementations.
+Journal of Machine Learning Research: https://github.com/DLR-RM/stable-baselines3 
+[7] 
+CARLA Documentation (2023).
+Official CARLA Simulator API Reference: https://carla.readthedocs.io/
+3 - NỘI DUNG CÁC PHẦN THUYẾT MINH VÀ TÍNH TOÁN:                Tỷ lệ %
+Nội dung các phần
+Tỷ lệ %
+Chương 1: Tổng quan về đề tài
+10%
+Chương 2: Cơ sở lý thuyết
+30%
+Chương 3: Thiết kế hệ thống
+30%
+Chương 4: Thử nghiệm và đánh giá hệ thống
+20%
+Chương 5: Kết luận và hướng phát triển
+10%
+4. GIÁO VIÊN HƯỚNG DẪN TỪNG PHẦN
+Phần
+Họ và tên giáo viên hướng dẫn
+Chương 1: Tổng quan về đề tài
+TS Lê Nguyễn Tuấn Thành
+Chương 2: Cơ sở lý thuyết
+TS Lê Nguyễn Tuấn Thành 
+Chương 3: Thiết kế hệ thống
+TS Lê Nguyễn Tuấn Thành
+Chương 4: Thử nghiệm và đánh giá hệ thống
+TS Lê Nguyễn Tuấn Thành
+Chương 5: Kết luận và hướng phát triển
+TS Lê Nguyễn Tuấn Thành
+5. NGÀY GIAO NHIỆM VỤ ĐỒ ÁN TỐT NGHIỆP
+Ngày ............  tháng .........  năm 20….
+          Trưởng Bộ môn
+         (Ký và ghi rõ Họ tên)
+Giáo viên hướng dẫn chính
+(Ký và ghi rõ Họ tên)
+Nhiệm vụ Đồ án tốt nghiệp đã được Hội đồng thi tốt nghiệp của Khoa thông qua.
+                                     Ngày. . . . .tháng. . . . .năm 20....                                                     Chủ tịch Hội đồng 
+(Ký và ghi rõ Họ tên)
+Sinh viên đã hoàn thành và nộp bản Đồ án tốt nghiệp cho Hội đồng thi ngày ... tháng ... năm 20...
+Sinh viên làm Đồ án tốt nghiệp
+   (Ký và ghi rõ Họ tên)
+TRƯỜNG ĐẠI HỌC THUỶ LỢI
+KHOA CÔNG NGHỆ THÔNG TIN
+BẢN TÓM TẮT ĐỀ CƯƠNG ĐỒ ÁN TỐT NGHIỆP
+Tên đề tài: Xây dựng hệ thống điều khiển xe tự hành
+Sinh viên thực hiện: Nguyễn Hữu Thành
+Lớp: 64KTPM1
+Mã sinh viên: 2251172501
+Số điện thoại: 0879851156
+Email: 2251172501@e.tlu.edu.vn
+Giáo viên hướng dẫn: TS. Lê Nguyễn Tuấn Thành
+TÓM TẮT ĐỀ TÀI
+Đề tài tập trung nghiên cứu và xây dựng hệ thống điều khiển xe tự hành. Hệ thống ứng dụng các kỹ thuật xử lý hình ảnh để nhận diện môi trường xung quanh. Dữ liệu từ môi trường được sử dụng làm đầu vào cho thuật toán học tăng cường (Reinforcement Learning) nhằm đưa ra quyết định điều khiển, giúp xe tự động vận hành an toàn và linh hoạt. Đồng thời, hệ thống áp dụng các thuật toán tìm đường để xác định lộ trình tối ưu, phục vụ các tác vụ vận chuyển và giao hàng. Song song với đó, một nền tảng quản lý được xây dựng nhằm giám sát, điều phối và quản lý hoạt động của xe, góp phần nâng cao hiệu quả vận hành và khả năng mở rộng của hệ thống.
+CÁC MỤC TIÊU CHÍNH
+Nghiên cứu và ứng dụng các kỹ thuật xử lý hình ảnh để nhận diện môi trường xung quanh.
+Xây dựng cơ chế ra quyết định cho xe tự hành dựa trên thuật toán học tăng cường (Reinforcement Learning).
+Triển khai hệ thống điều hướng sử dụng các thuật toán tìm đường nhằm lựa chọn lộ trình tối ưu.
+Phát triển nền tảng quản lý để giám sát, điều phối và quản lý hoạt động của xe.
+Tích hợp các thành phần trên thành một hệ thống hoàn chỉnh, có khả năng vận hành trong môi trường thực tế.
+KẾT QUẢ DỰ KIẾN
+Hoàn thiện mô hình xe tự hành có khả năng nhận diện môi trường xung quanh.
+Xe có thể tự động đưa ra quyết định điều khiển an toàn và linh hoạt nhờ áp dụng Reinforcement Learning.
+Xây dựng thành công hệ thống tìm đường, đảm bảo lựa chọn lộ trình tối ưu trong quá trình vận chuyển hoặc giao hàng.
+Phát triển nền tảng quản lý cho phép giám sát trạng thái, điều phối hoạt động và quản lý xe một cách hiệu quả.
+LỜI CAM ĐOAN
+Em xin cam đoan đây là đồ án tốt nghiệp của bản thân em. Các kết quả trong đồ án tốt nghiệp này là trung thực, không sao chép từ bất kỳ một nguồn nào và dưới bất kỳ hình thức nào. Việc tham khảo các nguồn tài liệu (nếu có) đã được thực hiện trích dẫn và ghi nguồn tài liệu tham khảo đúng quy định.
+Tác giả ĐATN
+Chữ ký
+Nguyễn Hữu Thành
+LỜI CẢM ƠN
+Trong suốt quá trình thực hiện đồ án tốt nghiệp, em đã nhận được rất nhiều sự giúp đỡ, chia sẻ kinh nghiệm và sự hướng dẫn tận tình từ thầy cô, gia đình và bạn bè. Đây là những nguồn động lực vô cùng quý báu giúp em có thể hoàn thành tốt đồ án này.
+Trước hết, em xin gửi lời cảm ơn chân thành tới Ban Giám hiệu Trường Đại học Thủy Lợi và toàn thể thầy cô Khoa Công nghệ Thông tin. Trong hơn 3 năm rưỡi học tập và rèn luyện tại trường, em đã nhận được sự giảng dạy tận tâm, những kiến thức bổ ích và những kinh nghiệm thực tiễn vô cùng quý giá. Nhờ nền tảng kiến thức mà các thầy cô đã truyền đạt, em mới có đủ hành trang để hoàn thành tốt chương trình học cũng như hoàn thành đồ án tốt nghiệp của mình.
+Đặc biệt, em xin bày tỏ lòng biết ơn sâu sắc tới thầy TS. Lê Nguyễn Tuấn Thành, người đã tận tình hướng dẫn và luôn quan tâm, chỉ bảo em không chỉ trong quá trình thực hiện đồ án “Xây dựng hệ thống điều khiển xe tự hành” mà còn trong suốt quá trình học tập và tham gia các hoạt động nghiên cứu khoa học tại trường. Những định hướng, góp ý và sự hỗ trợ của thầy đã giúp em mở rộng kiến thức, củng cố tư duy nghiên cứu và hoàn thiện từng bước trong quá trình triển khai đồ án. 
+Trong quá trình thực hiện đồ án, mặc dù em đã cố gắng nỗ lực hết sức, nhưng do kiến thức và kinh nghiệm còn hạn chế, thời gian thực hiện đồ án cũng có phần gấp rút nên khó tránh khỏi những thiếu sót. Em rất mong nhận được sự thông cảm cùng những ý kiến đóng góp của quý thầy cô để em có thể hoàn thiện hơn trong tương lai.
+Cuối cùng, em xin chân thành cảm ơn gia đình và bạn bè đã luôn đồng hành, động viên và tạo điều kiện cho em trong suốt quá trình học tập và hoàn thành đồ án tốt nghiệp.
+Em xin chân thành cảm ơn! 
+MỤC LỤC
+LỜI CAM ĐOANi
+LỜI CẢM ƠNii
+MỤC LỤCiii
+DANH MỤC HÌNH ẢNHvi
+DANH MỤC CÁC TỪ VIẾT TẮT VÀ GIẢI THÍCH CÁC THUẬT NGỮviii
+CHƯƠNG 1. TỔNG QUAN VỀ ĐỀ TÀI1
+1.1. Tổng quan về tình hình nghiên cứu1
+1.2. Lý do chọn đề tài2
+1.3. Mục tiêu của đề tài3
+1.4. Phương pháp nghiên cứu4
+1.5. Đối tượng và Phạm vi nghiên cứu5
+CHƯƠNG 2: CƠ SỞ LÝ THUYẾT6
+2.1. Tổng quan về học tăng cường6
+2.1.1. Phân biệt học tăng cường với các phương pháp học máy khác7
+2.1.1.1. Học tăng cường so với học có giám sát8
+2.1.1.2. Học tăng cường so với học không giám sát8
+2.1.2. Các khái niệm nền tảng trong Học tăng cường9
+2.2. Thuật toán PPO13
+2.2.1. Tổng quan13
+2.2.2. Một số thuật ngữ chính được sử dụng trong PPO13
+2.2.3. Các công thức trong PPO-Clip14
+2.2.4. Cách hoạt động của thuật toán PPO-Clip16
+2.2.5. Ưu điểm và nhược điểm của PPO-Clip17
+2.2.6. Một số ứng dụng của PPO17
+2.2.7. Lý do sinh viên lựa chọn thuật toán PPO-Clip18
+2.3. Thuật toán A*18
+2.3.1. Tổng quan18
+2.3.2. Một số thuật ngữ chính được sử dụng trong A*18
+2.3.3. Các công thức trong A*19
+2.3.4. Ưu điểm và nhược điểm của thuật toán A*19
+2.4. Tổng quan về CARLA20
+2.4.1. Giới thiệu chung về CARLA20
+2.4.2. Đặc điểm nổi bật của CARLA21
+2.4.3. Các mô hình và thành phần chính trong CARLA23
+2.4.4. Khả năng hỗ trợ học tăng cường của CARLA24
+2.4.5. Lý do CARLA phù hợp với đề tài26
+CHƯƠNG 3: THIẾT KẾ HỆ THỐNG28
+3.1. Thiết kế hệ thống điều khiển xe tự hành28
+3.1.1. Phân tách mô-đun phía client và phía server29
+3.1.2. Mô tả sơ đồ theo từng dòng dữ liệu32
+3.2. Thực nghiệm33
+3.2.1. Cài đặt thuật toán PPO-Clip34
+3.2.1.1. Xây dựng môi trường mô phỏng34
+3.2.1.2. Không gian trạng thái và hành động36
+3.2.1.3. Hàm phần thưởng41
+3.2.1.4. Tham số huấn luyện43
+3.2.1.5. Thực hiện huấn luyện45
+3.2.2. Cài đặt thuật toán A*47
+3.2.2.1. Trích xuất đồ thị làn đường47
+3.2.2.2.  Xây dựng hàm chi phí48
+3.3. Phát triển mô-đun Supervisor Controller50
+3.3.1. Lý do cần Supervisor Controller50
+3.3.2. Cơ chế kết hợp tín hiệu PPO + A*52
+3.3.3. Bộ lọc ổn định góc lái (Steering Stabilization Filter)53
+3.3.4. Đánh giá ưu điểm và hạn chế của Supervisor Controller53
+3.4. Phát triển Web UI điều hướng thời gian thực56
+3.4.1. Kiến trúc Web UI56
+3.4.2. Cơ chế click-to-goal57
+CHƯƠNG 4: THỬ NGHIỆM VÀ ĐÁNH GIÁ HỆ THỐNG58
+4.1. Kết quả huấn luyện PPO58
+4.1.1. Thực nghiệm với bộ tham số A59
+4.1.2. Thực nghiệm với bộ tham số B60
+4.1.3. Thực nghiệm với bộ tham số C61
+4.2. Kết quả thuật toán A*63
+4.3. Kết quả hệ thống kết hợp PPO + A*64
+4.4. Kết quả Web UI65
+4.5. Đánh giá66
+4.5.1. Đánh giá thuật toán PPO66
+4.5.2. Đánh giá thuật toán A*66
+4.5.3. Đánh giá hệ thống Supervisor (PPO + A*)67
+4.5.4. Đánh giá Web UI67
+CHƯƠNG 5: KẾT LUẬN VÀ HƯỚNG PHÁT TRIỂN69
+5.1. Kết luận69
+5.2. Hướng phát triển70
+TÀI LIỆU THAM KHẢO71
+DANH MỤC HÌNH ẢNH
+Hình 2.1. Hình ảnh ví dụ minh họa trong học tăng cường7
+Hình 2.2. Tác tử trí tuệ nhân tạo tương tác với môi trường9
+Hình 2.3: Tương tác giữa Tác tử và Môi trường trong quá trình quyết định Markov12
+Hình 2.4: Giao diện CARLA Unreal Engine21
+Hình 3.1: Sơ đồ hệ thống điều khiển xe tự hành29
+Hình 3.2: Kết nối client–server CARLA.34
+Hình 3.3: Bật synchronous mode.35
+Hình 3.4: Khởi tạo xe35
+Hình 3.5: Khởi tạo camera RGB36
+Hình 3.6: Cảm biến va chạm36
+Hình 3.7: Không gian trạng thái37
+Hình 3.8: Cảm biến làn đường ảo38
+Hình 3.9: Cảm biến động học của xe39
+Hình 3.10: Cảm biến khoảng cách39
+Hình 3.11: Hàm trích xuất đặc trưng ảnh40
+Hình 3.12: Các tham số huấn luyện43
+Hình 3.13: Hàm huấn luyện PPO46
+Hình 3.14: Trích xuất lane từ bản đồ CARLA48
+Hình 3.15: Xây dựng hàm chi phí49
+Hình 3.16: Cơ chế kết hợp tín hiệu PPO + A*52
+Hình 4.1: Reward Curve – Bộ tham số A59
+Hình 4.2: Offset – Bộ tham số A59
+Hình 4.3: Heading – Bộ tham số A60
+Hình 4.4: Reward Curve – Bộ tham số B60
+Hình 4.5: Offset – Bộ tham số B61
+Hình 4.6: Heading – Bộ tham số B61
+Hình 4.7: Reward Curve – Bộ tham số C62
+Hình 4.8: Offset – Bộ tham số C62
+Hình 4.9: Heading – Bộ tham số C62
+Hình 4.10: Đường đi sau smoothing63
+Hình 4.11: Giao diện bản đồ Web UI65
+Hình 4.12: Web UI sau khi click-to-goal66
+DANH MỤC CÁC TỪ VIẾT TẮT VÀ GIẢI THÍCH CÁC THUẬT NGỮ
+Từ viết tắt
+Thuật ngữ
+Giải thích
+RL
+Reinforcement Learning
+Học tăng cường.
+PPO
+Proximal Policy Optimization
+Thuật toán RL on-policy.
+A*
+A-star Algorithm
+Thuật toán tìm đường tối ưu dựa trên chi phí và heuristic.
+GNSS
+Global Navigation Satellite System
+Hệ thống định vị toàn cầu mô phỏng GPS trong CARLA.
+UI
+User Interface
+Giao diện người dùng, bao gồm Web UI điều khiển và giám sát xe
+Waypoint
+Waypoint
+Điểm mô tả quỹ đạo của xe trên bản đồ mô phỏng.
+Offset
+Lane Offset
+Độ lệch ngang giữa xe và tâm làn đường
+CARLA
+CARLA Simulator
+Bộ mô phỏng xe tự hành mã nguồn mở dựa trên Unreal Engine
+API
+Application Programming Interface
+Giao diện lập trình cho phép các mô-đun giao tiếp với nhau.
+Trajectory
+Quỹ đạo di chuyển của xe trong không gian.
+CHƯƠNG 1. TỔNG QUAN VỀ ĐỀ TÀI
+1.1. Tổng quan về tình hình nghiên cứu
+Trong bối cảnh trí tuệ nhân tạo (AI) phát triển nhanh chóng và được ứng dụng rộng rãi trong nhiều lĩnh vực, nghiên cứu về xe tự hành (Autonomous Driving) trở thành một trong những hướng đi nổi bật và thu hút nhiều sự quan tâm của cộng đồng khoa học. Từ giai đoạn đầu chỉ dừng lại ở các hệ thống hỗ trợ lái cơ bản, xe tự hành ngày nay đang hướng tới khả năng vận hành hoàn toàn tự động, dựa trên sự kết hợp của nhiều công nghệ tiên tiến như thị giác máy tính, học máy, mô phỏng và hệ thống điều khiển thông minh. Các hãng công nghệ lớn như Google, Tesla, Nvidia, Baidu hay các trường đại học hàng đầu đều đang đầu tư mạnh mẽ vào lĩnh vực này, tạo ra một hệ sinh thái nghiên cứu đa ngành và phong phú.
+Một trong những xu hướng quan trọng trong nghiên cứu xe tự hành hiện nay là ứng dụng học tăng cường (Reinforcement Learning – RL). RL xuất phát từ ý tưởng mô phỏng cách con người và sinh vật học hỏi dựa trên quá trình tương tác liên tục với môi trường, thông qua cơ chế thử – sai để tìm ra chiến lược tối ưu. Mô hình RL cho phép tác tử xây dựng kinh nghiệm từ các hành động đã thực hiện, từ đó dần cải thiện khả năng ra quyết định mà không cần được lập trình cứng từng quy tắc cụ thể. Nhờ đặc điểm này, RL được xem như một giải pháp tiềm năng cho bài toán điều khiển xe tự hành, nơi hệ thống phải xử lý chuỗi hành động liên tục, phản ứng theo thời gian thực và thích nghi với những thay đổi phức tạp trong môi trường giao thông.
+Ở chiều ngược lại, bài toán xe tự hành đặt ra hàng loạt thách thức về nhận thức, dự đoán và điều khiển. Xe phải hiểu được môi trường xung quanh thông qua cảm biến hoặc hình ảnh camera, phải đánh giá được nguy cơ va chạm, nhận diện làn đường, biển báo, người đi bộ, đồng thời phải lập kế hoạch hành trình và điều khiển vô lăng, ga, phanh một cách chính xác. Những thách thức này khiến việc thử nghiệm trực tiếp trên phương tiện thực trở nên tốn kém, mất thời gian và tiềm ẩn nguy hiểm.
+Chính vì vậy, xu hướng nghiên cứu hiện nay chuyển mạnh sang việc sử dụng các nền tảng mô phỏng để hỗ trợ thử nghiệm và huấn luyện mô hình. Các công cụ như CARLA, AirSim, LGSVL đã được phát triển và được đông đảo cộng đồng nghiên cứu sử dụng. Chúng cung cấp môi trường lái xe ảo đa dạng với nhiều loại bản đồ, phương tiện, tình huống giao thông và điều kiện thời tiết khác nhau. Mô phỏng giúp rút ngắn thời gian phát triển, giảm chi phí thử nghiệm và đặc biệt phù hợp cho RL — nơi tác tử cần thực hiện hàng triệu tương tác để học một chính sách tốt.
+Nhờ sự phát triển của các mô hình mô phỏng và khả năng tính toán ngày càng mạnh, nhiều nhóm nghiên cứu trên thế giới đã đạt được những kết quả đáng khích lệ trong việc áp dụng RL vào xe tự hành: từ các tác vụ cơ bản như giữ làn, tránh vật cản, đến những mục tiêu phức tạp hơn như điều hướng trong giao lộ, vượt xe, tối ưu hóa lộ trình hay kết hợp với các phương pháp lập kế hoạch dựa trên đồ thị. Một số nghiên cứu cũng chỉ ra rằng mô hình huấn luyện trong mô phỏng ngày càng có khả năng thích ứng với dữ liệu thực, mở ra tiềm năng triển khai trên phương tiện vật lý.
+1.2. Lý do chọn đề tài
+Trong bối cảnh các quốc gia trên thế giới đang hướng tới xây dựng hệ thống giao thông thông minh và hiện đại, công nghệ xe tự hành đã trở thành một lĩnh vực được quan tâm và đầu tư mạnh mẽ. Xe tự hành không chỉ là xu hướng công nghệ mà còn mang lại những giá trị ứng dụng rõ rệt trong đời sống. Việc tự động hóa phương tiện giúp giảm tải cho con người, nâng cao an toàn giao thông và tối ưu hiệu quả vận tải, từ đó tạo ra những chuyển biến tích cực trong xã hội.
+Trước hết, xe tự hành có thể góp phần cải thiện tình trạng ùn tắc giao thông – một vấn đề tồn tại tại nhiều thành phố lớn trên thế giới và cả Việt Nam. Với khả năng tối ưu hóa luồng di chuyển, duy trì tốc độ ổn định và hạn chế các thao tác dừng/đỗ đột ngột, xe tự hành hứa hẹn giúp giao thông vận hành trơn tru hơn. Đồng thời, nhờ hệ thống cảm biến và công nghệ xử lý ảnh, xe tự hành có thể phản ứng nhanh với các tình huống bất ngờ, từ đó giảm thiểu các rủi ro va chạm và nâng cao mức độ an toàn cho người tham gia giao thông.
+Bên cạnh đó, việc áp dụng xe tự hành còn giúp giải quyết tình trạng thiếu hụt tài xế tại nhiều quốc gia. Khi nhu cầu vận tải ngày càng tăng nhưng nguồn lực con người không đáp ứng đủ, việc triển khai các phương tiện tự động hóa có thể hỗ trợ đáng kể cho ngành logistics, vận tải hàng hóa và giao hàng. Điều này góp phần giảm chi phí lao động, tăng khả năng hoạt động liên tục và nâng cao hiệu quả kinh tế cho doanh nghiệp.
+Trên thế giới, công nghệ xe tự hành đã và đang thu hút nguồn vốn đầu tư rất lớn từ các tập đoàn và quỹ đầu tư. Tại Mỹ, các công ty như Waymo, Aurora hay TuSimple nhận được số vốn lên đến hàng tỷ USD cho việc nghiên cứu và phát triển xe tự hành, đặc biệt trong lĩnh vực vận tải hạng nặng. Tại châu Âu, các phương pháp điều khiển xe từ xa trong thời gian thực cũng đang được thử nghiệm nhằm mở rộng khả năng ứng dụng của phương tiện tự hành. Ở châu Á, Trung Quốc đã đưa các xe giao hàng tự động vào thực tiễn trong giai đoạn dịch bệnh COVID-19, góp phần giảm tiếp xúc và hỗ trợ công tác phòng dịch.
+Tại Việt Nam, xu hướng phát triển xe tự hành cũng đang được đẩy mạnh. Các doanh nghiệp công nghệ như FPT, Phenikaa hay VinFast đã đầu tư phát triển và thử nghiệm các mô hình xe tự hành mức độ cao, cho thấy tiềm năng lớn trong việc ứng dụng công nghệ này vào cuộc sống và hạ tầng giao thông nước ta trong tương lai.
+Tuy nhiên, việc nghiên cứu trực tiếp trên phương tiện thật đòi hỏi chi phí cao và tiềm ẩn rủi ro lớn. Do đó, việc mô phỏng và thử nghiệm trong môi trường ảo như CARLA mang lại nhiều lợi thế rõ rệt: an toàn, linh hoạt, chi phí thấp và dễ dàng tạo ra nhiều kịch bản phức tạp. Việc kết hợp các công nghệ xử lý hình ảnh, trí tuệ nhân tạo và đặc biệt là học tăng cường (Reinforcement Learning) trong môi trường mô phỏng giúp quá trình nghiên cứu trở nên hiệu quả và có khả năng mở rộng hơn.
+Chính vì những lý do trên, đề tài "Xây dựng hệ thống điều khiển xe tự hành" được lựa chọn nhằm góp phần vào xu hướng nghiên cứu và ứng dụng công nghệ xe tự hành tại Việt Nam. Đề tài không chỉ mang ý nghĩa khoa học mà còn có tính thực tiễn cao, đáp ứng nhu cầu phát triển giao thông tương lai và các ứng dụng tự động hóa trong nhiều lĩnh vực.
+1.3. Mục tiêu của đề tài
+Đề tài hướng tới mục tiêu xây dựng một hệ thống mô phỏng xe tự hành có khả năng nhận diện môi trường, học cách điều khiển và tự vận hành trên bản đồ mô phỏng. Cụ thể, các mục tiêu chính bao gồm:
+Xây dựng môi trường mô phỏng: Thiết lập và cấu hình môi trường CARLA phục vụ cho việc huấn luyện và kiểm thử.
+Phát triển thuật toán điều khiển dựa trên học tăng cường: Thiết kế bài toán RL phù hợp với ngữ cảnh xe tự hành (state, action, reward): Huấn luyện tác tử RL nhằm thực hiện các tác vụ như giữ làn, điều hướng và tránh vật cản: Đánh giá hiệu suất của mô hình thông qua các tiêu chí ổn định và mức độ an toàn khi vận hành.
+Xây dựng nền tảng quản lý và giám sát: Phát triển giao diện hoặc hệ thống hỗ trợ giám sát quá trình huấn luyện và vận hành xe. Cho phép theo dõi thông số, trạng thái và quá trình ra quyết định của xe trong thời gian thực.
+Đánh giá và đề xuất hướng phát triển: Đưa ra nhận xét về ưu điểm, hạn chế của mô hình
+1.4. Phương pháp nghiên cứu
+Phương pháp nghiên cứu lý thuyết:
+Tìm hiểu các kiến thức liên quan học tăng cường
+Nghiên cứu kiến trúc, chức năng và các thành phần của nền tảng mô phỏng CARLA.
+Tham khảo các công trình, bài báo và mô hình liên quan đến RL trong xe tự hành.
+Phương pháp mô phỏng:
+Thiết lập môi trường giao thông ảo trên CARLA, xây dựng kịch bản và điều kiện thử nghiệm.
+Mô phỏng quá trình vận hành xe và tương tác giữa tác tử RL với môi trường.
+Phương pháp thực nghiệm:
+Thiết kế và huấn luyện mô hình học tăng cường trên các tập dữ liệu thu được từ mô phỏng.
+Điều chỉnh tham số, thử nghiệm nhiều kịch bản khác nhau để đánh giá hiệu quả của thuật toán.
+Ghi nhận, phân tích kết quả thực nghiệm nhằm rút ra kết luận và đề xuất cải tiến.
+Phương pháp phân tích – đánh giá:
+So sánh các kết quả thu được trong quá trình huấn luyện và kiểm tra.
+Đánh giá khả năng tổng quát, độ ổn định và mức độ an toàn của mô hình.
+Xác định các yếu tố ảnh hưởng đến hiệu quả điều khiển và mức độ phù hợp với mục tiêu đặt ra.
+1.5. Đối tượng và Phạm vi nghiên cứu
+Đối tượng nghiên cứu:
+Thuật toán PPO-Clip dùng cho điều khiển xe tự hành.
+Môi trường mô phỏng CARLA, bao gồm bản đồ, cảm biến và mô hình phương tiện.
+Hệ thống điều hướng toàn cục dựa trên thuật toán A* và tập waypoint sinh ra.
+Bộ điều khiển Supervisor kết hợp điều khiển theo làn (PPO) và điều hướng theo tuyến.
+Phạm vi nghiên cứu:
+Mô phỏng trên CARLA.
+Tập trung vào hai chức năng chính:
+Giữ làn đường bằng PPO.
+Điều hướng tới điểm đích bằng A*.
+CHƯƠNG 2: CƠ SỞ LÝ THUYẾT
+2.1. Tổng quan về học tăng cường
+Học tăng cường (Reinforcement Learning – RL) là một nhánh quan trọng của học máy, trong đó một tác tử (agent) học cách đưa ra hành động tối ưu thông qua quá trình tương tác liên tục với môi trường. Khác với học có giám sát (supervised learning) – nơi mô hình học từ dữ liệu đã gán nhãn – học tăng cường giúp tác tử tự khám phá, tự rút kinh nghiệm dựa trên cơ chế thử – sai (trial and error).
+Trong RL, tại mỗi thời điểm, tác tử quan sát trạng thái hiện tại của môi trường (state), lựa chọn một hành động (action), và sau đó nhận phần thưởng (reward) phản ánh mức độ tốt/xấu của hành động đó. Mục tiêu của tác tử là học một chính sách tối ưu (optimal policy) nhằm tối đa hóa tổng phần thưởng mà nó nhận được trong suốt quá trình tương tác. Qua thời gian, thông qua việc liên tục quan sát phản hồi từ môi trường, tác tử sẽ cải thiện dần chiến lược của mình và đạt hiệu quả cao hơn trong việc hoàn thành nhiệm vụ.
+Quá trình này rất giống với cơ chế học của con người: khi thực hiện một hành động và nhận được kết quả tích cực, chúng ta có xu hướng lặp lại; ngược lại, khi kết quả tiêu cực xảy ra, ta điều chỉnh hành vi để tránh lặp lại sai lầm. RL mô phỏng chính xác cơ chế này bằng hệ thống phần thưởng và trừng phạt.
+Một ví dụ thường được sử dụng để minh họa RL là bài toán khám phá mê cung. Trong mê cung có phần thưởng và nhiều chướng ngại vật. Tác tử phải tìm đường đi tối ưu để đến được phần thưởng cuối cùng, đồng thời tránh va phải chướng ngại vật. Mỗi lựa chọn sai sẽ làm giảm phần thưởng, trong khi lựa chọn đúng sẽ tăng phần thưởng. Bằng cách thử nhiều đường đi khác nhau, tác tử dần học được con đường tốt nhất.
+                 
+Hình 2.1. Hình ảnh ví dụ minh họa trong học tăng cường
+Trong đó robot cần tránh lửa (hành động xấu, reward âm) và tiến tới viên kim cương (hành động tốt, reward dương). Tác tử sẽ đánh giá tổng phần thưởng mà nó thu được và tự điều chỉnh hành vi sao cho tối ưu nhất.
+Tóm lại, học tăng cường có một số đặc điểm chính sau:
+Trạng thái đầu vào (State): Tác tử cần biết trạng thái ban đầu của môi trường để bắt đầu học.
+Hành động và kết quả (Action – Outcome): Mỗi hành động có thể dẫn đến nhiều kết quả khác nhau, tùy thuộc vào môi trường.
+Cơ chế khen thưởng (Reward): Phản hồi từ môi trường giúp tác tử nhận biết hành động nào là tốt hoặc xấu.
+Quá trình học liên tục: Tác tử lặp lại chu trình quan sát – hành động – nhận thưởng để cải thiện chính sách.
+Mục tiêu tối ưu hóa: Chính sách tốt nhất được quyết định bởi khả năng tối đa hóa tổng phần thưởng theo thời gian.
+Nhờ cơ chế học linh hoạt và khả năng thích ứng cao, RL đã được ứng dụng rộng rãi trong nhiều lĩnh vực như robot, trò chơi, tài chính, điều khiển thông minh và đặc biệt là xe tự hành, nơi tác tử phải liên tục đưa ra quyết định trong môi trường phức tạp và thay đổi liên tục.
+2.1.1. Phân biệt học tăng cường với các phương pháp học máy khác
+Các thuật toán học máy thường được chia thành ba nhóm chính:
+Học có giám sát (Supervised Learning)
+Học không giám sát (Unsupervised Learning)
+Học tăng cường (Reinforcement Learning)
+Mỗi nhóm có cơ chế hoạt động và mục tiêu riêng. Việc phân biệt ba phương pháp này giúp lựa chọn cách tiếp cận phù hợp cho từng bài toán thực tế.
+2.1.1.1. Học tăng cường so với học có giám sát
+Học có giám sát yêu cầu sử dụng tập dữ liệu được gắn nhãn đầy đủ, nghĩa là mỗi mẫu đều có đầu ra đúng tương ứng. Mô hình được huấn luyện bằng cách tìm mối quan hệ giữa dữ liệu đầu vào và nhãn đầu ra. 
+Ví dụ: khi cung cấp tập dữ liệu hình ảnh đã gắn nhãn “chó” hoặc “mèo”, mô hình sẽ học cách phân loại đúng nhãn cho hình ảnh mới.
+Nhược điểm của phương pháp này là cần có giám sát viên (thường là con người) để gắn nhãn cho từng mẫu dữ liệu. Điều này tốn nhiều thời gian và chi phí khi kích thước dữ liệu lớn.
+Ngược lại, học tăng cường không yêu cầu gắn nhãn trước cho tập dữ liệu. Thay vì dự đoán đầu ra cố định, tác tử trong RL học cách tối ưu hóa hành vi của mình thông qua cơ chế thưởng – phạt. Trong quá trình tương tác với môi trường, tác tử liên tục thử nghiệm nhiều hành động khác nhau và nhận phần thưởng tương ứng. Những hành động giúp đạt mục tiêu cuối cùng sẽ được củng cố, trong khi hành động gây kết quả xấu sẽ bị hạn chế.
+Nói cách khác:
+Học có giám sát → học từ câu trả lời có sẵn.
+Học tăng cường → học từ trải nghiệm và phản hồi phần thưởng.
+2.1.1.2. Học tăng cường so với học không giám sát
+Trong học không giám sát, mô hình chỉ có dữ liệu đầu vào không gắn nhãn, không có kết quả mong muốn được xác định trước. Mục tiêu của UL là tìm kiếm các mẫu, cụm hoặc cấu trúc ẩn trong dữ liệu bằng các kỹ thuật thống kê và phân tích.
+Ví dụ: một thuật toán có thể tự động nhóm các tài liệu thành nhiều chủ đề khác nhau dựa trên từ khóa xuất hiện trong văn bản, mặc dù ban đầu không có nhãn chủ đề nào được cung cấp.
+Do đó, kết quả của học không giám sát thường mang tính khám phá, không hướng trực tiếp tới một mục tiêu cụ thể.
+Trong khi đó, học tăng cường có mục tiêu cuối cùng rõ ràng. Dù sử dụng cách tiếp cận mang tính thăm dò, thuật toán RL luôn hướng tới việc tối đa hóa phần thưởng, đồng nghĩa với việc tăng xác suất đạt được mục tiêu cuối. Tác tử liên tục kiểm chứng các hành động của mình, rút kinh nghiệm và tự cải thiện qua thời gian.
+2.1.2. Các khái niệm nền tảng trong Học tăng cường
+Học tăng cường được mô tả trong một môi trường gồm bốn thành phần: tác nhân, môi trường, trạng thái và hành động. Tác nhân là thực thể ra quyết định, còn môi trường bao gồm tất cả những gì tác nhân tương tác.
+Ở mỗi bước, tác nhân quan sát trạng thái hiện tại, chọn một hành động và gửi hành động đó đến môi trường. Môi trường phản hồi bằng một phần thưởng hoặc hình phạt, đồng thời chuyển sang trạng thái mới. Thông qua quá trình tương tác lặp lại liên tục này, tác nhân dần học cách chọn những hành động mang lại phần thưởng cao nhất, từ đó cải thiện khả năng ra quyết định theo thời gian.
+Hình 2.2. Tác tử trí tuệ nhân tạo tương tác với môi trường
+Tác nhân (Agent)
+Tác nhân là thực thể có khả năng quan sát môi trường thông qua cảm biến và tác động trở lại môi trường thông qua hành động.
+Ở người: cảm biến tương ứng với mắt, tai,… và hành động tương ứng với tay, chân,…
+Ở robot: cảm biến có thể là camera, LiDAR; hành động là điều khiển động cơ, bộ truyền động.
+Ở phần mềm: trạng thái và hành động được biểu diễn bằng dữ liệu và các thao tác tính toán.
+Tác nhân là trung tâm của hệ thống học tăng cường, chịu trách nhiệm ra quyết định theo thời gian.
+Môi trường (Environment)
+Môi trường là không gian mà tác nhân tồn tại và tương tác. Môi trường sinh ra trạng thái và phản hồi phần thưởng dựa trên hành động của tác nhân.
+Một môi trường RL có thể có nhiều đặc tính:
+Xác định hoặc ngẫu nhiên: kết quả hành động có thể cố định hoặc mang tính xác suất.
+Quan sát đầy đủ hoặc quan sát một phần: tác nhân có thể nắm toàn bộ trạng thái hoặc chỉ một phần thông tin.
+Rời rạc hoặc liên tục: trạng thái và hành động có thể là giá trị rời rạc (lên/xuống/trái/phải) hoặc giá trị liên tục (góc lái, vận tốc).
+Theo giai đoạn (episodic) hoặc liên tục (continuous): có điểm bắt đầu – kết thúc hoặc không có ranh giới rõ ràng.
+Đơn tác tử hoặc đa tác tử: một hoặc nhiều tác nhân cùng đồng thời ra quyết định.
+Trạng thái của môi trường (State)
+Trạng thái là mô tả đầy đủ về tình hình hiện tại của môi trường tại thời điểm tác nhân quan sát.
+Ví dụ: vị trí của robot trong mê cung, tốc độ xe, góc quay, khoảng cách đến mục tiêu,…
+Trạng thái là yếu tố đầu vào quan trọng giúp tác nhân quyết định hành động.
+Hành động (Action)
+Hành động là thao tác mà tác nhân thực hiện trong mỗi bước để ảnh hưởng đến môi trường.
+Hành động phụ thuộc vào trạng thái hiện tại.
+Tập hợp tất cả hành động mà tác nhân có thể thực hiện được gọi là không gian hành động (action space), có thể là rời rạc hoặc liên tục.
+Phần thưởng (Reward)
+Phần thưởng là phản hồi từ môi trường nhằm đánh giá chất lượng của hành động vừa thực hiện.
+Phần thưởng có thể dương (tốt) hoặc âm (xấu).
+Phần thưởng thường phụ thuộc vào bộ ba: trạng thái hiện tại, hành động vừa thực hiện, và trạng thái kế tiếp.
+Hàm phần thưởng đóng vai trò cốt lõi vì nó định hướng hành vi của tác nhân trong suốt quá trình học.
+Chính sách (Policy)
+Chính sách mô tả quy tắc lựa chọn hành động của tác nhân tại một trạng thái cụ thể. Đây được xem là “bộ não” của tác nhân.
+Chính sách xác định: mỗi trạng thái tương ứng một hành động duy nhất.
+Chính sách ngẫu nhiên: hành động được chọn theo phân phối xác suất.
+Khám phá và khai thác (Exploration & Exploitation)
+Chính Trong học tăng cường, bài toán đánh đổi giữa thăm dò (exploration) và khai thác (exploitation) là một trong những vấn đề quan trọng nhất. Khi tác tử hoạt động trong một môi trường chưa biết trước, nó phải cân nhắc giữa hai mục tiêu:
+Khám phá (Exploration): thử các hành động mới để thu thập thêm thông tin về môi trường.
+Khai thác (Exploitation): sử dụng kiến thức đã có để chọn hành động được đánh giá là có phần thưởng cao nhất.
+Mục tiêu của quá trình này là tối đa hóa tổng phần thưởng trong suốt quá trình tương tác với môi trường. Do đó, tác tử phải biết khi nào nên khám phá để học thêm thông tin mới, và khi nào nên khai thác những kinh nghiệm đã tích lũy để đạt hiệu quả tối ưu.
+Nếu tác tử khai thác quá nhiều, nó có thể rơi vào chiến lược kém tối ưu vì không khám phá đủ những hành động tiềm năng khác. Ngược lại, nếu khám phá quá nhiều, tác tử sẽ mất thời gian thử nghiệm và làm giảm tổng phần thưởng thu được.
+Vì thế, một tác tử hiệu quả cần phải thử nghiệm nhiều hành động trong giai đoạn đầu để có ước lượng chính xác về giá trị phần thưởng, sau đó dần ưu tiên các hành động tốt nhất khi hiểu rõ hơn về môi trường. Quản lý tốt sự cân bằng giữa thăm dò và khai thác là yếu tố cốt lõi giúp tác tử học được chính sách tối ưu.
+Hình 2.3: Tương tác giữa Tác tử và Môi trường trong quá trình quyết định Markov
+Quá trình quyết định Markov (MDP – Markov Decision Process)
+Hầu hết các bài toán RL đều được mô hình hóa bằng một Quá trình quyết định Markov (MDP), trong đó môi trường thỏa mãn thuộc tính Markov: “Tương lai chỉ phụ thuộc vào trạng thái hiện tại, không phụ thuộc vào quá khứ.”.
+MDP được mô tả bằng bộ 5 thành phần:
+S: không gian trạng thái
+A: không gian hành động
+P: xác suất chuyển trạng thái P(s’|s, a)
+R: hàm phần thưởng
+γ: hệ số chiết khấu (0 < γ < 1), thể hiện mức ưu tiên phần thưởng tương lai
+Trong MDP, tương tác giữa tác nhân và môi trường diễn ra theo chu trình:
+Tác nhân quan sát trạng thái Sₜ
+Tác nhân chọn hành động Aₜ
+Môi trường phản hồi phần thưởng Rₜ₊₁
+Môi trường chuyển sang trạng thái Sₜ₊₁
+Chu trình lặp lại
+2.2. Thuật toán PPO
+2.2.1. Tổng quan
+Proximal Policy Optimization (PPO) là một trong những thuật toán học tăng cường sâu (Deep Reinforcement Learning) được sử dụng rộng rãi hiện nay, được đề xuất bởi Schulman và cộng sự (2017). Đây là bước cải tiến quan trọng từ họ Actor–Critic truyền thống, nhằm giải quyết vấn đề cập nhật chính sách quá mạnh dẫn đến mất ổn định trong quá trình huấn luyện.
+PPO thuộc nhóm on-policy, nghĩa là tác tử học trực tiếp từ dữ liệu được tạo ra bởi chính sách hiện tại. Trong số các biến thể của PPO, PPO-Clip (Clipped Surrogate Objective) được sử dụng phổ biến vì sự đơn giản, hiệu quả và ổn định cao trong quá trình tối ưu hóa.
+Mục tiêu chính của thuật toán PPO-Clip là tìm ra chính sách tối ưu π(a|s) bằng cách cập nhật chậm và có kiểm soát, đảm bảo rằng tác tử cải thiện hiệu suất nhưng không thay đổi chính sách quá đột ngột. Điều này đặc biệt quan trọng trong các môi trường phức tạp như mô phỏng xe tự hành, nơi tính ổn định của chính sách là yêu cầu bắt buộc.
+2.2.2. Một số thuật ngữ chính được sử dụng trong PPO
+Trạng thái (state – s): Biểu diễn tình huống hiện tại của tác tử trong môi trường.
+Hành động (action – a): Quyết định mà tác tử thực hiện tại một trạng thái nhất định.
+Phần thưởng (reward – r): Giá trị phản hồi mà tác tử nhận được sau khi thực hiện hành động.
+Chính sách (policy – π): Mạng nơ-ron xác định phân phối xác suất của hành động trong từng trạng thái.
+Hàm giá trị (Value Function – V(s)): Mạng Critic ước lượng giá trị kỳ vọng tương lai.
+Ưu thế (Advantage – A(s,a)): Mức độ tốt hơn của một hành động so với hành động trung bình tại trạng thái đó.
+Biên cắt (clip ratio – ε): Hệ số cho phép giới hạn mức độ thay đổi của chính sách giữa các lần cập nhật.
+GAE (Generalized Advantage Estimation): Phương pháp tính Advantage giúp giảm phương sai và tăng độ ổn định.
+2.2.3. Các công thức trong PPO-Clip
+Thuật toán Proximal Policy Optimization (PPO), đặc biệt biến thể PPO-Clip, dựa trên một số công thức cốt lõi nhằm đảm bảo quá trình cập nhật chính sách ổn định nhưng vẫn hiệu quả. Các công thức quan trọng bao gồm tỉ số xác suất, hàm mục tiêu có cắt biên (clipped surrogate objective), hàm giá trị và advantage.
+Tỉ số xác suất
+(2.1)(2.1)PPO so sánh chính sách mới và chính sách cũ thông qua tỉ số:
+(2.1)
+(2.1)
+Chú thích
+: xác suất chọn hành động  khi ở trạng thái  theo chính sách mới.
+: xác suất theo chính sách cũ.
+: mức “thay đổi” của chính sách.
+Nếu : hành động trở nên “được ưu tiên” hơn.
+Nếu : hành động trở nên “ít được ưu tiên” hơn.
+Hàm mục tiêu có cắt biên
+(2.2)(2.2)PPO tối đa hóa hàm mục tiêu surrogate:
+(2.2)
+(2.2)
+Chú thích
+: advantage, đo mức độ một hành động tốt hơn hành động trung bình tại trạng thái đó.
+: hệ số clip nhỏ (thường 0.1 – 0.3).
+: giới hạn mức thay đổi của chính sách.
+Hàm “min” đảm bảo rằng chính sách không được thay đổi quá mạnh, tránh gây mất ổn định.
+Hàm giá trị
+(2.3)(2.3)Critic được huấn luyện bằng cách tối thiểu hóa sai số:
+(2.3)
+(2.3)
+Chú thích
+: giá trị trạng thái do mạng Critic ước lượng.
+ return (phần thưởng tích lũy) từ dữ liệu rollout.
+Ước lượng lợi thế
+(2.4)(2.4)PPO thường dùng GAE để giảm phương sai:
+(2.4)
+(2.4)
+(2.5)(2.5)với:
+(2.5)
+(2.5)
+Chú thích
+: hệ số chiết khấu phần thưởng.
+: hệ số GAE (0 → advantage ngắn hạn, 1 → dài hạn).
+​: TD-error (Temporal-Difference error).
+Hàm mục tiêu tổng hợp của PPO
+(2.6)(2.6)PPO có thể kết hợp nhiều thành phần thành loss tổng:
+(2.6)
+(2.6)
+Chú thích
+c1, c2​: hệ số điều chỉnh.
+: entropy của chính sách, giúp tăng khám phá
+2.2.4. Cách hoạt động của thuật toán PPO-Clip
+Thuật toán: PPO-Clip
+Đầu vào: tham số ban đầu của policy ​, tham số ban đầu của hàm giá trị ​, ​
+for do
+Thu thập tập các quỹ đạo bằng cách cho tác tử chạy theo policy hiện tại trong môi trường.
+Tính toán phần thưởng tích lũy–về–sau 
+Tính toán các giá trị advantage (bằng bất kỳ phương pháp ước lượng advantage nào) dựa trên giá trị hiện tại của hàm giá trị ​​.
+Cập nhật policy bằng cách cực đại hóa hàm mục tiêu PPO-Clip:
+Huấn luyện hàm giá trị bằng hồi quy (regression) theo lỗi bình phương:
+end for
+2.2.5. Ưu điểm và nhược điểm của PPO-Clip
+Ưu điểm:
+Ổn định cao trong quá trình huấn luyện: PPO giới hạn mức thay đổi của chính sách nhờ “clipped objective”, giúp tránh hiện tượng học không ổn định – một vấn đề lớn trong Actor–Critic truyền thống.
+Hiệu quả thực nghiệm vượt trội: PPO đạt hiệu suất rất tốt trên nhiều môi trường mô phỏng phức tạp, đặc biệt là robot và xe tự hành.
+Dễ triển khai hơn TRPO: PPO không yêu cầu giải bài toán tối ưu theo ràng buộc KL-divergence phức tạp, mà chỉ dùng gradient descent thông thường.
+Phù hợp với mạng nơ-ron sâu: Hoạt động hiệu quả với state có kích thước lớn như ảnh camera, lidar, vector cảm biến.
+Tái sử dụng dữ liệu nhiều lần (multiple epochs): Mỗi batch có thể được cập nhật nhiều lần giúp tăng hiệu quả học.
+Thực hiện tốt trong không gian hành động liên tục: Ứng dụng trực tiếp vào điều khiển góc lái, tốc độ của xe tự hành.
+Nhược điểm:
+On-policy: Không tái sử dụng dữ liệu cũ như SAC/TD3 → tốn dữ liệu hơn, yêu cầu nhiều bước tương tác.
+Phụ thuộc vào siêu tham số (hyperparameters): Việc lựa chọn clip range, batch size, learning rate ảnh hưởng mạnh đến kết quả.
+Cần GPU khi state phức tạp: Huấn luyện mô hình PPO nhận ảnh đầu vào đòi hỏi tài nguyên lớn.
+Hội tụ chậm hơn so với các thuật toán off-policy: Đặc biệt trong môi trường có nhiễu hoặc phần thưởng trễ.
+2.2.6. Một số ứng dụng của PPO
+Xe tự hành (Autonomous Driving): Điều khiển bám làn, tránh va chạm, điều hướng waypoint trong mô phỏng CARLA, LGSVL, AirSim.
+Robot di động và robot cánh tay: Di chuyển trong môi trường phức tạp, tối ưu đường đi, động học ngược.
+Drone / UAV: Điều khiển độ cao, hướng bay, tránh vật cản trong không gian ba chiều.
+Game và mô phỏng vật lý: nổi bật là các bài toán MuJoCo, Roboschool, IsaacGym.
+Tối ưu hóa hệ thống công nghiệp: Điều khiển quá trình, tự động hóa dây chuyền, robot kho vận.
+Điều khiển chuyển động nhân vật ảo trong game / phim: PPO cho hành vi mượt, tự nhiên hơn so với Q-learning và DQN.
+2.2.7. Lý do sinh viên lựa chọn thuật toán PPO-Clip
+Việc lựa chọn PPO-Clip trong khóa luận được dựa trên các yếu tố sau:
+Phù hợp với không gian hành động liên tục: Xe tự hành yêu cầu điều khiển góc lái, tốc độ → Q-learning/DQN không dùng được.
+Dễ triển khai nhờ thư viện Stable-Baselines3: Giúp sinh viên tập trung vào thiết kế môi trường, phần thưởng, thay vì xây PPO từ đầu.
+Hiệu suất thực nghiệm tốt – ít lỗi, ít dao động chính sách: Phù hợp cho môi trường mô phỏng có nhiều nhiễu như CARLA (ảnh sáng, bóng đổ, vật cản,…).
+2.3. Thuật toán A*
+2.3.1. Tổng quan
+Thuật toán A* (A-star) là một phương pháp tìm kiếm tối ưu có sử dụng thông tin ước lượng, được áp dụng rộng rãi trong robot di động, hệ thống điều hướng và bài toán lập kế hoạch đường đi cho xe tự hành. Ý tưởng cốt lõi của A* là đánh giá mỗi trạng thái bằng tổng chi phí đã đi qua và chi phí dự đoán để đi đến đích. Nhờ đó, quá trình tìm kiếm được dẫn hướng theo hướng ngắn nhất, tránh mở rộng tràn lan không cần thiết.
+2.3.2. Một số thuật ngữ chính được sử dụng trong A*
+Nút : Các điểm trong biểu đồ của bạn (giống như các giao điểm trên bản đồ)
+Các cạnh : Các kết nối giữa các nút (giống như các con đường nối các giao lộ)
+Chi phí đường dẫn : Chi phí thực tế để di chuyển từ nút này sang nút khác
+Phương pháp tìm kiếm : Chi phí ước tính từ bất kỳ nút nào đến mục tiêu
+Không gian tìm kiếm : Tập hợp tất cả các con đường có thể khám phá
+2.3.3. Các công thức trong A*
+(2.7)(2.7)Hàm đánh giá chính của A* được xác định như sau:
+(2.7)
+(2.7)
+(2.8)(2.8)Trong đó:
+(2.8)
+(2.8)
+với  là chi phí từ nút thứ   đến nút , 
+(2.9)(2.9)Heuristic thường dùng trong CARLA là khoảng cách Euclid:
+(2.9)
+(2.9)
+Điều kiện để A* đảm bảo tối ưu:
+với là chi phí thực thấp nhất để đi từ  đến đích.
+Khi các điều kiện trên thỏa mãn, A* sẽ tìm ra đường đi ngắn nhất (optimal path).
+(2.10)(2.10)Quá trình cập nhật nút láng giềng:
+(2.10)
+(2.10)
+Nếu:
+thì ta cập nhật đường đi tốt hơn và đưa nút vào Open List.
+2.3.4. Ưu điểm và nhược điểm của thuật toán A*
+Ưu điểm:
+A* là một thuật toán có khả năng tìm đường tối ưu trong nhiều môi trường khác nhau. Việc kết hợp heuristic giúp A* giảm số lượng nút phải duyệt, từ đó cải thiện tốc độ so với các thuật toán không dùng heuristic như Dijkstra.
+Nhược điểm:
+Hiệu năng của A* phụ thuộc mạnh vào chất lượng của heuristic. Nếu heuristic không tốt, thuật toán có thể trở nên chậm và tốn nhiều bộ nhớ. Một hạn chế khác là đường đi sau khi tìm kiếm thường bị "gãy khúc" do waypoint có mật độ dày, dẫn đến việc phải áp dụng thêm các thuật toán làm mượt (spline smoothing) để phù hợp với chuyển động thật của xe. Ngoài ra, trong môi trường lớn hoặc nhiều vật cản, A* có thể gặp vấn đề về thời gian xử lý.
+2.4. Tổng quan về CARLA
+2.4.1. Giới thiệu chung về CARLA
+CARLA (Car Learning to Act) là một nền tảng mô phỏng mã nguồn mở được xây dựng để phục vụ nghiên cứu trong lĩnh vực xe tự hành, học máy và học tăng cường. Không giống những phần mềm mô phỏng hướng giải trí, CARLA được thiết kế đặc biệt cho mục đích khoa học và kỹ thuật, với mục tiêu mô phỏng đầy đủ một môi trường giao thông đô thị có tính chân thực cao cả về đồ họa, hành vi giao thông lẫn vật lý chuyển động của phương tiện.
+Trong các phiên bản mới, CARLA đã chuyển sang sử dụng Unreal Engine 5.5, mang lại bước tiến lớn về chất lượng mô phỏng hình ảnh và vật lý. Nhờ đó, môi trường trong CARLA có độ chi tiết vượt trội so với các simulator mã nguồn mở khác, cho phép xây dựng các kịch bản giao thông phức tạp phục vụ nghiên cứu AI điều khiển xe tự hành. Chính nhờ mức độ chân thực này, nhiều mô hình được huấn luyện trong CARLA khi triển khai vào xe thực tế có mức độ khớp hành vi tốt hơn so với các simulator đơn giản.
+Ngày nay, CARLA được sử dụng rộng rãi trong các nhóm nghiên cứu trên toàn thế giới và đã trở thành một trong những công cụ tiêu chuẩn trong việc đánh giá thuật toán perception, planning và control trong xe tự hành. Các hội nghị lớn như CVPR, ICCV, ICRA, IROS hay NeurIPS đều thường xuyên xuất hiện các công trình sử dụng CARLA làm nền tảng thử nghiệm.
+Hình 2.4: Giao diện CARLA Unreal Engine
+2.4.2. Đặc điểm nổi bật của CARLA
+Đồ họa và vật lý chân thực với Unreal Engine 5.5
+Việc sử dụng UE 5.5 giúp CARLA vượt xa các simulator khác ở một số điểm:
+Lumen Global Illumination: mô phỏng ánh sáng toàn cục theo thời gian thực, giúp hình ảnh camera gần như giống thật → cực kỳ quan trọng trong các bài toán RL khi dùng CNN.
+Nanite Geometry: hỗ trợ mô hình cảnh quan siêu chi tiết, không gây tụt FPS → thích hợp cho bản đồ diện tích lớn, nhiều vật thể.
+Chaos Physics Engine: mô phỏng va chạm, lực kéo, độ bám đường, độ trượt bánh xe chính xác hơn UE4 → hỗ trợ bài toán RL học động lực học tốt hơn.
+Điều kiện môi trường đa dạng: mưa, sương mù, ánh sáng thay đổi… giúp kiểm tra tính khái quát (generalization) của mô hình PPO.
+Sự chân thực về hình ảnh và vật lý giúp dữ liệu cảm biến giống thật hơn, điều này là yếu tố quan trọng để RL có thể học được các chính sách điều khiển có khả năng áp dụng về sau.
+Hệ thống cảm biến ảo đa dạng và cấu hình linh hoạt
+CARLA hỗ trợ:
+camera RGB, Depth, Semantic, Fisheye,
+LiDAR 32/64/128 tia,
+Radar,
+GNSS, IMU,
+Collision Sensor, Lane Invasion Sensor.
+Điều này cho phép xây dựng không gian trạng thái (state) vô cùng phong phú.
+Bản đồ đô thị chuẩn OpenDRIVE
+CARLA cung cấp bản đồ dạng HD-map với:
+làn đường chi tiết: lane_id, lane_width, hướng di chuyển,
+road_id, giao lộ, vòng xuyến, làn rẽ,
+waypoint liên tục với khoảng cách nhỏ (0.5–1m),
+cấu trúc kết nối giữa các đoạn đường.
+Dạng dữ liệu này là điều kiện lý tưởng để áp dụng các thuật toán lập kế hoạch đường đi như A*.
+Traffic Manager và mô phỏng tình huống thực tế
+CARLA có khả năng mô phỏng:
+xe NPC chạy theo luật,
+người đi bộ không tuân thủ quy tắc,
+tình huống nguy hiểm như xe cắt ngang, vượt ẩu, dừng đột ngột.
+Các tình huống này cần thiết để kiểm tra tính ổn định của mô hình RL khi phải phản ứng trong tình huống không lường trước.
+Mã nguồn mở – dễ tích hợp
+CARLA có API Python/C++ mạnh mẽ. Điều này cho phép:
+custom code (như Supervisor trong đề tài),
+xây dựng Web server điều khiển xe,
+thiết kế reward theo ý muốn,
+xây dựng reset logic hợp lý,
+thu thập dataset lớn cho RL/vision.
+Đặc biệt, tất cả mô-đun trong đề tài (A*, PPO, supervisor, raycast, CNN) đều có thể tích hợp trơn tru nhờ API.
+2.4.3. Các mô hình và thành phần chính trong CARLA
+Mô hình phương tiện (Vehicle Model)
+Với UE 5.5 + Chaos Physics, phương tiện trong CARLA có:
+mô phỏng lực kéo theo động cơ,
+độ bám mặt đường thay đổi theo thời tiết,
+mô hình treo, trọng tâm xe, quán tính,
+hỗ trợ điều khiển mức thấp (steer–throttle–brake),
+mô phỏng rung lắc và mất ổn định khi vào cua nhanh.
+Nhờ tính chân thực này, RL có thể học các chiến lược điều khiển phù hợp với vật lý thực.
+Mô hình cảm biến
+Cảm biến đóng vai trò là nguồn cung cấp trạng thái chính cho tác tử. CARLA cung cấp một hệ thống cảm biến phong phú, cho phép mô phỏng dữ liệu của xe tự hành một cách chân thực. Đề tài sử dụng các nhóm cảm biến sau:
+Camera RGB: thu nhận ảnh môi trường phía trước, được đưa qua mô-đun CNN để trích xuất đặc trưng thị giác dạng vector 16 chiều.
+Ray-cast (LiDAR mô phỏng tối giản): phát hiện vật cản phía trước xe và ước lượng khoảng cách, hỗ trợ tính toán mức độ rủi ro va chạm.
+IMU sensor: ghi nhận các thông số quán tính, đặc biệt là yaw-rate, phục vụ đánh giá trạng thái động học của xe.
+Collision và Lane Invasion sensor: phát hiện va chạm và xâm lấn làn, từ đó sinh các phần thưởng phạt (penalty) trong thuật toán RL.
+Thông tin bản đồ (Map API): trích xuất thông số làn đường để tính toán độ lệch vị trí (offset) và sai lệch hướng (heading error) so với trục làn.
+Tất cả cảm biến được cập nhật theo chế độ đồng bộ (synchronous mode), bảo đảm mỗi bước thời gian của thuật toán RL nhận được bộ dữ liệu trạng thái nhất quán và chính xác.
+2.4.4. Khả năng hỗ trợ học tăng cường của CARLA
+CARLA được đánh giá là một trong những nền tảng mô phỏng phù hợp nhất cho các nghiên cứu về học tăng cường (Reinforcement Learning – RL) nhờ khả năng tái hiện chính xác môi trường giao thông và cung cấp các cơ chế giúp tác tử học hỏi hiệu quả. CARLA không chỉ mô phỏng phương tiện và hạ tầng giao thông, mà còn cung cấp một môi trường chuẩn hóa theo mô hình MDP – nền tảng lý thuyết của hầu hết các thuật toán RL hiện đại.
+Môi trường đáp ứng đầy đủ cấu trúc của một bài toán MDP
+Trong CARLA, mọi thông tin về trạng thái (position, velocity, orientation, dữ liệu cảm biến…) và hành động (steer, throttle, brake) đều được định nghĩa rõ ràng theo từng bước mô phỏng. Quá trình chuyển trạng thái, thu thập phần thưởng và khả năng khởi tạo lại môi trường đều được kiểm soát tốt. Điều này cho phép xây dựng một pipeline RL hoàn chỉnh, nơi thuật toán có thể quan sát – hành động – nhận thưởng một cách chính xác và nhất quán.
+Không gian trạng thái đa dạng, mang tính giàu đặc trưng:
+CARLA cho phép kết hợp nhiều loại cảm biến để xây dựng state vector có độ phong phú cao, ví dụ: camera RGB, LiDAR, IMU, GNSS, cảm biến va chạm, cảm biến vượt làn và thông tin địa hình. Đặc biệt, cấu trúc bản đồ lane-level của CARLA cung cấp nhiều thông tin hữu ích như độ cong đường, hướng làn và vị trí chính xác của phương tiện. Nhờ đó, RL có thể học được hành vi điều khiển trong các tình huống phức tạp, thay vì chỉ phản ứng theo các tín hiệu đơn giản.
+Hỗ trợ tốt cho không gian hành động liên tục:
+Xe trong CARLA được điều khiển thông qua các giá trị liên tục, phù hợp với các phương pháp policy gradient như PPO, SAC hoặc TD3. Tín hiệu điều khiển được áp dụng trực tiếp lên mô hình động học của xe, giúp tác tử RL nhận được phản hồi vật lý chân thực và ổn định – điều kiện quan trọng để học được các chiến lược lái xe mượt và an toàn.
+Cơ chế mô phỏng đồng bộ đảm bảo dữ liệu chính xác:
+CARLA cho phép chạy mô phỏng theo từng bước rời rạc (synchronous mode), nghĩa là mỗi bước mô phỏng chỉ thực hiện sau khi thuật toán RL đã xử lý xong bước trước. Điều này loại bỏ hoàn toàn sai lệch thời gian và đảm bảo rằng dữ liệu trả về phù hợp tuyệt đối với hành động mà tác tử vừa đưa ra. Đây là tính năng hiếm có ở các simulator và đặc biệt quan trọng khi huấn luyện RL với tốc độ cao.
+Thiết kế phần thưởng linh hoạt và trực quan:
+Nhờ khả năng truy cập vào toàn bộ dữ liệu vật lý và cảm biến, CARLA cho phép xây dựng hàm phần thưởng phản ánh trực tiếp chất lượng lái, như độ lệch làn, mức dao động góc lái, độ mượt của chuyển động, mức độ an toàn hoặc khả năng tuân thủ luật giao thông. Các tín hiệu này giúp mô hình RL học được các chính sách điều khiển an toàn và hiệu quả trong môi trường phức tạp.
+Khả năng reset nhanh, hỗ trợ huấn luyện quy mô lớn:
+Các thuật toán RL thường yêu cầu một lượng mẫu khổng lồ để hội tụ. CARLA tối ưu phần này bằng khả năng reset môi trường rất nhanh, giúp quá trình thu thập dữ liệu được liên tục và giảm tối đa thời gian chờ – một điều kiện thiết yếu khi huấn luyện PPO trong đề tài.
+Môi trường đa dạng, nhiều tình huống thử nghiệm:
+CARLA cho phép tạo và tùy chỉnh nhiều kịch bản giao thông ở mức độ phức tạp cao: đường cong, đường dốc, giao lộ, thời tiết thay đổi, xe NPC, người đi bộ hoặc vật cản bất ngờ. Điều này giúp tác tử RL học được chính sách khái quát tốt và chịu được thay đổi môi trường – một yếu tố quan trọng trong điều khiển xe tự hành.
+2.4.5. Lý do CARLA phù hợp với đề tài
+Việc chọn CARLA làm môi trường mô phỏng trong đề tài không chỉ xuất phát từ khả năng mô phỏng giao thông chân thực, mà còn nhờ mức độ tương thích cao với mục tiêu nghiên cứu về hệ thống điều khiển tự hành kết hợp giữa lập kế hoạch và học tăng cường.
+Tính chân thực cao trong mô phỏng bản đồ và phương tiện:
+CARLA cung cấp bản đồ được mô hình hóa chi tiết theo chuẩn OpenDRIVE, kèm theo mô hình động học phương tiện có độ chính xác cao. Điều này cho phép đánh giá hiệu quả của thuật toán điều khiển trong bối cảnh gần giống thực tế, đặc biệt khi cần phân tích sai lệch làn, góc hướng và độ ổn định của xe.
+Khả năng thu thập dữ liệu phong phú phục vụ mô hình điều khiển:
+Nền tảng này cho phép thu thập song song nhiều loại dữ liệu như hình ảnh camera, trạng thái động lực, thông tin va chạm hoặc dữ liệu bản đồ. Những nguồn thông tin này rất cần thiết để xây dựng bộ trạng thái cho PPO, cũng như để giám sát hành vi xe trong quá trình chạy thử.
+Cung cấp đầy đủ công cụ để triển khai thuật toán điều khiển:
+CARLA hỗ trợ áp dụng các tín hiệu điều khiển mức thấp, ghi nhận phản hồi tức thời và mô phỏng tác động của điều khiển lên phương tiện. Điều này tạo điều kiện thuận lợi cho việc kiểm thử, điều chỉnh và đánh giá mô hình PPO trong quá trình thực nghiệm.
+Khả năng xây dựng kịch bản linh hoạt:
+CARLA cho phép tùy chỉnh môi trường với nhiều điều kiện hoạt động khác nhau: thời tiết, ánh sáng, mức độ giao thông hoặc các tình huống nguy hiểm. Sự đa dạng này giúp đề tài đánh giá mô hình trong nhiều bối cảnh, tăng độ tin cậy và tính thực tiễn của kết quả nghiên cứu.
+Tương thích tốt với các phương pháp mở rộng và phát triển trong tương lai:
+Nhờ kiến trúc mở và API linh hoạt, CARLA cho phép dễ dàng tích hợp các mô-đun khác như thuật toán lập kế hoạch A*, module giám sát Supervisor hay Web server điều khiển. Điều này giúp hệ thống trong đề tài có thể mở rộng trong các hướng nghiên cứu tiếp theo mà không bị giới hạn bởi nền tảng mô phỏng.
+CHƯƠNG 3: THIẾT KẾ HỆ THỐNG
+3.1. Thiết kế hệ thống điều khiển xe tự hành
+Hệ thống điều khiển xe tự hành trong đề tài được xây dựng dựa trên kiến trúc phân lớp client–server, cho phép tách biệt hoàn toàn giữa giao diện tương tác và các thuật toán điều khiển phức tạp. Cách tiếp cận phân tầng này giúp hệ thống dễ bảo trì, dễ mở rộng, phù hợp để tích hợp các thuật toán khác nhau và đảm bảo hoạt động ổn định trong môi trường mô phỏng CARLA.
+Trong đó, lớp client đảm nhận vai trò giao tiếp với người dùng, thu thập yêu cầu điều hướng và hiển thị trạng thái của xe; còn lớp server thực hiện toàn bộ nhiệm vụ lập kế hoạch đường đi, tính toán điều khiển và mô phỏng hành vi xe trong CARLA.
+Tổng thể hệ thống được thiết kế nhằm đáp ứng hai nhiệm vụ cốt lõi:
+Lập kế hoạch đường đi toàn cục (global planning): xác định tuyến đường ngắn nhất hoặc an toàn nhất từ vị trí hiện tại tới vị trí đích dựa trên thuật toán A* chạy trên đồ thị làn đường của CARLA.
+Điều khiển cục bộ (local control): đảm bảo xe bám làn, vận hành ổn định và xử lý các tình huống cục bộ thông qua bộ điều khiển học tăng cường PPO và bộ bám waypoint.
+Để kết nối hai nhiệm vụ trên, hệ thống sử dụng mô-đun Supervisor Controller, một thành phần được xây dựng nhằm điều phối và hợp nhất tín hiệu điều khiển sinh ra từ các bộ điều khiển cục bộ. Đây cũng là một trong những đóng góp quan trọng của đề tài.
+Kiến trúc tổng quan của hệ thống được thể hiện trong Hình 3.1 và được mô tả chi tiết qua hai lớp chức năng dưới đây.
+Hình 3.1: Sơ đồ hệ thống điều khiển xe tự hành 
+3.1.1. Phân tách mô-đun phía client và phía server
+Toàn bộ hệ thống được tổ chức thành hai lớp chính: Lớp Client (Giao diện) và Lớp Server (Điều khiển). Mỗi lớp đảm nhiệm một nhóm chức năng rõ ràng và không chồng chéo nhau.
+A. Lớp Client (Giao diện)
+Các mô-đun phía client được phát triển hoàn toàn trong đề tài, thực hiện nhiệm vụ thu nhận yêu cầu từ người dùng và hiển thị kết quả trả về từ server. Lớp này không chứa bất kỳ thuật toán điều khiển nào, đảm bảo phân tách rõ ràng với phần xử lý.
+Giao diện Web (Web UI)
+Là môi trường trực quan để người dùng quan sát bản đồ, vị trí xe và các waypoint sinh ra từ thuật toán A*.
+Hiển thị theo thời gian thực thông tin vận hành như góc lái, trạng thái di chuyển, tốc độ, và tuyến đường hiện tại.
+Hỗ trợ tương tác trực tiếp như thao tác click chọn điểm đích.
+Web UI được triển khai bằng HTML/Canvas kết hợp với kết nối HTTP hoặc WebSocket, đảm bảo tốc độ cập nhật nhanh và độ trễ thấp.
+Mô-đun chọn điểm đích (Global Goal Module)
+Tiếp nhận thao tác click chuột từ người dùng trên bản đồ.
+Chuyển đổi vị trí click thành tọa độ hệ quy chiếu CARLA (x_goal, y_goal).
+Tạo yêu cầu điều hướng và gửi sang server để xử lý.
+Mô-đun này là điểm bắt đầu của luồng dữ liệu trong hệ thống và đóng vai trò quan trọng trong việc kích hoạt quá trình lập kế hoạch A*.
+Mô-đun truyền thông Client (Client Handler)
+Đảm nhiệm việc gửi yêu cầu định tuyến đến server dưới dạng HTTP request hoặc JSON payload.
+Nhận phản hồi từ server như danh sách waypoint, trạng thái xe và góc lái hiện tại.
+Đồng bộ dữ liệu với Web UI để cập nhật hiển thị.
+Nhờ mô-đun này, lớp Client có thể vận hành độc lập mà không cần biết chi tiết thuật toán phía server.
+B. Lớp Server (Điều khiển)
+Lớp server bao gồm toàn bộ phần xử lý chính của hệ thống: lập kế hoạch đường đi, sinh tín hiệu điều khiển và mô phỏng hành vi xe. Server hoạt động liên tục ở tần số 20 Hz nhằm đảm bảo độ mượt và tính thời gian thực. Các mô-đun phía server được chia thành ba nhóm:
+Mô-đun định tuyến A* (Routing Module – A*)*
+Nhận hai thông tin đầu vào: vị trí xe hiện tại và vị trí đích yêu cầu từ client.
+Thực hiện tìm kiếm đường tối ưu trên đồ thị lane graph của CARLA bằng thuật toán A*.
+Áp dụng các kỹ thuật smoothing (làm mượt), giảm waypoint thừa, và chuẩn hóa hướng để tạo ra một tuyến đường mượt và tối ưu hơn cho điều khiển.
+Xuất ra danh sách waypoint hoàn chỉnh và gửi sang mô-đun điều khiển Supervisor.
+Đây là mô-đun đảm bảo nhiệm vụ lập kế hoạch toàn cục của hệ thống.
+Bộ điều khiển Supervisor (Supervisor Controller)
+Đóng vai trò là trung tâm điều phối điều khiển của xe, chịu trách nhiệm kết hợp hai bộ điều khiển cục bộ:
+Bộ điều khiển PPO (PPO Controller)
+Tại mỗi bước thời gian, tác tử PPO-Clip quan sát trạng thái của môi trường và sinh hành động điều khiển xe. Trạng thái đầu vào  được xây dựng từ các thông tin bám làn, động học của xe, khoảng cách vật cản và đặc trưng trích xuất từ ảnh camera. Các thông tin này được tổng hợp thành một vector trạng thái biểu diễn đầy đủ tình huống lái tại thời điểm .
+Đầu ra của thuật toán là hành động điều khiển ​ trong không gian liên tục, chủ yếu là góc lái của xe. Hành động này được gửi vào môi trường CARLA để cập nhật trạng thái mới và sinh phần thưởng tương ứng. Mục tiêu của PPO-Clip là học chính sách điều khiển sao cho tổng phần thưởng thu được trong quá trình vận hành được tối đa hóa, từ đó giúp xe bám làn ổn định và an toàn.
+Nhận vector trạng thái gồm độ lệch làn, sai số hướng, độ cong đường, thông tin raycast và các đặc trưng ảnh.
+Sử dụng mạng neural đã huấn luyện bằng PPO-Clip để sinh góc lái đề xuất steer_rl.
+Khả năng thích nghi cao nhờ học từ trải nghiệm trong môi trường mô phỏng.
+Bộ bám waypoint (Tracking Controller)
+Dựa trên danh sách waypoint đầu vào từ Routing Module.
+Tính toán góc lái steer_wp dựa trên nguyên lý điều khiển bám quỹ đạo (pure pursuit / Stanley).
+Thích hợp trong các đoạn đường cong hoặc giao lộ nơi PPO có thể thiếu thông tin toàn cục.
+Cơ chế hợp nhất điều khiển
+Supervisor Controller phân tích bối cảnh thực tế (đường thẳng, khúc cua, gần giao lộ, tốc độ hiện tại…) và lựa chọn hoặc nội suy giữa steer_rl và steer_wp để tạo steer_final:
+Cơ chế này giúp hệ thống đạt được sự cân bằng giữa độ mượt (PPO) và độ chính xác tuyến đường (A* + waypoint).
+Xe tự hành trong CARLA (Vehicle apply_control())
+Nhận tín hiệu điều khiển cuối cùng gồm steer_final, throttle và brake.
+Thực thi điều khiển trong mô phỏng CARLA và phản hồi trạng thái mới về server.
+Đồng bộ vị trí, hướng, tốc độ và các trạng thái khác để cập nhật vào vòng lặp điều khiển.
+Đây là đầu ra cuối cùng của hệ thống và là nơi thực thi commandes điều khiển.
+3.1.2. Mô tả sơ đồ theo từng dòng dữ liệu
+Quy trình vận hành tổng quát của hệ thống được thực hiện theo các bước sau:
+Người dùng chọn điểm đích trên Web UI, Global Goal Module chuyển thao tác này thành tọa độ.
+Client Handler gửi yêu cầu định tuyến sang server.
+Routing Module (A*) tính toán đường đi tối ưu và trả về danh sách waypoint đã làm mượt.
+Supervisor Controller nhận danh sách waypoint.
+PPO Controller và Tracking Controller đồng thời sinh ra hai giá trị góc lái steer_rl và steer_wp.
+Supervisor Controller hợp nhất hai giá trị này thành steer_final, tối ưu theo ngữ cảnh.
+Tín hiệu điều khiển được gửi tới Vehicle apply_control() trong CARLA để thực thi.
+CARLA trả về trạng thái xe mới, server tiếp tục cập nhật và gửi về client.
+Web UI cập nhật tuyến đường, vị trí xe, trạng thái điều khiển theo thời gian thực.
+Kiến trúc phân tầng này cho phép hệ thống tận dụng ưu điểm của cả hai phương pháp: A đảm nhiệm lập kế hoạch đường đi toàn cục, PPO điều khiển cục bộ linh hoạt, và Supervisor đảm bảo quyết định lái luôn an toàn và phù hợp với trạng thái thực tế.
+3.2. Thực nghiệm
+Nội dung thực nghiệm của đề tài bao gồm hai giai đoạn chính:
+Huấn luyện bộ điều khiển giữ làn dựa trên học tăng cường: Mô hình Proximal Policy Optimization (PPO-Clip) được huấn luyện từ đầu nhằm tạo ra chính sách điều khiển cục bộ có khả năng giữ làn ổn định và mượt mà trong nhiều điều kiện đường khác nhau.
+Triển khai và đánh giá thuật toán lập kế hoạch đường đi toàn cục: Thuật toán A* được phát triển để hoạt động trên đồ thị làn đường của CARLA, thực hiện tìm kiếm tuyến đường ngắn nhất từ vị trí hiện tại của xe đến điểm đích do người dùng chỉ định, kèm theo bước làm mượt và chuẩn hóa waypoint.
+Hai thành phần trên sau đó được tích hợp chặt chẽ trong hệ thống điều khiển xe tự hành thông qua mô-đun Supervisor Controller, nhằm tận dụng ưu điểm của cả lập kế hoạch toàn cục (A*) và điều khiển cục bộ thích nghi (PPO).
+Để đảm bảo tính tái lập và kết quả khách quan, toàn bộ các thực nghiệm (bao gồm cả quá trình huấn luyện PPO và đánh giá hệ thống hoàn chỉnh) đều được tiến hành trên bản đồ Town10HD_Opt của CARLA phiên bản 0.9.15, ở chế độ đồng bộ (synchronous mode) với tần số mô phỏng cố định 20 Hz. Chế độ này giúp đồng bộ hoàn toàn giữa server CARLA và vòng lặp học tăng cường/điều khiển, loại bỏ sai số do độ trễ thời gian thực.
+3.2.1. Cài đặt thuật toán PPO-Clip
+3.2.1.1. Xây dựng môi trường mô phỏng
+Quá trình huấn luyện PPO yêu cầu mô phỏng ổn định và có khả năng tái lập. Do đó, môi trường CARLA được xây dựng theo mô hình client–server, trong đó client gửi lệnh điều khiển và nhận dữ liệu cảm biến, còn server xử lý mô phỏng vật lý, ánh sáng, giao thông và bản đồ.
+Kết nối client–server CARLA.
+Client kết nối đến server thông qua cổng mặc định 2000.
+Hình 3.2: Kết nối client–server CARLA.
+Kích hoạt chế độ synchronous
+Chế độ synchronous đảm bảo rằng mỗi bước mô phỏng chỉ tiến hành khi client gửi lệnh điều khiển. Điều này cực kỳ quan trọng cho học tăng cường vì môi trường phải đồng bộ 1 bước → 1 action → 1 reward.
+Hình 3.3: Bật synchronous mode.
+Khởi tạo xe
+Để tăng tính đa dạng của các tình huống giao thông mà xe phải đối mặt trong quá trình huấn luyện, xe tự hành được khởi tạo tại các vị trí ngẫu nhiên trong số các điểm spawn hợp lệ trên bản đồ. Cơ chế này giúp chính sách học tăng cường tiếp xúc với nhiều cấu hình ban đầu khác nhau.
+Hình 3.4: Khởi tạo xe
+Khởi tạo hệ thống cảm biến
+Camera RGB: độ phân giải 800×600, FOV 90°, dùng để trích xuất đặc trưng CNN.
+Hình 3.5: Khởi tạo camera RGB
+Cảm biến va chạm
+Hình 3.6: Cảm biến va chạm
+3.2.1.2. Không gian trạng thái và hành động
+Không gian trạng thái (State space)
+Không gian trạng thái của môi trường gồm 33 đặc trưng:
+Hình 3.7: Không gian trạng thái
+Trong đó:
+10 đặc trưng động học và làn đường được trích xuất từ Waypoint API và thông tin quán tính của xe, bao gồm: độ lệch ngang so với tâm làn (offset), sai số hướng (heading error), tốc độ quay thân xe (yaw-rate), vận tốc ngang (lateral velocity), độ cong làn đường (curvature), khoảng cách tới hai mép làn (distance left/right), tốc độ lệch làn (offset-dot), cờ hợp lệ làn (lane-valid) và hệ số chiều chuyển động (dir-forward).. Các đặc trưng này lấy từ hai hàm:
+lane_metrics(world, vehicle) – cảm biến làn đường ảo
+Hình 3.8: Cảm biến làn đường ảo
+Hàm lane_metrics(world, vehicle) đóng vai trò như cảm biến làn đường ảo, trích xuất các thông tin hình học của làn gồm độ lệch tâm làn, sai số hướng, bề rộng làn, độ cong và trạng thái hợp lệ của làn.
+vehicle_dyn(vehicle) – cảm biến động học của xe
+Hình 3.9: Cảm biến động học của xe
+Hàm vehicle_dyn(vehicle) đóng vai trò như cảm biến động học của xe, trích xuất các thông tin chuyển động gồm vận tốc tiến, vận tốc ngang và tốc độ quay thân xe. Kết hợp với cảm biến làn đường ảo trong Hình 3.8, hệ thống thu được đầy đủ thông tin về vị trí và trạng thái chuyển động của xe trong làn, tạo nên nhóm 10 đặc trưng động học và làn đường dùng cho PPO.
+7 đặc trưng raycast đại diện cho khoảng cách tới vật cản ở phía trước và hai bên, giúp tác tử PPO nhận diện chướng ngại vật, tránh va chạm và hạn chế đánh lái gây lệch làn quá mức.
+Hình 3.10: Cảm biến khoảng cách
+Có 7 tia với góc: −45°, −30°, −15°, 0°, 15°, 30°, 45° so với hướng chuyển động.Mỗi tia trả về khoảng cách gần nhất tới vật cản trong tầm 30 m (nếu không có va chạm → trả về 30)
+16 đặc trưng ảnh từ mô-đun CNN.
+Hình 3.11: Hàm trích xuất đặc trưng ảnh
+16 đặc trưng CNN được trích xuất từ ảnh camera RGB thông qua các phép biến đổi Sobel (gradient theo hai trục), Gaussian Blur và histogram mức xám. Thay vì sử dụng mạng CNN sâu, đề tài dùng bộ đặc trưng thủ công gọn nhẹ để giảm chi phí tính toán nhưng vẫn giữ được thông tin hình học cơ bản của cảnh phía trước.
+Không gian hành động (Action Space)
+Không gian hành động của môi trường điều khiển xe tự hành được xây dựng dưới dạng một chiều liên tục, biểu diễn góc lái của xe. Hành động a là một giá trị thực nằm trong khoảng:
+Khoảng giá trị này tương ứng với biên độ đánh lái trái/phải của vô-lăng theo chuẩn của CARLA. Cụ thể:
+: xe đánh lái sang trái
+: xe đánh lái sang trái
+: xe giữ hướng thẳng
+Biên độ được lựa chọn dựa trên thực nghiệm nhằm đảm bảo góc lái đủ lớn để xe có thể ôm cua mượt mà, nhưng không vượt quá ngưỡng gây mất ổn định khi chạy ở tốc độ mục tiêu. Trong quá trình mô phỏng, giá trị hành động này được kết hợp với ga sinh bởi bộ điều khiển PID để tạo thành lệnh điều khiển cuối cùng áp dụng lên xe. Nhờ đó, không gian hành động phản ánh trung thực hành vi đánh lái trong môi trường lái xe thực tế và phù hợp với yêu cầu của thuật toán PPO trong bài toán bám làn.
+3.2.1.3. Hàm phần thưởng
+Hàm phần thưởng trong môi trường được thiết kế nhằm dẫn dắt tác tử học hành vi lái xe an toàn, bám sát tâm làn, duy trì hướng ổn định và tránh mọi tình huống mất kiểm soát. Reward tại mỗi bước mô phỏng được tổng hợp từ nhiều thành phần khác nhau, đại diện cho các tiêu chí lái xe an toàn trong thực tế. Cụ thể, hàm phần thưởng bao gồm các thành phần sau:
+Xe nhận thưởng cơ sở
+Ở mỗi bước, tác tử nhận một phần thưởng cơ sở:
+Thành phần này đóng vai trò khuyến khích xe tiếp tục di chuyển mà không gặp sự cố, tạo ra chuỗi reward dương khi xe duy trì được trạng thái ổn định.
+Phạt lệch làn:
+Lệch làn là yếu tố quan trọng nhất trong bài toán bám làn. Vị trí xe càng xa tâm làn, mức độ phạt càng tăng:
+Nếu độ lệch vượt ngưỡng an toàn , mức phạt sẽ được nhân mạnh để ngăn tác tử học thói quen chạy sát mép làn.
+Phạt sai hướng:
+Tác tử cũng bị phạt khi hướng xe lệch với trục làn:
+Trong đó:
+ là sai số hướng giữa xe và lane.
+Tỉ lệ hóa theo giúp chuẩn hóa mức độ phạt trong phạm vi ổn định.
+Mục tiêu của phần phạt này là giúp xe duy trì hướng di chuyển song song với trục làn, hạn chế hiện tượng đánh lái gấp không cần thiết.
+Phạt ra khỏi làn:
+Nếu xe vượt ra khỏi làn hợp lệ, tác tử bị trừ mạnh:
+Trừ 1 điểm khi vượt mép làn
+Thực hiện reset mềm nếu độ lệch quá lớn
+Reset mềm giúp xe quay lại một vị trí an toàn trong làn mà không kết thúc episode, nhờ đó tăng hiệu quả thu thập dữ liệu on-policy của PPO.
+Phạt sai tốc độ: 
+Tốc độ mục tiêu trong bài toán là khoảng 10–12 km/h. Tác tử bị phạt khi tốc độ quá thấp hoặc quá cao, buộc nó duy trì vận tốc ổn địnhPhạt va chạm: trừ 20 điểm và xe được đặt lại vị trí.
+Giới hạn này giúp xe tránh dừng lại hoặc tăng tốc đột ngột trong các đoạn thẳng.
+Phạt lệch nghiêm trọng (|offset| > 2 m): trừ 15 điểm.
+3.2.1.4. Tham số huấn luyện
+Hình 3.12: Các tham số huấn luyện
+Trong quá trình huấn luyện tác tử PPO-Clip, việc lựa chọn và điều chỉnh các tham số (hyperparameters) có vai trò quan trọng trong việc đảm bảo quá trình học diễn ra ổn định, hội tụ nhanh và tạo ra chính sách điều khiển hiệu quả. Các tham số này được khai báo thông qua hàm make_ppo() và được tinh chỉnh dựa trên đặc thù của bài toán điều khiển xe tự hành trong môi trường CARLA – vốn là một môi trường liên tục, có tính động lực học phức tạp và nhạy cảm với nhiễu.
+Nhìn tổng thể, các tham số PPO được chia thành các nhóm chính sau:
+Nhóm tham số thu thập dữ liệu và tối ưu hóa
+n_steps – số bước mô phỏng trước khi cập nhật chính sách
+Tham số này quy định độ dài mỗi chu kỳ tương tác giữa tác tử và môi trường.
+Giá trị lớn giúp phép ước lượng Advantage ổn định hơn và phản ánh chính xác động lực học của xe, nhưng đồng thời đòi hỏi nhiều bộ nhớ và tăng thời gian giữa hai lần cập nhật.
+Do đặc tính chuyển động liên tục và quán tính cao của xe, việc sử dụng số bước tương đối lớn là phù hợp.
+batch_size – kích thước mỗi lô dữ liệu huấn luyện
+Batch lớn mang lại gradient mượt hơn và ổn định hơn, trong khi batch nhỏ cho phép cập nhật nhanh hơn nhưng dễ dao động.
+Với môi trường vật lý như CARLA, kích thước batch trung bình giúp duy trì cân bằng giữa tốc độ và ổn định học.
+n_epochs – số vòng lặp tối ưu hóa trên mỗi batch
+Giá trị lớn cho phép mô hình khai thác tối đa thông tin từ dữ liệu thu thập được. Tuy nhiên, số epoch quá cao có thể làm chính sách bị “quá khớp” với rollout hiện tại.
+Do đó cần lựa chọn sao cho tác tử học đủ sâu nhưng vẫn duy trì tính tổng quát.
+Nhóm tham số của thuật toán học tăng cường
+learning_rate – tốc độ học của optimizer
+Đây là tham số điều khiển độ lớn của từng bước cập nhật trọng số.
+Learning rate quá lớn khiến chính sách dao động mạnh, trong khi giá trị quá nhỏ khiến tiến trình học chậm.
+Đối với PPO, tốc độ học thường được đặt ở mức vừa phải để đảm bảo hội tụ ổn định.
+gamma – hệ số chiết khấu phần thưởng tương lai
+Gamma gần 1 giúp tác tử quan tâm hơn đến mục tiêu dài hạn, điều này rất quan trọng trong điều khiển xe – nơi hành động hiện tại có thể ảnh hưởng nhiều bước về sau (ví dụ: xoay vô lăng quá mạnh sẽ làm mất ổn định sau vài giây).
+gae_lambda – tham số của Generalized Advantage Estimation
+Tham số này giúp giảm phương sai trong quá trình tính Advantage, từ đó làm cho việc cập nhật chính sách mượt mà và ổn định hơn.
+Giá trị trung bình thường mang lại sự cân bằng giữa độ lệch và độ chính xác.
+Nhóm tham số điều chỉnh mức độ thay đổi chính sách
+clip_range – biên độ cắt của PPO-Clip
+Đây là cơ chế bảo vệ quan trọng của PPO. Biên độ clip quyết định mức độ thay đổi tối đa của chính sách mới so với chính sách cũ sau mỗi lần cập nhật.
+Nếu clip quá nhỏ, tác tử học chậm; nếu clip quá lớn, việc cập nhật trở nên không ổn định.
+Trong các bài toán điều khiển liên tục, clip range vừa phải là lựa chọn tối ưu.
+ent_coef – hệ số entropy
+Entropy giúp duy trì mức độ khám phá, đặc biệt hữu ích trong giai đoạn đầu huấn luyện.
+Tuy nhiên, trong bài toán giữ làn, mục tiêu chính là lái xe ổn định, nên hệ số entropy thường được đặt thấp để hạn chế các hành vi ngẫu nhiên.
+Tham số tốc độ mục tiêu của xe
+target speed – tốc độ xe mong muốn khi huấn luyện
+Tốc độ này được duy trì bởi bộ điều khiển PID tích hợp trong môi trường.
+Việc cố định tốc độ giúp bài toán trở về dạng điều khiển lái (steering) thuần túy, giảm nhiễu và giúp PPO học nhanh hơn.
+Tốc độ quá cao khiến hành vi đánh lái trở nên khó kiểm soát; ngược lại, tốc độ quá thấp làm giảm độ khó của nhiệm vụ..
+3.2.1.5. Thực hiện huấn luyện
+Hình 3.13: Hàm huấn luyện PPO
+Hình 3.13 mô tả hàm main() dùng để khởi động quá trình huấn luyện PPO-Clip trong file train_ppo.py. Hàm này trước hết đọc tham số dòng lệnh thông qua argparse, bao gồm: lựa chọn hiển thị HUD (--hud), đường dẫn checkpoint cần tải lại (--load) và tổng số bước huấn luyện (--steps). Dựa trên tham số --hud, chế độ hiển thị môi trường được đặt thành "human" hoặc "none".
+Tiếp theo, chương trình khởi tạo môi trường CARLA đã xây dựng ở các mục trước và bọc nó lại dưới dạng vector environment bằng DummyVecEnv. Đối tượng env_inst = env.envs[0] được giữ riêng để phục vụ callback. Sau đó, hàm main() kiểm tra nếu tham số --load trỏ tới một file mô hình hợp lệ thì sẽ nạp lại mô hình PPO từ checkpoint này; ngược lại, một mô hình PPO mới sẽ được tạo ra thông qua hàm make_ppo(env), trong đó các siêu tham số (hyperparameters) như n_steps, batch_size, learning_rate, gamma, gae_lambda, clip_range, n_epochs, ent_coef… đã được cấu hình sẵn.
+Để theo dõi quá trình học, chương trình khởi tạo một callback ReportCallback, nhận vào môi trường env_inst, thư mục lưu log (logdir="logs/report"), tần suất lưu (save_freq) và kích thước khối thống kê (bin_size). Callback này sẽ thu thập và ghi lại các chỉ số huấn luyện theo thời gian (reward, lệch làn, sai số hướng, tốc độ, các giá trị loss của policy và value function, entropy…), đồng thời định kỳ lưu checkpoint mô hình để phục vụ đánh giá hoặc tiếp tục huấn luyện.
+Vòng lặp huấn luyện chính được thực hiện thông qua lời gọi model.learn(...) của thư viện Stable-Baselines3. Trong suốt quá trình này, tác tử PPO tương tác với môi trường, quan sát trạng thái (gồm các đặc trưng động học, cảm biến raycast, thông tin làn đường và đặc trưng CNN), sinh hành động đánh lái liên tục trong khoảng [−0.6,0.6], nhận phần thưởng và cập nhật chính sách theo cơ chế PPO-Clip. Khối try/except cho phép người dùng dừng sớm bằng tổ hợp phím Ctrl+C; khi đó mô hình hiện tại sẽ được lưu lại dưới dạng file ppo_lane_keep_interrupt.zip để có thể tiếp tục huấn luyện về sau.
+Khi hoàn thành toàn bộ số bước huấn luyện được chỉ định, mô hình PPO-Clip cuối cùng được lưu xuống file ppo_lane_keep_final.zip. File này chứa toàn bộ trọng số mạng và thông tin cấu hình cần thiết để nạp lại chính sách điều khiển xe trong phần thực nghiệm vận hành của hệ thống. Đây là kết quả cuối cùng của quá trình huấn luyện mô hình PPO-Clip.
+3.2.2. Cài đặt thuật toán A*
+3.2.2.1. Trích xuất đồ thị làn đường
+Đầu tiên, hệ thống tiến hành trích xuất toàn bộ cấu trúc làn đường của bản đồ trong CARLA. Từ dữ liệu Waypoint API, mỗi nút (node) được tạo ra bao gồm thông tin vị trí (x, y, yaw), road_id, lane_id, chiều di chuyển và trạng thái giao lộ. Các nút này được liên kết theo thứ tự lái xe, hình thành một đồ thị có hướng (directed graph) đại diện cho toàn bộ mạng lưới làn đường trong bản đồ. Đồ thị này là đầu vào chính cho thuật toán A* trong bước tìm đường.
+ 
+Hình 3.14: Trích xuất lane từ bản đồ CARLA
+3.2.2.2.  Xây dựng hàm chi phí
+Thuật toán A* được triển khai trên đồ thị làn đường (lane graph) được xây dựng sẵn và lưu dưới dạng file carla_graph_full.json. Đồ thị này biểu diễn bản đồ CARLA ở mức độ chi tiết theo từng làn, trong đó mỗi node mô tả vị trí tâm làn, hướng di chuyển và các thuộc tính hình học; còn mỗi cạnh (edge) thể hiện sự kết nối liên tục giữa hai waypoint kế tiếp trên cùng làn đường.
+Trong đồ thị này, mỗi cạnh đã chứa một trọng số (edge cost) cho biết chi phí di chuyển từ node hiện tại sang node kế tiếp. Trọng số cơ bản thường được tính theo khoảng cách giữa hai waypoint, nhưng có thể được mở rộng để phản ánh các đặc điểm giao thông thực tế hơn như độ cong của đoạn đường, vùng giao lộ hoặc sự thay đổi hướng đột ngột. Việc gán trọng số ngay từ giai đoạn xây dựng đồ thị giúp A* hoạt động hiệu quả và nhất quán khi tìm đường.
+Mục tiêu của hàm chi phí là mô tả “độ tốn kém” khi xe di chuyển qua một đoạn đường nhất định. Do đó, chi phí không chỉ phụ thuộc vào độ dài hình học giữa hai điểm mà còn có thể tích hợp các yếu tố bổ sung nhằm ưu tiên đường đi mượt, an toàn và phù hợp với đặc tính điều khiển của xe tự hành. Một số yếu tố thường được đưa vào hàm chi phí gồm:
+Độ dài đoạn đường: thành phần cơ bản nhất, khuyến khích xe chọn đường ngắn.
+Độ cong của làn: đoạn cong gắt có chi phí cao hơn để hạn chế đường đi khó điều khiển.
+Hướng di chuyển: phạt các cạnh có sự thay đổi hướng lớn để đảm bảo tuyến đường mượt mà.
+Nút giao thông: tăng chi phí tại vùng giao lộ để tránh chọn đường rẽ không cần thiết.
+Nhờ việc thiết kế chi phí theo hướng này, A* không chỉ tìm đường đi ngắn nhất về mặt khoảng cách mà còn tìm được đường đi “tối ưu cho xe tự hành" – tức là đường đi vừa mượt, vừa ổn định, giúp xe dễ điều khiển khi kết hợp với bộ điều khiển đường đi (waypoint follower) và tác tử PPO ở các phần sau.
+Hình 3.15: Xây dựng hàm chi phí
+3.3. Phát triển mô-đun Supervisor Controller
+Trong quá trình thử nghiệm, hai bộ điều khiển cục bộ của hệ thống – bộ điều khiển PPO (learning-based controller) và bộ điều khiển A–waypoint (tracking-based controller)* – thể hiện những ưu điểm và hạn chế rất khác nhau. Đây cũng chính là lý do dẫn đến nhu cầu phát triển một tầng điều khiển hợp nhất mới, gọi là Supervisor Controller, nhằm khai thác ưu điểm của cả hai phương pháp và loại bỏ nhược điểm còn tồn tại.
+3.3.1. Lý do cần Supervisor Controller
+Hạn chế của PPO Controller
+Bộ điều khiển PPO-Clip được huấn luyện trong môi trường CARLA có khả năng:
+giữ làn rất ổn định;
+duy trì góc lái mượt trong các đoạn đường thẳng;
+phản ứng linh hoạt trước các thay đổi nhỏ của môi trường.
+Tuy nhiên, PPO cũng tồn tại một số hạn chế:
+PPO chỉ quan sát được trạng thái cục bộ (lệch làn, heading error, curvature, raycast…),trong khi không nắm được tuyến đường toàn cục (global intention).
+Tại các vị trí ngã ba, ngã tư, nơi cần rẽ theo lộ trình A*, PPO không biết phải rẽ trái hay rẽ phải.
+Ở các khúc cua có độ cong lớn, PPO có thể điều khiển hơi yếu, dẫn đến xe bị rộng cua hoặc lệch khỏi waypoint.
+Điều này xuất phát từ bản chất on-policy của PPO: chính sách chỉ tối ưu theo dữ liệu thu thập trong quá trình huấn luyện, không mang thông tin toàn cục của bản đồ.
+Hạn chế của Waypoint Tracking Controller (WP Controller)
+Ngược lại hoàn toàn với PPO, bộ điều khiển waypoint có các đặc điểm:
+Luôn bám rất chính xác theo tuyến đường A*.
+Ra quyết định rõ ràng ở giao lộ (biết hướng rẽ).
+Hoạt động tốt trong cả bản đồ lớn Town10HD_Opt.
+Nhưng WP Controller cũng có điểm yếu:
+Tính chất rời rạc của waypoint khiến góc lái thay đổi đột ngột tại các giao lộ.
+Khi waypoint quá dày hoặc hướng thay đổi liên tục → gây giật lái hoặc zig-zag.
+Không có khả năng “làm mượt” hành vi như PPO, do điều khiển dựa trên hình học thuần túy.
+Sự cần thiết của một tầng điều phối – Supervisor
+Bộ điều khiển
+Ưu điểm
+Nhược điểm
+PPO
+Mượt, thích nghi, giữ làn tốt
+Không biết hướng rẽ toàn cục
+Waypoint
+Chính xác về hướng, rẽ đúng lộ trình
+Giật lái, zig-zag tại giao lộ
+⇒ Vì vậy, việc kết hợp hai nguồn tín hiệu này là yêu cầu tất yếu để xe vừa đi đúng đường, vừa vận hành mượt mà, đặc biệt tại:
+giao lộ phức tạp,
+khúc cua gắt,
+đoạn đường dài cần giữ làn ổn định,
+các tình huống mà một bộ điều khiển riêng lẻ khó xử lý tốt.
+Supervisor Controller ra đời chính là để giải quyết vấn đề này.
+3.3.2. Cơ chế kết hợp tín hiệu PPO + A*
+Hình 3.16: Cơ chế kết hợp tín hiệu PPO + A*
+Supervisor Controller được xây dựng theo ba chế độ hoạt động chính, tương ứng với ba nhóm tình huống:
+AUTO-CENTER MODE → dùng waypoint 100%
+Supervisor chuyển sang chế độ hiệu chỉnh tự động khi phát hiện một trong các điều kiện:
+Nguy cơ va chạm: khoảng cách raycast gần nhất < 4 m
+Lệch làn mạnh: offset > 0.8 m
+Sai hướng lớn: heading error > 25°
+Làn không hợp lệ: lane_valid = 0
+Trong các tình huống này, việc duy trì sự ổn định là ưu tiên cao nhất.Do đó Supervisor bỏ qua hoàn toàn steer_rl và chỉ dùng:
+Điều này giúp xe quay lại tâm làn nhanh chóng và an toàn.
+JUNCTION MODE (tại giao lộ) → waypoint chiếm 70%
+Khi xe tiến vào giao lộ (at_junction=True), hành vi quan trọng nhất là rẽ đúng theo lộ trình A*.
+Do đó Supervisor kết hợp hai tín hiệu theo tỉ lệ:
+Waypoint giữ vai trò dẫn hướng chính, PPO giúp mượt hóa góc lái.
+RL MODE (bình thường) → PPO 100%
+Khi xe đang ở:
+đường thẳng hoặc cong nhẹ,
+waypoint ổn định,
+không lệch làn, không sai hướng, không giao lộ,
+Supervisor chỉ dùng steer_rl:
+Điều này tận dụng khả năng mượt mà và tự nhiên của bộ điều khiển PPO.
+3.3.3. Bộ lọc ổn định góc lái (Steering Stabilization Filter)
+Để hạn chế góc lái thay đổi đột ngột, Supervisor áp dụng bộ lọc:
+3.3.4. Đánh giá ưu điểm và hạn chế của Supervisor Controller
+Mô-đun Supervisor Controller mang lại nhiều cải thiện đáng kể so với việc sử dụng riêng lẻ từng bộ điều khiển PPO hoặc waypoint. Tuy nhiên, do được xây dựng dựa trên luật (rule-based), mô-đun này vẫn tồn tại một số hạn chế nhất định. Phần dưới đây tổng hợp ưu điểm và nhược điểm theo đúng hành vi được triển khai trong mã nguồn.
+Ưu điểm của Supervisor
+An toàn hơn trong các tình huống nguy cơ
+Supervisor tự động chuyển về điều khiển waypoint 100% khi:
+có vật cản gần (min_ray < 4 m),
+xe lệch tâm lane (> 0.8 m),
+sai hướng quá lớn (> 25°),
+hoặc lane bị mất tín hiệu.
+Điều này giúp xe “tự hồi phục” về trạng thái ổn định, tránh rủi ro lệch làn hoặc va chạm.
+Rẽ chính xác hơn tại giao lộ:
+Tại giao lộ, Supervisor ưu tiên waypoint 70% để đảm bảo xe luôn rẽ đúng hướng theo lộ trình A*, đồng thời vẫn giữ được một phần tính mượt từ PPO.
+Di chuyển mượt hơn ở đoạn ổn định:
+Khi đường thẳng hoặc cong nhẹ và không có nguy cơ, Supervisor sử dụng hoàn toàn steer_rl từ PPO. PPO cho hành vi điều khiển mềm mại, giảm rung giật so với điều khiển dựa trên waypoint.
+Hạn chế zigzag và thay đổi hướng đột ngột:
+Các tình huống waypoint gấp (nhất là trong giao lộ) thường khiến xe zigzag nếu dùng WP Controller thuần túy. Supervisor chỉ dùng waypoint mạnh khi cần thiết, kết hợp với PPO giúp ổn định và giảm dao động tay lái.
+Góc lái tự nhiên hơn nhờ bộ lọc ổn định:
+Bộ lọc làm mượt (low-pass filter) trong Supervisor giúp:
+giảm độ giật góc lái,
+đảm bảo continuity giữa các khung thời gian,
+tạo cảm giác vận hành giống xe thật.
+Hạn chế của Supervisor Controller
+Mặc dù mang lại nhiều cải thiện, Supervisor vẫn tồn tại một số điểm hạn chế đặc trưng của mô hình rule-based:
+Phụ thuộc vào các ngưỡng cố định (threshold-based)
+Supervisor sử dụng các điều kiện so sánh:
+offset > 0.8,
+heading > 25°,
+min_ray < 4 m.
+Các ngưỡng này do con người đặt ra và không tối ưu cho mọi tình huống.Nếu môi trường thay đổi (tốc độ cao hơn, bản đồ khác), ngưỡng này có thể không còn phù hợp.
+Chưa thích ứng theo tốc độ xe:
+Hiện tại, các ngưỡng auto-center và tỷ lệ trộn 0.3–0.7 không thay đổi theo tốc độ. Trong thực tế:
+tốc độ cao cần ngưỡng nghiêm ngặt hơn,
+tốc độ thấp có thể dùng PPO nhiều hơn.
+Supervisor chưa tự động thích nghi theo yếu tố này.
+Các luật ra quyết định chưa xét đa yếu tố phức tạp. Supervisor chỉ xét:
+offset,
+heading,
+raycast,
+trạng thái giao lộ.
+Những yếu tố như:
+độ cong waypoint phía trước,
+mật độ giao thông giả lập,
+độ tin cậy của PPO theo từng vùng bản đồ 
+hiện chưa được xem xét.
+Không “học được” như PPO
+Supervisor hoàn toàn rule-based → không tự cải thiện theo thời gian. Muốn tăng hiệu quả phải chỉnh lại các tham số thủ công.
+3.4. Phát triển Web UI điều hướng thời gian thực
+Hệ thống Web UI giữ vai trò là giao diện trực quan giúp người dùng tương tác với mô phỏng, theo dõi trạng thái xe và gửi yêu cầu điều hướng. Đây là thành phần nằm ở phía client, đảm nhiệm chức năng hiển thị và kết nối với server điều khiển.
+3.4.1. Kiến trúc Web UI
+Web UI được thiết kế theo mô hình đơn giản, tập trung vào ba chức năng chính:
+Hiển thị bản đồ và trạng thái xe:
+Giao diện trình duyệt hiển thị bản đồ giao thông đã được trích xuất từ môi trường mô phỏng.Trên bản đồ này, người dùng có thể quan sát:
+vị trí hiện tại của xe,
+hướng di chuyển,
+tuyến đường đã được quy hoạch,
+thông số vận hành quan trọng (tốc độ, góc lái,…).
+Nhờ cơ chế cập nhật liên tục từ server, Web UI hoạt động gần như thời gian thực, hỗ trợ quá trình kiểm thử thuật toán điều khiển.
+Tương tác người dùng
+Web UI cho phép người dùng thao tác trực tiếp trên bản đồ, ví dụ như:
+phóng to/thu nhỏ khu vực quan sát,
+đánh dấu điểm đích,
+xem thông tin waypoint hoặc trạng thái xe,
+kích hoạt tính năng điều hướng.
+Các thao tác đều được thiết kế trực quan, đảm bảo dễ dùng ngay cả với người không chuyên.
+Giao tiếp với hệ thống server
+Giao diện sử dụng các API nhẹ để trao đổi dữ liệu với server. Việc truyền nhận chỉ gồm:
+thông tin điểm đích,
+trạng thái xe,
+tuyến đường do thuật toán trả về.
+Nhờ đó giao diện hoạt động mượt, không tạo tải lớn lên hệ thống.
+3.4.2. Cơ chế click-to-goal
+Một trong những tính năng quan trọng nhất của Web UI là cơ chế “click-to-goal”.
+Quy trình hoạt động như sau:
+Người dùng nhấn vào một vị trí bất kỳ trên bản đồ.
+Hệ thống chuyển đổi vị trí click thành tọa độ tương ứng trong không gian mô phỏng.
+Tọa độ được gửi lên server như một yêu cầu điều hướng mới.
+Server tiến hành quy hoạch đường đi bằng thuật toán A*.
+Tuyến đường được trả về và hiển thị ngay trên Web UI.
+Cơ chế này giúp người dùng dễ dàng tạo ra nhiều kịch bản thử nghiệm, đánh giá khả năng kết hợp giữa bộ lập kế hoạch toàn cục và bộ điều khiển cục bộ.
+CHƯƠNG 4: THỬ NGHIỆM VÀ ĐÁNH GIÁ HỆ THỐNG
+4.1. Kết quả huấn luyện PPO
+Trong phần này, mô hình PPO-Clip được huấn luyện với ba bộ siêu tham số (preset) khác nhau.
+Mỗi bộ tham số thể hiện một triết lý huấn luyện riêng: cân bằng – nhanh – ổn định.
+Ba cấu hình được mô tả như sau:
+Bộ tham số A
+n_steps = 2048
+batch_size = 256
+gae_lambda = 0.95
+gamma = 0.995
+n_epochs = 10
+ent_coef = 0.0
+learning_rate = 3e-4
+clip_range = 0.2
+Bộ tham số B
+n_steps = 1024
+batch_size = 128
+gae_lambda = 0.90
+gamma = 0.990
+n_epochs = 15
+ent_coef = 0.01
+learning_rate = 1e-3
+clip_range = 0.3
+Bộ tham số C
+n_steps = 4096
+batch_size = 512
+gae_lambda = 0.97
+gamma = 0.999
+n_epochs = 8
+ent_coef = 0.0
+learning_rate = 1e-4
+clip_range = 0.15
+4.1.1. Thực nghiệm với bộ tham số A
+Bộ tham số A là cấu hình cân bằng, được dùng như baseline. Với rollout vừa phải và learning rate trung bình, PPO học ổn định và không bị dao động mạnh.
+Hình 4.1: Reward Curve – Bộ tham số A
+Hình 4.2: Offset – Bộ tham số A
+Hình 4.3: Heading – Bộ tham số A
+Nhận xét kết quả:
+Reward tăng đều theo các iteration.
+Offset giảm dần, đường cong offset khá mượt.
+Heading error ổn định sau vài nghìn bước.
+Mô hình ít bị reset, hành động không quá “giật”.
+4.1.2. Thực nghiệm với bộ tham số B
+Bộ tham số B có learning rate lớn, clip rộng, batch nhỏ → mô hình học rất nhanh nhưng dễ mất ổn định.
+Hình 4.4: Reward Curve – Bộ tham số B
+Hình 4.5: Offset – Bộ tham số B
+Hình 4.6: Heading – Bộ tham số B
+Nhận xét kết quả:
+Reward tăng mạnh ở giai đoạn đầu nhưng dao động lớn.
+Offset giảm nhanh nhưng không mượt, có nhiều đỉnh sai số.
+Heading có lúc lệch mạnh → dễ xuất hiện soft-reset.
+Mô hình khám phá nhiều hơn (nhờ entropy cao) nhưng đánh lái “hỗn”.
+4.1.3. Thực nghiệm với bộ tham số C
+Preset C hướng đến độ ổn định cao: rollout dài, batch lớn, learning rate nhỏ → mô hình hội tụ chậm nhưng cực kỳ mượt.
+Hình 4.7: Reward Curve – Bộ tham số C
+Hình 4.8: Offset – Bộ tham số C
+Hình 4.9: Heading – Bộ tham số C
+Nhận xét kết quả:
+Reward tăng chậm nhưng rất ổn định, không có “nhảy số”.
+Offset không ổn định.
+Heading error không ổn định.
+4.2. Kết quả thuật toán A* 
+Thuật toán A* được sử dụng nhằm tìm đường đi tối ưu từ vị trí hiện tại của xe đến mục tiêu mà người dùng chọn. Việc đánh giá tập trung vào chất lượng tuyến đường, số lượng waypoint, độ mượt và khả năng xử lý các đoạn giao lộ trong bản đồ Town10HD_Opt.
+Kết quả tìm đường thô (raw path)
+A* cho kết quả đúng tuyến, bám theo cấu trúc lane-level của bản đồ. Tuy nhiên đường đi thô thường chứa nhiều điểm gấp khúc, đặc biệt tại:
+giao lộ bốn hướng,
+các đoạn cong lớn,
+khu vực đổi lane.
+Kết quả sau khi smoothing
+Để cải thiện độ mượt, đường đi được làm trơn bằng thuật toán lọc điểm và nội suy đoạn cong. Số waypoint giảm từ vài trăm xuống còn vài chục điểm.
+Hình 4.10: Đường đi sau smoothing
+Nhận xét kết quả A*
+Tuyến đường tìm được chính xác và không xảy ra lỗi "đi ngược chiều".
+Smoothing giúp giảm dao động góc lái khi xe bám theo đường.
+Một số đoạn giao lộ phức tạp vẫn cần điều chỉnh thủ công để hạn chế các góc quá sắc.
+A* hoạt động ổn định, thời gian tính toán trung bình dưới 100ms cho một mục tiêu.
+4.3. Kết quả hệ thống kết hợp PPO + A*
+Hệ thống Supervisor hoạt động như “bộ hòa giải” giữa điều khiển học tăng cường (PPO) và điều khiển dựa trên bản đồ (A*). Mục tiêu là đảm bảo:
+PPO giữ làn và xử lý các đoạn đi thẳng, cua nhẹ.
+A* định hướng và xử lý các đoạn rẽ, giao lộ, hoặc khi hướng xe sai lệch lớn.
+Kịch bản thử nghiệm
+Xe được đặt tại vị trí ngẫu nhiên, người dùng chọn vị trí mục tiêu trên web. Supervisor nhận:
+waypoint từ A*,
+hành động từ PPO, và quyết định chế độ điều khiển.
+Kết quả chạy thực tế
+Trong đường thẳng hoặc cong nhẹ → hệ thống ưu tiên PPO, xe giữ làn rất mượt.
+Khi sắp đến ngã rẽ → Supervisor chuyển sang chế độ waypoint để đảm bảo xe rẽ đúng hướng.
+Khi rẽ xong → Supervisor trả lại quyền điều khiển cho PPO.
+Nhận xét
+Khả năng điều khiển ổn định hơn so với chỉ dùng PPO.
+Đường đi mượt hơn so với chỉ dùng A*.
+Giảm đáng kể trường hợp xe lệch hướng khi đi qua giao lộ.
+Hạn chế: ở các ngã rẽ phức tạp, cần tinh chỉnh thêm ngưỡng chuyển đổi giữa hai chế độ.
+4.4. Kết quả Web UI
+Giao diện Web đóng vai trò quan trọng trong việc giám sát và điều khiển hệ thống. Web được xây dựng nhẹ, trực quan, cho phép thao tác “click-to-goal” và quan sát trạng thái xe trên bản đồ 2D lane-level.
+Các chức năng đã triển khai
+Hiển thị bản đồ dạng 2D.
+Hiển thị vị trí, hướng, tốc độ, trạng thái xe theo thời gian thực.
+Hiển thị đường đi được sinh bởi A*.
+Cho phép người dùng chọn vị trí đích chỉ bằng một cú click.
+Hình 4.11: Giao diện bản đồ Web UI
+Hình 4.12: Web UI sau khi click-to-goal
+Nhận xét
+Web UI giúp theo dõi toàn bộ pipeline mà không cần mở giao diện CARLA mặc định.
+Thao tác chọn mục tiêu rất đơn giản và trực quan.
+Độ trễ thấp, phù hợp cho giám sát real-time.
+Một số phân đoạn bản đồ phức tạp cần tối ưu hiển thị để rõ nét hơn.
+4.5. Đánh giá
+4.5.1. Đánh giá thuật toán PPO
+Bộ tham số A: PPO-Clip hoạt động ổn định và đạt hiệu quả cao khi được cấu hình cân bằng. Quá trình huấn luyện cho thấy reward tăng đều, offset và heading error giảm dần và ổn định. Hành vi điều khiển mượt, ít xuất hiện hiện tượng reset. Do đó, bộ tham số A phù hợp để sử dụng làm cấu hình baseline cho bài toán điều khiển xe tự hành giữ làn.
+Bộ tham số B: PPO-Clip học rất nhanh trong giai đoạn đầu do khả năng cập nhật chính sách mạnh. Tuy nhiên, mô hình dễ bị dao động, offset và heading error không ổn định, dẫn đến hành vi đánh lái thiếu chính xác. Điều này cho thấy khi các siêu tham số được đặt quá lớn, PPO-Clip không phù hợp cho các bài toán điều khiển yêu cầu độ chính xác và ổn định cao.
+Bộ tham số C: PPO-Clip thể hiện quá trình huấn luyện ổn định về mặt reward, tuy nhiên chất lượng điều khiển không tương ứng, thể hiện qua offset và heading error chưa ổn định. Kết quả này cho thấy việc tối ưu reward đơn thuần là chưa đủ, mà cần thiết kế hàm reward và cấu hình huấn luyện phù hợp để đảm bảo chất lượng điều khiển thực tế.
+4.5.2. Đánh giá thuật toán A*
+Ưu điểm:
+Định tuyến chính xác theo bản đồ CARLA (lane-level).
+Tính toán nhanh và ít lỗi.
+Sau smoothing, đường mượt và dễ điều khiển.
+Hạn chế:
+Đường thô có nhiều điểm gấp khúc.
+Không phản ánh động học xe → cần bộ điều khiển thấp hơn hỗ trợ.
+Một số waypoint gần giao lộ cần tinh chỉnh thủ công.
+4.5.3. Đánh giá hệ thống Supervisor (PPO + A*)
+Ưu điểm:
+Kết hợp được ưu điểm của PPO và A*.
+Xe vừa đi đúng hướng, vừa giữ làn mượt.
+Chuyển đổi điều khiển tương đối ổn định.
+Tăng khả năng chạy đường dài, giảm lỗi lệch hướng.
+Hạn chế:
+Logic chuyển đổi cần tinh chỉnh ngưỡng heading/curvature.
+Chưa có xử lý hoàn chỉnh cho tình huống giao thông phức tạp.
+Khi A* và PPO đưa ra hành động trái ngược, có thể gây rung nhẹ.
+4.5.4. Đánh giá Web UI
+Ưu điểm:
+Giao diện trực quan, dễ sử dụng.
+Theo dõi trạng thái thực tế của xe rất rõ ràng.
+Hỗ trợ điều khiển click-to-goal nhanh chóng.
+Hiển thị dữ liệu CARLA theo thời gian thực.
+Hạn chế:
+Một số phân đoạn bản đồ cần tối ưu hiển thị.
+Khả năng mở rộng thêm tính năng (tránh vật cản, hiển thị traffic light).
+CHƯƠNG 5: KẾT LUẬN VÀ HƯỚNG PHÁT TRIỂN
+5.1. Kết luận
+Đề tài tập trung xây dựng một hệ thống điều khiển xe tự hành trên môi trường mô phỏng CARLA, kết hợp giữa thuật toán học tăng cường Proximal Policy Optimization (PPO-Clip) và thuật toán tìm đường cổ điển A*. Một mô-đun Supervisor được thiết kế nhằm điều phối linh hoạt hai thuật toán, giúp phương tiện vừa giữ làn ổn định vừa di chuyển chính xác theo hướng mục tiêu. Bên cạnh đó, hệ thống tích hợp giao diện Web hỗ trợ thiết lập điểm đích và giám sát hoạt động của xe theo thời gian thực.
+Thuật toán PPO-Clip được cài đặt và huấn luyện trên môi trường Town10HD_Opt với nhiều bộ siêu tham số khác nhau. Kết quả thực nghiệm cho thấy mô hình PPO có khả năng giữ làn tốt, điều khiển mượt và ổn định, đặc biệt khi sử dụng bộ tham số tối ưu (Preset C). Thuật toán hoạt động hiệu quả trên các đoạn đường thẳng và cong nhẹ, góp phần tạo nên phong cách lái tự nhiên cho xe.
+Thuật toán A* được triển khai để thực hiện định tuyến toàn cục. Kết quả cho thấy A* tìm được đường đi chính xác và bám sát cấu trúc làn đường của bản đồ CARLA. Việc áp dụng kỹ thuật smoothing giúp cải thiện đáng kể độ mượt của tuyến đường, giảm số waypoint dư thừa và nâng cao chất lượng bám đường của xe.
+Mô-đun Supervisor đảm nhiệm vai trò kết hợp hai thuật toán một cách hợp lý: trong các đoạn đường ổn định, hệ thống ưu tiên sử dụng PPO để giữ làn; khi tiếp cận các đoạn cua hoặc giao lộ, điều khiển tự động chuyển sang sử dụng waypoint từ A*. Nhờ cơ chế này, phương tiện có thể di chuyển hoàn chỉnh từ vị trí xuất phát đến điểm đích mà không gặp hiện tượng lệch hướng hoặc mất ổn định.
+Giao diện Web góp phần nâng cao tính trực quan của hệ thống, cho phép người dùng lựa chọn điểm đích, quan sát trạng thái xe và theo dõi thông số hoạt động theo thời gian thực. Điều này giúp quá trình thử nghiệm trở nên thuận tiện và dễ đánh giá hơn.
+Tổng hợp lại, đề tài đã hoàn thành các mục tiêu đề ra:
+Xây dựng môi trường mô phỏng xe tự hành trên CARLA.
+Huấn luyện mô hình PPO cho nhiệm vụ giữ làn.
+Cài đặt thuật toán A* tìm đường dựa trên bản đồ lane-level.
+Phát triển mô-đun Supervisor kết hợp PPO và A*.
+Xây dựng giao diện Web phục vụ điều khiển và giám sát thời gian thực.
+Hệ thống hoạt động ổn định trong các thử nghiệm và cho thấy tiềm năng mở rộng cho các bài toán phức tạp hơn trong tương lai.
+5.2. Hướng phát triển
+Mặc Mặc dù hệ thống đã đạt được các mục tiêu chính, vẫn còn nhiều hướng nghiên cứu tiềm năng:
+Mở rộng bộ điều khiển PPO: Điều khiển bổ sung ga và phanh, huấn luyện trong điều kiện thời tiết và giao thông đa dạng để tăng khả năng tổng quát hoá.
+Bổ sung khả năng tránh vật cản: Tích hợp LiDAR, Radar hoặc Depth Camera cùng các thuật toán tránh va chạm để tăng độ an toàn.
+Cải thiện thuật toán A*: Nâng cấp lên Hybrid A* hoặc State Lattice nhằm mô phỏng động học xe chính xác hơn, đồng thời tối ưu hoá thuật toán smoothing.
+Hoàn thiện mô-đun Supervisor: Tối ưu tiêu chí chuyển đổi giữa hai chế độ điều khiển để thích ứng tốt hơn trong giao lộ hoặc các đoạn cua gắt.
+Nâng cấp giao diện Web: Cải thiện tốc độ cập nhật, bổ sung thông tin trực quan hơn hoặc hỗ trợ điều khiển nhiều phương tiện cùng lúc.
+Cuối cùng, em xin gửi lời cảm ơn chân thành tới thầy hướng dẫn, người đã luôn tận tình hỗ trợ, định hướng và đóng góp nhiều ý kiến quý báu trong suốt quá trình thực hiện đề tài. Những kiến thức và kinh nghiệm thu nhận được từ đồ án không chỉ giúp em hoàn thành tốt nhiệm vụ hiện tại mà còn là nền tảng quan trọng để em tiếp tục học tập, nghiên cứu và phát triển trong lĩnh vực trí tuệ nhân tạo và thị giác máy tính trong tương lai.
+TÀI LIỆU THAM KHẢO
+[1] 
+Dosovitskiy, A., Ros, G., Codevilla, F., López, A., & Koltun, V. (2017).
+CARLA: An Open Urban Driving Simulator. Conference on Robot Learning (CoRL): https://arxiv.org/abs/1711.03938 
+[2] 
+Schulman, J., Wolski, F., Dhariwal, P., Radford, A., & Klimov, O. (2017).
+Proximal Policy Optimization Algorithms. arXiv preprint arXiv:1707.06347: https://arxiv.org/abs/1707.06347
+[3] 
+Schulman, J., Levine, S., Moritz, P., Jordan, M., & Abbeel, P. (2015).
+Trust Region Policy Optimization. International Conference on Machine Learning (ICML): https://arxiv.org/abs/1502.05477
+[4] 
+Sutton, R. S., & Barto, A. G. (2018).
+Reinforcement Learning: An Introduction (2nd Edition). MIT Press: http://incompleteideas.net/book/the-book-2nd.html
+[5] 
+OpenAI SpinningUp (2018).
+Proximal Policy Optimization (PPO) Documentation: https://spinningup.openai.com/en/latest/algorithms/ppo.html
+[6] 
+Raffin, A., Hill, A., Ernestus, M., Gleave, A., Kanervisto, A., Dormann, N., & Plappert, M. (2021).
+Stable-Baselines3: Reliable Reinforcement Learning Implementations.
+Journal of Machine Learning Research: https://github.com/DLR-RM/stable-baselines3 
+[7] 
+CARLA Documentation (2023).
+Official CARLA Simulator API Reference: https://carla.readthedocs.io/

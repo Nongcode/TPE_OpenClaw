@@ -2,6 +2,7 @@ const fs = require("fs");
 const path = require("path");
 const {
   listDirectories,
+  listConfiguredAgentIds,
   readJsonIfExists,
   resolveOpenClawHome,
   unique,
@@ -80,6 +81,17 @@ function inferManifest(agentId) {
       taskTypes: ["media.create"],
     };
   }
+  if (agentId === "nv_prompt") {
+    return {
+      ...defaults,
+      label: "Nhan vien prompt",
+      role: "prompt specialist",
+      reportsTo: "pho_phong",
+      requiresReviewBy: "pho_phong",
+      capabilities: ["prompt", "image-prompt", "video-prompt", "prompt-research"],
+      taskTypes: ["prompt.write", "prompt.revise"],
+    };
+  }
 
   return defaults;
 }
@@ -135,7 +147,10 @@ function discoverRegistry(options = {}) {
   const openClawHome = resolveOpenClawHome(options.openClawHome);
   const manifestDir =
     options.manifestDir || path.join(__dirname, "..", "manifests");
-  const agentIds = unique(listDirectories(path.join(openClawHome, "agents")));
+  const agentIds = unique([
+    ...listDirectories(path.join(openClawHome, "agents")),
+    ...listConfiguredAgentIds(openClawHome),
+  ]);
 
   const agents = agentIds.map((agentId) => {
     const runtime = loadAgentRuntime(openClawHome, agentId);

@@ -1,69 +1,44 @@
 # Flow
 
-## State machine
+## Main path
 
-`agent-orchestrator-test` chỉ có 4 trạng thái chính:
-
-1. `drafting_content`
-2. `awaiting_content_approval`
-3. `awaiting_media_approval`
-4. `published`
-
-## User messages
-
-Khi đang chờ duyệt content, các câu sau được hiểu là duyệt:
-
-- "duyệt content"
-- "duyệt bài"
-- "ok content"
-- "ok bài"
-- "cho làm ảnh"
-
-Khi đang chờ duyệt content, các câu sau được hiểu là yêu cầu sửa:
-
-- "sửa content"
-- "viết lại"
-- "chưa duyệt content"
-- "bài chưa đạt"
-
-Khi đang chờ duyệt media, các câu sau được hiểu là duyệt và publish:
-
-- "duyệt ảnh"
-- "duyệt media"
-- "ok ảnh"
-- "đăng bài"
-- "publish"
-
-Khi đang chờ duyệt media, các câu sau được hiểu là yêu cầu sửa:
-
-- "sửa ảnh"
-- "làm lại ảnh"
-- "chưa duyệt media"
-- "ảnh chưa đạt"
-
-## Output blocks expected from child agents
-
-`nv_content` phải trả các marker sau để script parse ổn định:
-
-- `APPROVED_CONTENT_BEGIN`
-- `APPROVED_CONTENT_END`
-- `PRODUCT_NAME:`
-- `PRODUCT_URL:`
-- `IMAGE_DOWNLOAD_DIR:`
-
-`nv_media` phải trả các marker sau:
-
-- `IMAGE_PROMPT_BEGIN`
-- `IMAGE_PROMPT_END`
-- `GENERATED_IMAGE_PATH:`
-
-## Publish payload
-
-Sau khi user duyệt media, script sẽ publish bằng:
-
-```json
-{
-  "caption_long": "<approved content>",
-  "media_paths": ["<generated image path>"]
-}
+```text
+idle
+  -> CREATE_NEW
+  -> nv_content
+  -> awaiting_content_approval
+  -> nv_prompt
+  -> nv_media
+  -> awaiting_media_approval
+  -> awaiting_publish_decision
+  -> published | scheduled
 ```
+
+## Media path details
+
+- `nv_prompt` viet prompt image, video, hoac both.
+- `nv_media` phai thuc thi bang prompt duoc giao.
+- Khi tao anh, `nv_media` phai dua vao skill:
+  - `image_paths[0] = anh san pham goc`
+  - `image_paths[1..] = logo cong ty trong .openclaw/assets/logos`
+- Khi tao video, `nv_media` uu tien gui anh san pham goc lam reference image.
+
+## Approval summary
+
+Khi dang cho duyet media, `pho_phong` phai hien thi:
+
+- duong dan media vua tao
+- prompt da dung
+- anh san pham goc da dung
+- logo da dung
+
+## Reject loops
+
+- `Sua anh, ...` -> `nv_media` hoc feedback, `nv_prompt` viet lai prompt, `nv_media` tao lai media
+- `Sua prompt, ...` -> `nv_prompt` hoc feedback, viet lai prompt, `nv_media` tao lai media
+
+## Training target agents
+
+- `nv_content`
+- `nv_prompt`
+- `nv_media`

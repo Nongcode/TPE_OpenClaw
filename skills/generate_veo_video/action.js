@@ -143,35 +143,33 @@ async function uploadReferenceImage(page, imagePath) {
 
   logStep("upload_image", abs);
 
-  const clicked = await maybeClickByText(page, ["Hình ảnh"], 2500);
-  if (!clicked) {
-    await maybeClick(page, [
-      'button:has-text("Hình ảnh")',
-      '[role="button"]:has-text("Hình ảnh")'
-    ], 2500);
-  }
+  // Đảm bảo đang ở tab "Hình ảnh" (hoặc Thành phần) nếu có
+  await maybeClickByText(page, ["Hình ảnh", "Thành phần"], 2500);
+  await sleep(1000);
 
-  // Thử gắn file vào input file ẩn
-  const fileInputs = page.locator('input[type="file"]');
-  const count = await fileInputs.count();
-  if (count > 0) {
-    await fileInputs.first().setInputFiles(abs);
+  // Cách an toàn nhất trong Playwright: Lắng nghe sự kiện bật hộp thoại chọn file
+  try {
+    const [fileChooser] = await Promise.all([
+      page.waitForEvent('filechooser', { timeout: 5000 }),
+      // Click vào vùng chứa dòng chữ "Tải hình ảnh lên" như trong HTML
+      page.locator('div:has-text("Tải hình ảnh lên")').last().click()
+    ]);
+    
+    // Gắn đường dẫn file vào hộp thoại vừa mở
+    await fileChooser.setFiles(abs);
     return true;
+  } catch (err) {
+    logStep("upload_image_fallback", "Đang thử tìm input file ẩn...");
+    // Fallback: Thử gắn file trực tiếp vào thẻ input ẩn nếu cách trên thất bại
+    const fileInputs = page.locator('input[type="file"]');
+    const count = await fileInputs.count();
+    if (count > 0) {
+      await fileInputs.first().setInputFiles(abs);
+      return true;
+    }
   }
 
-  // fallback: click khu vực upload nếu có
-  const uploadClicked = await maybeClick(page, [
-    'button:has-text("Tải lên")',
-    '[role="button"]:has-text("Tải lên")',
-    'button:has-text("Upload")',
-    '[role="button"]:has-text("Upload")'
-  ], 3000);
-
-  if (!uploadClicked) {
-    throw new Error("Không tìm thấy input/file upload để tải ảnh tham chiếu.");
-  }
-
-  return true;
+  throw new Error("Không thể thực hiện click tải ảnh lên.");
 }
 
 async function clickGenerate(page) {
@@ -248,27 +246,40 @@ async function waitForGeneration(page, timeoutMs) {
 async function tryDownloadLatestVideo(page, outDir) {
   logStep("download", "Thử tải video mới nhất");
 
-  // Mở menu / download ở card mới nhất nếu có
-  const possibleButtons = [
-    'button[aria-label*="Tải xuống"]',
-    'button[aria-label*="Download"]',
-    'button:has-text("Tải xuống")',
-    '[role="button"]:has-text("Tải xuống")',
-    'button:has-text("Download")',
-    '[role="button"]:has-text("Download")',
+  // BƯỚC 1: Click chuột phải vào video mới nhất để mở Context Menu
+  try {
+    const videoElement = page.locator('video').last();
+    await videoElement.waitFor({ state: "visible", timeout: 5000 });
+    // Dùng nút right (chuột phải) thay vì click thông thường
+    await videoElement.click({ button: 'right' }); 
+    await sleep(1500); // Chờ một chút để menu xổ xuống (rất quan trọng)
+  } catch (err) {
+    logStep("download_warn", "Không tìm thấy thẻ video để click chuột phải.");
+  }
+
+  // BƯỚC 2: Click vào nút "Tải xuống" bên trong menu
+  // Thay đổi selector để phù hợp với thẻ <div role="menuitem"> trong HTML
+  const possibleMenuContent = [
+    '[role="menuitem"]:has-text("Tải xuống")', 
+    'div:has-text("Tải xuống")',
+    '[role="menuitem"]:has-text("Download")'
   ];
 
-  for (const sel of possibleButtons) {
+  for (const sel of possibleMenuContent) {
     try {
       const btn = page.locator(sel).last();
       await btn.waitFor({ state: "visible", timeout: 2500 });
 
+      // Lắng nghe sự kiện tải xuống của trình duyệt trước khi click
       const downloadPromise = page.waitForEvent("download", { timeout: 15000 }).catch(() => null);
       await btn.click();
+      
       const download = await downloadPromise;
       if (download) {
-        const filePath = path.join(outDir, `${safeNow()}-${download.suggestedFilename()}`);
+        const fileName = download.suggestedFilename() || `veo-${safeNow()}.mp4`;
+        const filePath = path.join(outDir, fileName);
         await download.saveAs(filePath);
+        logStep("download_success", filePath);
         return filePath;
       }
     } catch (_) {}
@@ -306,7 +317,7 @@ async function main() {
 
   const projectUrl =
     input.project_url ||
-    "https://labs.google/fx/vi/tools/flow/project/a1520d8f-d36d-46a1-ac8f-7dafab0ac5d8";
+    "https://labs.google/fx/vi/tools/flow/project/ea150be4-d292-432a-a757-34e6ae1a06cd";
 
   const prompt =
     input.prompt ||

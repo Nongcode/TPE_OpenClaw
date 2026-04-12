@@ -169,11 +169,13 @@ function buildTaskPrompt(envelope, registry) {
   } else if (envelope.type === "media_revise") {
     lines.push("- Sua media theo review that; neu can goi skill thi goi tu lane cua ban.");
   } else if (envelope.to === "nv_media") {
-    lines.push("- Nhan content da duyet va tao media that bang skill trong lane cua ban.");
-    lines.push("- Tra ve duong dan tai nguyen that va ghi chu do khop voi content.");
-    lines.push('- Prompt tao anh va video bat buoc viet bang tieng Viet.');
-    lines.push('- Bat buoc dat logo "TÂN PHÁT ETEK" o goc trai ben tren anh va video.');
-    lines.push("- Bat buoc uu tien dung anh goc san pham/anh tham chieu da duoc ban giao.");
+    lines.push("- CHI tao BOI CANH/NEN (background) bang skill gemini_generate_image trong lane cua ban.");
+    lines.push("- TUYET DOI KHONG ve san pham vao prompt. San pham that se duoc ghep tu dong boi he thong.");
+    lines.push("- TUYET DOI KHONG dua ten san pham, thuong hieu, hoac bat ky vat the nao vao prompt.");
+    lines.push("- Logo TAN PHAT ETEK se duoc he thong TU DONG dong dau, KHONG can ve trong prompt.");
+    lines.push("- De khoang trong lon o trung tam (60-70%) de ghep san pham.");
+    lines.push('- Prompt tao anh bat buoc viet bang tieng Viet.');
+    lines.push("- Tra ve duong dan anh nen that va ghi chu.");
   } else if (envelope.to === "nv_content") {
     lines.push("- Viet content that tu lane cua ban; neu thieu du lieu thi tu research truoc khi viet.");
   } else if (envelope.type === "content_review") {
