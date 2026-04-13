@@ -11,6 +11,7 @@ const {
   extractField,
   parseContentReply,
   parseMediaReply,
+  scanLatestGeneratedMedia,
   shouldSupersedePendingWorkflow,
 } = require("./orchestrator");
 const intentParser = require("./intent_parser");
@@ -93,6 +94,26 @@ DE_XUAT_BUOC_TIEP:
   const parsed = parseMediaReply(reply);
   assert.equal(parsed.imagePrompt, "Prompt tieng Viet");
   assert.equal(parsed.generatedImagePath, "D:\\output\\image.png");
+});
+
+test("scanLatestGeneratedMedia can recover repo-level generated image artifacts", () => {
+  const tmpRoot = path.join(os.tmpdir(), `orchestrator-scan-${Date.now()}`);
+  const openClawHome = path.join(tmpRoot, ".openclaw");
+  const repoRoot = path.join(tmpRoot, "repo");
+  const workspaceMediaDir = path.join(openClawHome, "workspace_media", "artifacts", "images");
+  const repoImagesDir = path.join(repoRoot, "artifacts", "images");
+  const startedAtIso = new Date(Date.now() - 5_000).toISOString();
+  const repoImagePath = path.join(repoImagesDir, "Gemini_Generated_Image_test.png");
+
+  fs.mkdirSync(workspaceMediaDir, { recursive: true });
+  fs.mkdirSync(repoImagesDir, { recursive: true });
+  fs.writeFileSync(repoImagePath, "image");
+
+  const result = scanLatestGeneratedMedia(openClawHome, startedAtIso, { repoRoot });
+  assert.equal(result.imagePath, repoImagePath);
+  assert.equal(result.videoPath, "");
+
+  fs.rmSync(tmpRoot, { recursive: true, force: true });
 });
 
 test("parseIntentByKeywords: CREATE_NEW default for normal brief", () => {

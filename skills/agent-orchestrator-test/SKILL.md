@@ -38,6 +38,11 @@ Workflow hien tai:
   - prompt da dung
   - anh san pham goc da dung
   - danh sach logo da dung
+- Khi orchestrator tra ve truong `human_message`, `pho_phong` phai uu tien chuyen nguyen van truong nay cho user.
+- Neu `human_message` co cac dong `MEDIA: "..."`, phai giu nguyen de gateway chat render anh; khong duoc doi sang duong dan text thuong.
+- O buoc tao media, neu lenh chay tra ve `Command still running`, `pho_phong` phai tiep tuc `process poll` thay vi dung lai sau lan poll dau.
+- Truoc khi gui thong bao tien do tam thoi, can kiem tra `workspace_phophong/agent-orchestrator-test/current-workflow.json`; neu da sang `awaiting_media_approval` thi phai trinh ngay media cho user duyet.
+- Chi cho phep thong bao tam thoi khi da doi lau ma tien trinh van chua ket thuc; khong dung thong bao tam thoi lam ket qua cuoi cung cua workflow.
 
 ## Learning
 

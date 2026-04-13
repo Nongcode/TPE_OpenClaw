@@ -5,16 +5,16 @@ import { extractProductIntentKeyword } from "./base-scraper.js";
 
 test("extractProductIntentKeyword prefers YEU_CAU_GOC_SAN_PHAM labels", () => {
   const keyword = extractProductIntentKeyword(
-    "YEU_CAU_GOC_SAN_PHAM: Thiết bị hứng, hút dầu thải hoạt động khí nén 80 lít URL_SAN_PHAM: https://uptek.vn/shop/example",
+    "YEU_CAU_GOC_SAN_PHAM: Thiet bi hung, hut dau thai hoat dong khi nen 80 lit URL_SAN_PHAM: https://uptek.vn/shop/example",
   );
 
-  assert.equal(keyword, "Thiết bị hứng, hút dầu thải hoạt động khí nén 80 lít");
+  assert.equal(keyword, "Thiet bi hung, hut dau thai hoat dong khi nen 80 lit");
 });
 
-test("extractProductIntentKeyword prefers keyword sạch labels", () => {
+test("extractProductIntentKeyword prefers keyword sach labels", () => {
   const keyword = extractProductIntentKeyword(
-    "keyword sạch chỉ gồm tên sản phẩm: Thiết bị hứng, hút dầu thải hoạt động khí nén 80 lít",
+    "keyword sach chi gom ten san pham: Thiet bi hung, hut dau thai hoat dong khi nen 80 lit",
   );
 
-  assert.equal(keyword, "Thiết bị hứng, hút dầu thải hoạt động khí nén 80 lít");
+  assert.equal(keyword, "Thiet bi hung, hut dau thai hoat dong khi nen 80 lit");
 });

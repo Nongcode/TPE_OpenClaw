@@ -68,6 +68,11 @@ function resolveLogoAssetPaths(openClawHome, limit = 8) {
   }
 }
 
+function resolveMediaOutputDir(openClawHome) {
+  const baseDir = path.join(openClawHome || "C:/Users/Administrator/.openclaw", "workspace_media", "artifacts", "images");
+  return path.normalize(baseDir);
+}
+
 /**
  * Build system prompt cho nv_media.
  */
@@ -94,6 +99,11 @@ function buildMediaSystemPrompt(agentId, openClawHome) {
     "- Khong publish",
     "- Khong gia lap duong dan file",
     "- Neu skill tao anh/video tra ve loi, phai noi ro loi that tu tool",
+    "- Khi goi gemini_generate_image tren Windows/PowerShell, uu tien tao file JSON tam va goi action.js bang tham so --input_file.",
+    "- Khong duoc thu nhieu cach goi lung tung neu da co cach goi --input_file hoat dong.",
+    "- Khong doc lai noi dung SKILL.md ra chat, khong ke lai command thu nghiem, khong dump log terminal dai dong vao cau tra loi workflow.",
+    "- Khong duoc tu sua file code/skill trong luc dang thuc thi media thong thuong. Neu phat hien loi he thong, dung lai va bao dung loi that thay vi tu hot-fix trong lane.",
+    "- Uu tien tra ket qua workflow gon: thanh cong thi chi bao ket qua; that bai thi chi bao loi cot loi va de xuat buoc tiep theo.",
     rulesSection,
   ].join("\n");
 }
@@ -223,6 +233,7 @@ function buildMediaGeneratePrompt(params) {
   const systemPrompt = buildMediaSystemPrompt(agentId, openClawHome);
 
   const productImagePath = state.content?.primaryProductImage || "";
+  const mediaOutputDir = resolveMediaOutputDir(openClawHome);
   const promptContext = [
     promptPackage.imagePrompt ? `IMAGE_PROMPT_DUOC_GIAO:\n${promptPackage.imagePrompt}` : "",
     promptPackage.videoPrompt ? `VIDEO_PROMPT_DUOC_GIAO:\n${promptPackage.videoPrompt}` : "",
@@ -235,6 +246,7 @@ function buildMediaGeneratePrompt(params) {
     state.content?.imageDir ? `Thu muc anh goc: ${state.content.imageDir}` : "",
     productImagePath ? `Anh san pham goc bat buoc gui cho skill: ${productImagePath}` : "",
     logoPaths.length > 0 ? `Logo cong ty bat buoc gui cho skill anh: ${logoPaths.join(" ; ")}` : "",
+    `Thu muc output media bat buoc: ${mediaOutputDir}`,
     "",
     "Noi dung da duyet:",
     state.content?.approvedContent || "",
@@ -245,9 +257,13 @@ function buildMediaGeneratePrompt(params) {
   const imageInstruction = [
     "NEU CAN TAO ANH:",
     "- Goi skill gemini_generate_image trong lane cua ban.",
+    "- Tren Windows/PowerShell, tao 1 file JSON tam chua image_prompt + image_paths + output_dir roi goi: node skills/gemini_generate_image/action.js --input_file <duong_dan_file_json>.",
     "- Dung DUNG IMAGE_PROMPT_DUOC_GIAO, khong tu y doi nghia.",
     "- image_paths BAT BUOC gom: [anh san pham goc, ...tat ca logo cong ty].",
+    `- output_dir BAT BUOC la: ${mediaOutputDir}. Khong duoc de tool tu suy ra theo cwd.`,
     "- Muc tieu la tao ra anh quang cao cuoi cung tu reference that, khong phai background-only.",
+    "- Khong doc lai SKILL.md ra chat. Khong thu lenh sai truoc roi moi sua. Khong tua thich sua file skill trong luc dang lam media.",
+    "- Neu tool loi, chi tom tat loi that gon nhat; khong chen transcript command, process poll, hay log terminal raw vao reply.",
     "- Sau khi tao xong, ghi dung cac marker sau:",
     "IMAGE_PROMPT_BEGIN",
     "<prompt anh da dung>",
@@ -334,6 +350,7 @@ function buildMediaRevisePrompt(params) {
   const productImageInfo = state.content?.primaryProductImage
     ? `Anh san pham goc bat buoc gui cho skill: ${state.content.primaryProductImage}`
     : "";
+  const mediaOutputDir = resolveMediaOutputDir(openClawHome);
 
   const context = [
     `Brief goc: ${state.original_brief}`,
@@ -342,6 +359,7 @@ function buildMediaRevisePrompt(params) {
     state.content?.imageDir ? `Thu muc anh goc: ${state.content.imageDir}` : "",
     productImageInfo,
     logoPaths.length > 0 ? `Logo cong ty bat buoc gui cho skill anh: ${logoPaths.join(" ; ")}` : "",
+    `Thu muc output media bat buoc: ${mediaOutputDir}`,
     "",
     "Noi dung da duyet:",
     state.content?.approvedContent || "",
@@ -403,6 +421,7 @@ function buildMediaRevisePrompt(params) {
     `User yeu cau sua lai ${isBoth ? "anh va video" : isVideo ? "video" : "anh"}.`,
     "Hay thuc thi lai media theo dung prompt package da duoc giao va sua theo nhan xet cua sep.",
     "Khong duoc bo qua reference product image. Khi tao anh, khong duoc bo qua logo paths.",
+    `Khi tao anh, output_dir BAT BUOC la: ${mediaOutputDir}.`,
     "",
     markerInstructions,
     "",

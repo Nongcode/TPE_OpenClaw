@@ -4,6 +4,7 @@ import { TextExtractor } from "./text-extractor.js";
 
 const DEFAULTS = {
   keyword: "",
+  product_url: "",
   target_site: "uptek.vn",
   category_hint: "",
   browser_path: "",
@@ -47,6 +48,11 @@ function parseArgs(argv) {
       index += 1;
       continue;
     }
+    if (token === "--product_url") {
+      params.product_url = next;
+      index += 1;
+      continue;
+    }
     if (token === "--target_site") {
       params.target_site = next;
       index += 1;
@@ -85,8 +91,8 @@ async function main() {
   let browser = null;
   try {
     const params = parseArgs(process.argv);
-    if (!String(params.keyword || "").trim()) {
-      printJson(validationError("Missing --keyword"));
+    if (!String(params.keyword || "").trim() && !String(params.product_url || "").trim()) {
+      printJson(validationError("Missing --keyword or --product_url"));
       process.exit(1);
       return;
     }

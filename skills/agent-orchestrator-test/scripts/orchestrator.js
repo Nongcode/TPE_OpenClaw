@@ -1,15 +1,15 @@
-/**
- * orchestrator.js — Bộ điều phối trung tâm v2.
+﻿/**
+ * orchestrator.js â€” Bá»™ Ä‘iá»u phá»‘i trung tÃ¢m v2.
  *
- * Nâng cấp từ state-machine tuyến tính cố định sang Multi-Agent tự trị:
+ * NÃ¢ng cáº¥p tá»« state-machine tuyáº¿n tÃ­nh cá»‘ Ä‘á»‹nh sang Multi-Agent tá»± trá»‹:
  * - Dynamic Routing qua LLM intent parsing
  * - Long-term Memory (rules.json self-learning)
- * - Human-in-the-Loop bắt buộc tại mọi checkpoint
+ * - Human-in-the-Loop báº¯t buá»™c táº¡i má»i checkpoint
  * - Video placeholder + fallback
  * - Publish / Schedule / Edit Published
- * - Human-readable logging (không in raw JSON)
+ * - Human-readable logging (khÃ´ng in raw JSON)
  *
- * Backward compatible: giữ nguyên exports cũ cho test.
+ * Backward compatible: giá»¯ nguyÃªn exports cÅ© cho test.
  */
 
 const fs = require("fs");
@@ -35,7 +35,7 @@ const logger = require("./logger");
 const REPO_ROOT = path.resolve(__dirname, "..", "..", "..");
 const MAX_REJECT_PER_STAGE = 5;
 
-// ─── CLI Argument Parsing ────────────────────────────────────────────
+// â”€â”€â”€ CLI Argument Parsing â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 function parseArgs(argv) {
   const options = {
@@ -47,7 +47,7 @@ function parseArgs(argv) {
     reset: false,
     timeoutMs: 900000,
     dryRun: false,
-    useLLMIntent: false, // Tắt mặc định — LLM intent gửi prompt vào lane phó phòng gây lộ nội dung. Dùng keyword matching.
+    useLLMIntent: false, // Táº¯t máº·c Ä‘á»‹nh â€” LLM intent gá»­i prompt vÃ o lane phÃ³ phÃ²ng gÃ¢y lá»™ ná»™i dung. DÃ¹ng keyword matching.
   };
 
   const positional = [];
@@ -75,7 +75,7 @@ function loadMessage(options) {
   return String(options.message || "").trim();
 }
 
-// ─── Workspace & State Helpers ───────────────────────────────────────
+// â”€â”€â”€ Workspace & State Helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 function getPhoPhongWorkspace(config, openClawHome) {
   const workspace =
@@ -111,6 +111,15 @@ function getMediaTimeoutMs(baseTimeoutMs) {
   return Math.max(numeric, 900000);
 }
 
+function normalizeMediaPathForDirective(filePath) {
+  return String(filePath || "").trim().replace(/\\/g, "/");
+}
+
+function buildMediaDirective(filePath) {
+  const normalized = normalizeMediaPathForDirective(filePath);
+  return normalized ? `MEDIA: "${normalized}"` : "";
+}
+
 function buildPaths(workspaceDir) {
   const baseDir = path.join(workspaceDir, "agent-orchestrator-test");
   const historyDir = path.join(baseDir, "history");
@@ -120,7 +129,7 @@ function buildPaths(workspaceDir) {
   return { baseDir, historyDir, currentFile };
 }
 
-// ─── Result Builders ─────────────────────────────────────────────────
+// â”€â”€â”€ Result Builders â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 function buildResult(params) {
   return {
@@ -138,11 +147,11 @@ function printResult(result, asJson) {
     console.log(JSON.stringify(result, null, 2));
     return;
   }
-  // Human-readable mode: chỉ in summary
+  // Human-readable mode: chá»‰ in summary
   console.log(result.human_message || result.summary || JSON.stringify(result, null, 2));
 }
 
-// ─── Workflow State Management ───────────────────────────────────────
+// â”€â”€â”€ Workflow State Management â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 function archiveWorkflow(paths, state) {
   if (!state?.workflow_id) return;
@@ -160,7 +169,7 @@ function saveWorkflow(paths, state) {
 }
 
 /**
- * Migrate state cũ nếu thiếu trường mới.
+ * Migrate state cÅ© náº¿u thiáº¿u trÆ°á»ng má»›i.
  */
 function migrateState(state) {
   if (!state) return state;
@@ -179,26 +188,26 @@ function migrateState(state) {
   return state;
 }
 
-// ─── Reply Validation ────────────────────────────────────────────────
+// â”€â”€â”€ Reply Validation â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 function validateCommonReply(reply, workflowId, stepId) {
   const text = String(reply || "").trim();
   if (!text) throw new Error("Agent reply is empty.");
 
-  // Soft validation — chỉ warn nếu thiếu token, không crash.
-  // Agent LLM có thể viết hơi khác (thêm dấu, space, format) nhưng nội dung đúng.
+  // Soft validation â€” chá»‰ warn náº¿u thiáº¿u token, khÃ´ng crash.
+  // Agent LLM cÃ³ thá»ƒ viáº¿t hÆ¡i khÃ¡c (thÃªm dáº¥u, space, format) nhÆ°ng ná»™i dung Ä‘Ãºng.
   const requiredTokens = [
     "WORKFLOW_META", "TRANG_THAI", "KET_QUA",
   ];
   for (const token of requiredTokens) {
     if (!text.includes(token)) {
-      logger.log("warn", `⚠️ Agent reply thiếu token "${token}" — tiếp tục xử lý.`);
+      logger.log("warn", `âš ï¸ Agent reply thiáº¿u token "${token}" â€” tiáº¿p tá»¥c xá»­ lÃ½.`);
     }
   }
   return text;
 }
 
-// ─── Agent Communication ─────────────────────────────────────────────
+// â”€â”€â”€ Agent Communication â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 async function runAgentStep(params) {
   const task = transport.sendTaskToAgentLane({
@@ -256,7 +265,7 @@ function looksLikeFreshWorkflowBrief(message, parsedIntent) {
   ];
 
   const strongSignalCount = strongSignals.filter((token) => normalized.includes(token)).length;
-  const hasQuotedProduct = /["“”].+["“”]/.test(raw);
+  const hasQuotedProduct = /["â€œâ€].+["â€œâ€]/.test(raw);
   const longEnough = normalized.length >= 40;
   const hasStructuredBrief = raw.includes("\n") || raw.includes(":");
 
@@ -309,7 +318,6 @@ function buildMediaApprovalSummary(params) {
   const { media, promptPackage, route } = params;
   const mediaPaths = collectMediaPaths(media);
   const previewFile = media?.generatedImagePath || media?.generatedVideoPath || "";
-  const fileLink = previewFile ? `file:///${previewFile.replace(/\\/g, "/")}` : "";
   const promptPreview = buildPromptPreview(promptPackage);
   const referenceText = [
     media?.usedProductImage ? `Anh san pham goc da dung: ${media.usedProductImage}` : "",
@@ -319,15 +327,18 @@ function buildMediaApprovalSummary(params) {
   ].filter(Boolean).join("\n");
 
   return [
-    `🎨 NV Media da tao xong media (${route.effectiveType}), dang cho Sep duyet.`,
+    `NV Media da tao xong media (${route.effectiveType}), dang cho Sep duyet.`,
     mediaPaths.length > 0 ? `Media tao ra: ${mediaPaths.join(" ; ")}` : "",
-    fileLink ? `Xem nhanh: ${fileLink}` : "",
+    previewFile ? "Anh media vua tao:" : "",
+    buildMediaDirective(previewFile),
+    media?.usedProductImage ? "Anh goc san pham de doi chieu:" : "",
+    buildMediaDirective(media?.usedProductImage),
     referenceText,
     "",
     promptPreview,
     "",
-    '👉 Duyet va sang buoc tiep: "Duyet anh va dang bai" hoac "Duyet media"',
-    '👉 Sua tiep: "Sua anh, <nhan xet>" hoac "Sua prompt, <nhan xet>"',
+    'Duyet va sang buoc tiep: "Duyet anh va dang bai" hoac "Duyet media"',
+    'Sua tiep: "Sua anh, <nhan xet>" hoac "Sua prompt, <nhan xet>"',
   ].filter(Boolean).join("\n");
 }
 
@@ -361,12 +372,29 @@ function selectLatestArtifactPath(dirPath, extensions, sinceMs, excludePatterns 
   }
 }
 
-function scanLatestGeneratedMedia(openClawHome, startedAtIso) {
+function selectLatestArtifactAcrossDirs(dirPaths, extensions, sinceMs, excludePatterns = []) {
+  const candidates = dirPaths
+    .map((dirPath) => selectLatestArtifactPath(dirPath, extensions, sinceMs, excludePatterns))
+    .filter(Boolean)
+    .map((fullPath) => ({
+      fullPath,
+      mtimeMs: fs.statSync(fullPath).mtimeMs,
+    }))
+    .sort((left, right) => right.mtimeMs - left.mtimeMs);
+
+  return candidates[0]?.fullPath || "";
+}
+
+function scanLatestGeneratedMedia(openClawHome, startedAtIso, overrides = {}) {
   const workspaceDir = memory.resolveAgentWorkspace("nv_media", openClawHome);
   const sinceMs = startedAtIso ? new Date(startedAtIso).getTime() : 0;
+  const repoRoot = path.resolve(overrides.repoRoot || REPO_ROOT);
 
-  const imagePath = selectLatestArtifactPath(
-    path.join(workspaceDir, "artifacts", "images"),
+  const imagePath = selectLatestArtifactAcrossDirs(
+    [
+      path.join(workspaceDir, "artifacts", "images"),
+      path.join(repoRoot, "artifacts", "images"),
+    ],
     [".png", ".jpg", ".jpeg", ".webp"],
     sinceMs,
     [/before/i, /screenshot/i, /test_/i],
@@ -376,15 +404,16 @@ function scanLatestGeneratedMedia(openClawHome, startedAtIso) {
     path.join(workspaceDir, "artifacts", "videos"),
     path.join(workspaceDir, "outputs", "veo_videos"),
     path.join(workspaceDir, "outputs", "videos"),
+    path.join(repoRoot, "artifacts", "videos"),
+    path.join(repoRoot, "outputs", "veo_videos"),
+    path.join(repoRoot, "outputs", "videos"),
   ];
-  const videoPath = videoDirs
-    .map((dirPath) => selectLatestArtifactPath(dirPath, [".mp4", ".mov", ".webm"], sinceMs))
-    .find(Boolean) || "";
+  const videoPath = selectLatestArtifactAcrossDirs(videoDirs, [".mp4", ".mov", ".webm"], sinceMs);
 
   return { imagePath, videoPath };
 }
 
-// ─── Content Dedup Check ─────────────────────────────────────────────
+// â”€â”€â”€ Content Dedup Check â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 function isDuplicateContent(historyDir, newContent) {
   try {
@@ -413,19 +442,19 @@ function isDuplicateContent(historyDir, newContent) {
   return false;
 }
 
-// ─── WORKFLOW ACTIONS ────────────────────────────────────────────────
+// â”€â”€â”€ WORKFLOW ACTIONS â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 /**
- * Tạo workflow mới — giao nv_content viết bài.
+ * Táº¡o workflow má»›i â€” giao nv_content viáº¿t bÃ i.
  */
 async function startNewWorkflow(context) {
   const workflowId = `wf_test_${randomUUID()}`;
   const stepId = "step_01_content";
   const intent = context.intent;
 
-  logger.logPhase("TẠO BÀI MỚI", `Sếp giao brief: "${context.message.slice(0, 100)}..."`);
+  logger.logPhase("Táº O BÃ€I Má»šI", `Sáº¿p giao brief: "${context.message.slice(0, 100)}..."`);
   logger.logHandoff(
-    "Phó phòng", "NV Content",
+    "PhÃ³ phÃ²ng", "NV Content",
     logger.buildHumanMessage("pho_phong", "nv_content", "content_draft", context.message.slice(0, 80)),
   );
 
@@ -450,7 +479,7 @@ async function startNewWorkflow(context) {
 
   // Content dedup check
   if (isDuplicateContent(context.paths.historyDir, content.approvedContent)) {
-    logger.log("info", "⚠️ Nội dung này có thể trùng với bài đã đăng gần đây.");
+    logger.log("info", "âš ï¸ Ná»™i dung nÃ y cÃ³ thá»ƒ trÃ¹ng vá»›i bÃ i Ä‘Ã£ Ä‘Äƒng gáº§n Ä‘Ã¢y.");
   }
 
   const state = saveWorkflow(context.paths, {
@@ -470,15 +499,21 @@ async function startNewWorkflow(context) {
 
   const summary = [
     context.supersededWorkflowId ? `Da archive workflow cu: ${context.supersededWorkflowId}` : "",
-    "📝 NV Content đã viết xong bài nháp, đang chờ Sếp duyệt.",
-    content.productName ? `Sản phẩm: ${content.productName}` : "",
+    "ðŸ“ NV Content Ä‘Ã£ viáº¿t xong bÃ i nhÃ¡p, Ä‘ang chá» Sáº¿p duyá»‡t.",
+    content.productName ? `Sáº£n pháº©m: ${content.productName}` : "",
     "",
-    "━━━ NỘI DUNG CHỜ DUYỆT ━━━",
+    "â”â”â” Ná»˜I DUNG CHá»œ DUYá»†T â”â”â”",
     content.approvedContent,
-    "━━━━━━━━━━━━━━━━━━━━━━━━━━",
+    "â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”",
     "",
-    "👉 Sếp muốn duyệt? Nói: \"Duyệt content, tạo ảnh\"",
-    "👉 Muốn sửa? Ghi rõ nhận xét, ví dụ: \"Sửa content, thêm giá\"",
+    "ðŸ‘‰ Sáº¿p muá»‘n duyá»‡t? NÃ³i: \"Duyá»‡t content, táº¡o áº£nh\"",
+    "ðŸ‘‰ Muá»‘n sá»­a? Ghi rÃµ nháº­n xÃ©t, vÃ­ dá»¥: \"Sá»­a content, thÃªm giÃ¡\"",
+  ].filter(Boolean).join("\n");
+  const summaryWithPreview = [
+    summary,
+    content.primaryProductImage ? "" : "",
+    content.primaryProductImage ? "Anh goc san pham de doi chieu:" : "",
+    buildMediaDirective(content.primaryProductImage),
   ].filter(Boolean).join("\n");
 
   logger.logApprovalWait("awaiting_content_approval", content.approvedContent);
@@ -486,21 +521,21 @@ async function startNewWorkflow(context) {
   return buildResult({
     workflowId,
     stage: state.stage,
-    summary,
-    humanMessage: summary,
+    summary: summaryWithPreview,
+    humanMessage: summaryWithPreview,
     data: { content, next_expected_action: "content_approval" },
   });
 }
 
 /**
- * Sửa content khi bị reject.
+ * Sá»­a content khi bá»‹ reject.
  */
 async function reviseContent(context, state) {
   const stepId = "step_01b_content_revise";
 
   logger.logRejected("content", context.message);
 
-  // Memory learning: rút quy tắc từ feedback
+  // Memory learning: rÃºt quy táº¯c tá»« feedback
   const feedbackRule = memory.learnFromFeedbackSync("nv_content", context.openClawHome, context.message);
   if (feedbackRule) {
     const latestRule = feedbackRule.rules[feedbackRule.rules.length - 1];
@@ -519,18 +554,18 @@ async function reviseContent(context, state) {
   // Smart retry guard
   const contentRejects = state.reject_history.filter((r) => r.stage === "content").length;
   if (contentRejects > MAX_REJECT_PER_STAGE) {
-    logger.logError("content", `NV Content đã bị từ chối ${contentRejects} lần. Cần xem lại brief.`);
+    logger.logError("content", `NV Content Ä‘Ã£ bá»‹ tá»« chá»‘i ${contentRejects} láº§n. Cáº§n xem láº¡i brief.`);
     return buildResult({
       workflowId: state.workflow_id,
       stage: "blocked",
       status: "blocked",
-      summary: `⚠️ NV Content đã bị từ chối ${contentRejects} lần liên tiếp. Có thể brief cần bổ sung hoặc nhân viên cần training thêm.`,
+      summary: `âš ï¸ NV Content Ä‘Ã£ bá»‹ tá»« chá»‘i ${contentRejects} láº§n liÃªn tiáº¿p. CÃ³ thá»ƒ brief cáº§n bá»• sung hoáº·c nhÃ¢n viÃªn cáº§n training thÃªm.`,
       data: { reject_count: contentRejects },
     });
   }
 
   logger.logHandoff(
-    "Phó phòng", "NV Content",
+    "PhÃ³ phÃ²ng", "NV Content",
     logger.buildHumanMessage("pho_phong", "nv_content", "content_revise", context.message.slice(0, 80)),
   );
 
@@ -561,29 +596,35 @@ async function reviseContent(context, state) {
   });
 
   const summary = [
-    "📝 NV Content đã sửa lại bài theo nhận xét, đang chờ Sếp duyệt lại.",
+    "ðŸ“ NV Content Ä‘Ã£ sá»­a láº¡i bÃ i theo nháº­n xÃ©t, Ä‘ang chá» Sáº¿p duyá»‡t láº¡i.",
     "",
-    "━━━ NỘI DUNG ĐÃ SỬA ━━━",
+    "â”â”â” Ná»˜I DUNG ÄÃƒ Sá»¬A â”â”â”",
     content.approvedContent,
-    "━━━━━━━━━━━━━━━━━━━━━━━━━",
+    "â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”",
     "",
-    "👉 Duyệt: \"Duyệt content, tạo ảnh\"",
-    "👉 Sửa tiếp: ghi rõ nhận xét",
+    "ðŸ‘‰ Duyá»‡t: \"Duyá»‡t content, táº¡o áº£nh\"",
+    "ðŸ‘‰ Sá»­a tiáº¿p: ghi rÃµ nháº­n xÃ©t",
   ].join("\n");
+  const summaryWithPreview = [
+    summary,
+    content.primaryProductImage ? "" : "",
+    content.primaryProductImage ? "Anh goc san pham de doi chieu:" : "",
+    buildMediaDirective(content.primaryProductImage),
+  ].filter(Boolean).join("\n");
 
   logger.logApprovalWait("awaiting_content_approval", content.approvedContent);
 
   return buildResult({
     workflowId: state.workflow_id,
     stage: nextState.stage,
-    summary,
-    humanMessage: summary,
+    summary: summaryWithPreview,
+    humanMessage: summaryWithPreview,
     data: { content, next_expected_action: "content_approval" },
   });
 }
 
 /**
- * Tạo media (ảnh hoặc video).
+ * Táº¡o media (áº£nh hoáº·c video).
  */
 async function generateMedia(context, state) {
   const stepId = "step_02_media";
@@ -595,9 +636,9 @@ async function generateMedia(context, state) {
     logger.log("video", route.fallbackMessage);
   }
 
-  logger.logPhase("TẠO MEDIA", `Loại: ${route.effectiveType}`);
+  logger.logPhase("Táº O MEDIA", `Loáº¡i: ${route.effectiveType}`);
   logger.logHandoff(
-    "Phó phòng", "NV Media",
+    "PhÃ³ phÃ²ng", "NV Media",
     logger.buildHumanMessage("pho_phong", "nv_media", "media_generate", ""),
   );
 
@@ -609,9 +650,9 @@ async function generateMedia(context, state) {
     openClawHome: context.openClawHome,
   });
 
-  // ─── LOCK: Lưu stage 'generating_media' TRƯỚC khi gọi agent ────────────
-  // Thẩm quyền này ngăn orchestrator bị loop không hởi NV Media lần 2
-  // nếu nó crash sau khi NV Media đã trả ảnh nhưng trước khi save state.
+  // â”€â”€â”€ LOCK: LÆ°u stage 'generating_media' TRÆ¯á»šC khi gá»i agent â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // Tháº©m quyá»n nÃ y ngÄƒn orchestrator bá»‹ loop khÃ´ng há»Ÿi NV Media láº§n 2
+  // náº¿u nÃ³ crash sau khi NV Media Ä‘Ã£ tráº£ áº£nh nhÆ°ng trÆ°á»›c khi save state.
   saveWorkflow(context.paths, {
     ...state,
     stage: "generating_media",
@@ -630,11 +671,11 @@ async function generateMedia(context, state) {
         timeoutMs: getMediaTimeoutMs(context.options.timeoutMs),
         prompt,
       });
-      break; // Thành công
+      break; // ThÃ nh cÃ´ng
     } catch (transportErr) {
-      logger.logError("transport", `Lần ${attempt}: ${transportErr.message || transportErr}`);
+      logger.logError("transport", `Láº§n ${attempt}: ${transportErr.message || transportErr}`);
       if (attempt >= MAX_TRANSPORT_RETRIES) {
-        // Khi transport lỗi, khôi phục stage về awaiting_content_approval
+        // Khi transport lá»—i, khÃ´i phá»¥c stage vá» awaiting_content_approval
         saveWorkflow(context.paths, {
           ...state,
           stage: "awaiting_content_approval",
@@ -645,19 +686,19 @@ async function generateMedia(context, state) {
           stage: "awaiting_content_approval",
           status: "error",
           summary: [
-            "❌ Tạo ảnh không thành công sau 2 lần thử.",
-            `Lỗi: ${transportErr.message || "Kết nối tới NV Media bị ngắt."}`,
+            "âŒ Táº¡o áº£nh khÃ´ng thÃ nh cÃ´ng sau 2 láº§n thá»­.",
+            `Lá»—i: ${transportErr.message || "Káº¿t ná»‘i tá»›i NV Media bá»‹ ngáº¯t."}`,
             "",
-            "👉 Thử lại: \"Duyệt content, tạo ảnh\"",
+            "ðŸ‘‰ Thá»­ láº¡i: \"Duyá»‡t content, táº¡o áº£nh\"",
           ].join("\n"),
           data: { error: transportErr.message },
         });
       }
-      logger.log("info", `🔃 Thử lại lần ${attempt + 1}...`);
+      logger.log("info", `ðŸ”ƒ Thá»­ láº¡i láº§n ${attempt + 1}...`);
     }
   }
 
-  // ─── Parse kết quả ────────────────────────────────────────────
+  // â”€â”€â”€ Parse káº¿t quáº£ â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   let media;
   try {
     media = mediaAgent.parseMediaResult(mediaReply, route.effectiveType);
@@ -673,17 +714,17 @@ async function generateMedia(context, state) {
       stage: "awaiting_content_approval",
       status: "error",
       summary: [
-        "❌ NV Media đã tạo ảnh nhưng hệ thống không đọc được kết quả.",
-        `Lỗi: ${parseErr.message}`,
+        "âŒ NV Media Ä‘Ã£ táº¡o áº£nh nhÆ°ng há»‡ thá»‘ng khÃ´ng Ä‘á»c Ä‘Æ°á»£c káº¿t quáº£.",
+        `Lá»—i: ${parseErr.message}`,
         "",
-        "👉 Thử lại: \"Duyệt content, tạo ảnh\"",
+        "ðŸ‘‰ Thá»­ láº¡i: \"Duyá»‡t content, táº¡o áº£nh\"",
       ].join("\n"),
       data: { error: parseErr.message },
     });
   }
 
-  // ─── Lưu background path ngay sau khi parse — trước composite ────────────
-  // Nếu composite crash, recovery sử dụng đường dẫn này thay vì scan thư mục.
+  // â”€â”€â”€ LÆ°u background path ngay sau khi parse â€” trÆ°á»›c composite â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // Náº¿u composite crash, recovery sá»­ dá»¥ng Ä‘Æ°á»ng dáº«n nÃ y thay vÃ¬ scan thÆ° má»¥c.
   saveWorkflow(context.paths, {
     ...state,
     stage: "generating_media",
@@ -691,8 +732,8 @@ async function generateMedia(context, state) {
     generating_product_image_path: state.content?.primaryProductImage || "",
   });
 
-  // ─── PIPELINE GHÉP 3 LỚP ──────────────────────────────────────────
-  // Nếu có ảnh sản phẩm thật → ghép: Background AI + Product thật + Logo
+  // â”€â”€â”€ PIPELINE GHÃ‰P 3 Lá»šP â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // Náº¿u cÃ³ áº£nh sáº£n pháº©m tháº­t â†’ ghÃ©p: Background AI + Product tháº­t + Logo
   let finalMediaPath = media.generatedImagePath || media.generatedVideoPath || "";
   if (
     route.effectiveType === "image" &&
@@ -700,7 +741,7 @@ async function generateMedia(context, state) {
     state.content?.primaryProductImage
   ) {
     try {
-      logger.log("media", "🔧 Đang ghép 3 lớp: Nền AI + Sản phẩm thật + Logo...");
+      logger.log("media", "ðŸ”§ Äang ghÃ©p 3 lá»›p: Ná»n AI + Sáº£n pháº©m tháº­t + Logo...");
       const compositePath = await mediaAgent.compositeImage3Layers({
         backgroundPath: media.generatedImagePath,
         productImagePath: state.content.primaryProductImage,
@@ -712,11 +753,11 @@ async function generateMedia(context, state) {
       media.generatedImagePath = compositePath;
       media.composited = true;
       finalMediaPath = compositePath;
-      logger.log("media", `✅ Ghép ảnh 3 lớp thành công: ${compositePath}`);
+      logger.log("media", `âœ… GhÃ©p áº£nh 3 lá»›p thÃ nh cÃ´ng: ${compositePath}`);
     } catch (compErr) {
       process.stderr.write(`[COMPOSITE_ERROR] ${compErr.stack || compErr.message || compErr}\n`);
       logger.logError("composite", compErr);
-      logger.log("info", "⚠️ Sử dụng ảnh nền AI gốc (chưa ghép sản phẩm).");
+      logger.log("info", "âš ï¸ Sá»­ dá»¥ng áº£nh ná»n AI gá»‘c (chÆ°a ghÃ©p sáº£n pháº©m).");
       media.composited = false;
     }
   }
@@ -735,21 +776,29 @@ async function generateMedia(context, state) {
     media,
   });
 
-  // Tạo file:// link để phó phòng hiển thị ảnh trong chat
+  // Táº¡o file:// link Ä‘á»ƒ phÃ³ phÃ²ng hiá»ƒn thá»‹ áº£nh trong chat
   const fileLink = finalMediaPath
     ? `file:///${finalMediaPath.replace(/\\/g, "/")}`
     : "";
 
   const summary = [
-    `🎨 NV Media đã tạo ${route.effectiveType === "video" ? "video" : "ảnh"} xong, đang chờ Sếp duyệt.`,
-    media.composited ? "✅ Đã ghép: Nền AI + Sản phẩm thật + Logo" : "",
-    route.fallbackMessage ? `ℹ️ ${route.fallbackMessage}` : "",
+    `ðŸŽ¨ NV Media Ä‘Ã£ táº¡o ${route.effectiveType === "video" ? "video" : "áº£nh"} xong, Ä‘ang chá» Sáº¿p duyá»‡t.`,
+    media.composited ? "âœ… ÄÃ£ ghÃ©p: Ná»n AI + Sáº£n pháº©m tháº­t + Logo" : "",
+    route.fallbackMessage ? `â„¹ï¸ ${route.fallbackMessage}` : "",
     "",
-    finalMediaPath ? `🖼️ Xem ảnh: ${fileLink}` : "",
+    finalMediaPath ? `ðŸ–¼ï¸ Xem áº£nh: ${fileLink}` : "",
     `File: ${finalMediaPath}`,
     "",
-    "👉 Duyệt và đăng bài: \"Duyệt ảnh và đăng bài\"",
-    "👉 Sửa ảnh: ghi rõ nhận xét, ví dụ: \"Sửa ảnh, nền chưa đẹp\"",
+    "ðŸ‘‰ Duyá»‡t vÃ  Ä‘Äƒng bÃ i: \"Duyá»‡t áº£nh vÃ  Ä‘Äƒng bÃ i\"",
+    "ðŸ‘‰ Sá»­a áº£nh: ghi rÃµ nháº­n xÃ©t, vÃ­ dá»¥: \"Sá»­a áº£nh, ná»n chÆ°a Ä‘áº¹p\"",
+  ].filter(Boolean).join("\n");
+  const summaryWithPreview = [
+    summary,
+    finalMediaPath ? "" : "",
+    finalMediaPath ? "Anh media vua tao:" : "",
+    buildMediaDirective(finalMediaPath),
+    state.content?.primaryProductImage ? "Anh goc san pham de doi chieu:" : "",
+    buildMediaDirective(state.content?.primaryProductImage),
   ].filter(Boolean).join("\n");
 
   logger.logApprovalWait("awaiting_media_approval", `File: ${finalMediaPath}`);
@@ -757,14 +806,14 @@ async function generateMedia(context, state) {
   return buildResult({
     workflowId: state.workflow_id,
     stage: nextState.stage,
-    summary,
-    humanMessage: summary,
+    summary: summaryWithPreview,
+    humanMessage: summaryWithPreview,
     data: { media, approved_content: state.content.approvedContent, next_expected_action: "media_approval" },
   });
 }
 
 /**
- * Sửa media khi bị reject.
+ * Sá»­a media khi bá»‹ reject.
  */
 async function reviseMedia(context, state) {
   const stepId = "step_02b_media_revise";
@@ -790,18 +839,18 @@ async function reviseMedia(context, state) {
 
   const mediaRejects = state.reject_history.filter((r) => r.stage === "media").length;
   if (mediaRejects > MAX_REJECT_PER_STAGE) {
-    logger.logError("media", `NV Media đã bị từ chối ${mediaRejects} lần.`);
+    logger.logError("media", `NV Media Ä‘Ã£ bá»‹ tá»« chá»‘i ${mediaRejects} láº§n.`);
     return buildResult({
       workflowId: state.workflow_id,
       stage: "blocked",
       status: "blocked",
-      summary: `⚠️ NV Media đã bị từ chối ${mediaRejects} lần liên tiếp. Prompt có thể cần được thiết kế lại.`,
+      summary: `âš ï¸ NV Media Ä‘Ã£ bá»‹ tá»« chá»‘i ${mediaRejects} láº§n liÃªn tiáº¿p. Prompt cÃ³ thá»ƒ cáº§n Ä‘Æ°á»£c thiáº¿t káº¿ láº¡i.`,
       data: { reject_count: mediaRejects },
     });
   }
 
   logger.logHandoff(
-    "Phó phòng", "NV Media",
+    "PhÃ³ phÃ²ng", "NV Media",
     logger.buildHumanMessage("pho_phong", "nv_media", "media_revise", context.message.slice(0, 80)),
   );
 
@@ -814,7 +863,7 @@ async function reviseMedia(context, state) {
     openClawHome: context.openClawHome,
   });
 
-  // ─── LOCK: Lưu stage 'revising_media' TRƯỚC khi gọi agent ─────────────
+  // â”€â”€â”€ LOCK: LÆ°u stage 'revising_media' TRÆ¯á»šC khi gá»i agent â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   saveWorkflow(context.paths, {
     ...state,
     stage: "revising_media",
@@ -822,7 +871,7 @@ async function reviseMedia(context, state) {
     revising_feedback: context.message,
   });
 
-  // ─── Gọi NV Media với retry ──────────────────────────────────────
+  // â”€â”€â”€ Gá»i NV Media vá»›i retry â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   let reply;
   const MAX_TRANSPORT_RETRIES = 2;
   for (let attempt = 1; attempt <= MAX_TRANSPORT_RETRIES; attempt++) {
@@ -838,7 +887,7 @@ async function reviseMedia(context, state) {
       });
       break;
     } catch (transportErr) {
-      logger.logError("transport", `Lần ${attempt}: ${transportErr.message || transportErr}`);
+      logger.logError("transport", `Láº§n ${attempt}: ${transportErr.message || transportErr}`);
       if (attempt >= MAX_TRANSPORT_RETRIES) {
         saveWorkflow(context.paths, {
           ...state,
@@ -850,19 +899,19 @@ async function reviseMedia(context, state) {
           stage: "awaiting_media_approval",
           status: "error",
           summary: [
-            "❌ Sửa ảnh không thành công.",
-            `Lỗi: ${transportErr.message || "Kết nối bị ngắt."}`,
+            "âŒ Sá»­a áº£nh khÃ´ng thÃ nh cÃ´ng.",
+            `Lá»—i: ${transportErr.message || "Káº¿t ná»‘i bá»‹ ngáº¯t."}`,
             "",
-            "👉 Thử lại: nhắn lại nhận xét sửa ảnh",
+            "ðŸ‘‰ Thá»­ láº¡i: nháº¯n láº¡i nháº­n xÃ©t sá»­a áº£nh",
           ].join("\n"),
           data: { error: transportErr.message },
         });
       }
-      logger.log("info", `🔃 Thử lại lần ${attempt + 1}...`);
+      logger.log("info", `ðŸ”ƒ Thá»­ láº¡i láº§n ${attempt + 1}...`);
     }
   }
 
-  // ─── Parse kết quả ────────────────────────────────────────────
+  // â”€â”€â”€ Parse káº¿t quáº£ â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   let media;
   try {
     media = mediaAgent.parseMediaResult(reply, mediaType);
@@ -878,16 +927,16 @@ async function reviseMedia(context, state) {
       stage: "awaiting_media_approval",
       status: "error",
       summary: [
-        "❌ NV Media đã tạo ảnh mới nhưng hệ thống không đọc được kết quả.",
-        `Lỗi: ${parseErr.message}`,
+        "âŒ NV Media Ä‘Ã£ táº¡o áº£nh má»›i nhÆ°ng há»‡ thá»‘ng khÃ´ng Ä‘á»c Ä‘Æ°á»£c káº¿t quáº£.",
+        `Lá»—i: ${parseErr.message}`,
         "",
-        "👉 Thử lại: nhắn lại nhận xét sửa ảnh",
+        "ðŸ‘‰ Thá»­ láº¡i: nháº¯n láº¡i nháº­n xÃ©t sá»­a áº£nh",
       ].join("\n"),
       data: { error: parseErr.message },
     });
   }
 
-  // ─── PIPELINE GHÉP 3 LỚP (giống generateMedia) ────────────────────
+  // â”€â”€â”€ PIPELINE GHÃ‰P 3 Lá»šP (giá»‘ng generateMedia) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   let finalMediaPath = media.generatedImagePath || media.generatedVideoPath || "";
   if (
     mediaType === "image" &&
@@ -895,7 +944,7 @@ async function reviseMedia(context, state) {
     state.content?.primaryProductImage
   ) {
     try {
-      logger.log("media", "🔧 Đang ghép lại 3 lớp với nền mới...");
+      logger.log("media", "ðŸ”§ Äang ghÃ©p láº¡i 3 lá»›p vá»›i ná»n má»›i...");
       const compositePath = await mediaAgent.compositeImage3Layers({
         backgroundPath: media.generatedImagePath,
         productImagePath: state.content.primaryProductImage,
@@ -907,10 +956,10 @@ async function reviseMedia(context, state) {
       media.generatedImagePath = compositePath;
       media.composited = true;
       finalMediaPath = compositePath;
-      logger.log("media", `✅ Ghép ảnh 3 lớp thành công: ${compositePath}`);
+      logger.log("media", `âœ… GhÃ©p áº£nh 3 lá»›p thÃ nh cÃ´ng: ${compositePath}`);
     } catch (compErr) {
       logger.logError("composite", compErr);
-      logger.log("info", "⚠️ Sử dụng ảnh nền AI gốc (chưa ghép sản phẩm).");
+      logger.log("info", "âš ï¸ Sá»­ dá»¥ng áº£nh ná»n AI gá»‘c (chÆ°a ghÃ©p sáº£n pháº©m).");
       media.composited = false;
     }
   }
@@ -931,33 +980,41 @@ async function reviseMedia(context, state) {
     media,
   });
 
-  // Tạo file:// link để phó phòng hiển thị ảnh trong chat
+  // Táº¡o file:// link Ä‘á»ƒ phÃ³ phÃ²ng hiá»ƒn thá»‹ áº£nh trong chat
   const fileLink = finalMediaPath
     ? `file:///${finalMediaPath.replace(/\\/g, "/")}`
     : "";
 
   const summary = [
-    "🎨 NV Media đã sửa lại theo nhận xét, đang chờ Sếp duyệt.",
-    media.composited ? "✅ Đã ghép lại: Nền AI mới + Sản phẩm thật + Logo" : "",
+    "ðŸŽ¨ NV Media Ä‘Ã£ sá»­a láº¡i theo nháº­n xÃ©t, Ä‘ang chá» Sáº¿p duyá»‡t.",
+    media.composited ? "âœ… ÄÃ£ ghÃ©p láº¡i: Ná»n AI má»›i + Sáº£n pháº©m tháº­t + Logo" : "",
     "",
-    finalMediaPath ? `🖼️ Xem ảnh: ${fileLink}` : "",
-    `File mới: ${finalMediaPath}`,
+    finalMediaPath ? `ðŸ–¼ï¸ Xem áº£nh: ${fileLink}` : "",
+    `File má»›i: ${finalMediaPath}`,
     "",
-    "👉 Duyệt: \"Duyệt ảnh và đăng bài\"",
-    "👉 Sửa tiếp: ghi rõ nhận xét",
+    "ðŸ‘‰ Duyá»‡t: \"Duyá»‡t áº£nh vÃ  Ä‘Äƒng bÃ i\"",
+    "ðŸ‘‰ Sá»­a tiáº¿p: ghi rÃµ nháº­n xÃ©t",
+  ].filter(Boolean).join("\n");
+  const summaryWithPreview = [
+    summary,
+    finalMediaPath ? "" : "",
+    finalMediaPath ? "Anh media sau khi sua:" : "",
+    buildMediaDirective(finalMediaPath),
+    state.content?.primaryProductImage ? "Anh goc san pham de doi chieu:" : "",
+    buildMediaDirective(state.content?.primaryProductImage),
   ].filter(Boolean).join("\n");
 
   return buildResult({
     workflowId: state.workflow_id,
     stage: nextState.stage,
-    summary,
-    humanMessage: summary,
+    summary: summaryWithPreview,
+    humanMessage: summaryWithPreview,
     data: { media, next_expected_action: "media_approval" },
   });
 }
 
 /**
- * Bước trung gian: Hỏi sếp muốn đăng ngay hay hẹn giờ.
+ * BÆ°á»›c trung gian: Há»i sáº¿p muá»‘n Ä‘Äƒng ngay hay háº¹n giá».
  */
 async function generateMediaFlow(context, state) {
   const mediaRequestStepId = "step_02_media_prepare";
@@ -1481,13 +1538,13 @@ function askPublishDecision(context, state) {
   });
 
   const summary = [
-    "✅ Sếp đã duyệt cả content và media!",
+    "âœ… Sáº¿p Ä‘Ã£ duyá»‡t cáº£ content vÃ  media!",
     "",
-    "👉 Đăng ngay: \"Đăng ngay\" hoặc \"Publish\"",
-    "👉 Hẹn giờ: \"Hẹn giờ 20:00 hôm nay\" hoặc \"Schedule 2026-04-10T20:00:00+07:00\"",
+    "ðŸ‘‰ ÄÄƒng ngay: \"ÄÄƒng ngay\" hoáº·c \"Publish\"",
+    "ðŸ‘‰ Háº¹n giá»: \"Háº¹n giá» 20:00 hÃ´m nay\" hoáº·c \"Schedule 2026-04-10T20:00:00+07:00\"",
   ].join("\n");
 
-  logger.logApprovalWait("awaiting_publish_decision", "Sếp chọn Đăng ngay hay Hẹn giờ?");
+  logger.logApprovalWait("awaiting_publish_decision", "Sáº¿p chá»n ÄÄƒng ngay hay Háº¹n giá»?");
 
   return buildResult({
     workflowId: state.workflow_id,
@@ -1499,10 +1556,10 @@ function askPublishDecision(context, state) {
 }
 
 /**
- * Đăng bài ngay.
+ * ÄÄƒng bÃ i ngay.
  */
 function publishNowAction(context, state) {
-  logger.logPhase("ĐĂNG BÀI", "Đang đăng bài lên Fanpage...");
+  logger.logPhase("ÄÄ‚NG BÃ€I", "Äang Ä‘Äƒng bÃ i lÃªn Fanpage...");
 
   const mediaPaths = [];
   if (state.media?.generatedImagePath) mediaPaths.push(state.media.generatedImagePath);
@@ -1527,9 +1584,9 @@ function publishNowAction(context, state) {
   logger.logPublished(postId);
 
   const summary = [
-    "📤 Bài viết đã được đăng thành công lên Fanpage!",
+    "ðŸ“¤ BÃ i viáº¿t Ä‘Ã£ Ä‘Æ°á»£c Ä‘Äƒng thÃ nh cÃ´ng lÃªn Fanpage!",
     postId ? `Post ID: ${postId}` : "",
-    `Media: ${mediaPaths.join(", ") || "không có"}`,
+    `Media: ${mediaPaths.join(", ") || "khÃ´ng cÃ³"}`,
   ].filter(Boolean).join("\n");
 
   return buildResult({
@@ -1542,12 +1599,12 @@ function publishNowAction(context, state) {
 }
 
 /**
- * Hẹn giờ đăng bài.
+ * Háº¹n giá» Ä‘Äƒng bÃ i.
  */
 function schedulePostAction(context, state) {
   const scheduleTime = state.intent?.schedule_time || context.scheduleTime || context.message;
 
-  logger.logPhase("HẸN GIỜ", `Đang hẹn giờ đăng bài: ${scheduleTime}`);
+  logger.logPhase("Háº¸N GIá»œ", `Äang háº¹n giá» Ä‘Äƒng bÃ i: ${scheduleTime}`);
 
   const mediaPaths = [];
   if (state.media?.generatedImagePath) mediaPaths.push(state.media.generatedImagePath);
@@ -1573,8 +1630,8 @@ function schedulePostAction(context, state) {
   logger.logScheduled(scheduleTime);
 
   const summary = [
-    "📅 Bài viết đã được hẹn giờ đăng thành công!",
-    `Thời gian: ${scheduleTime}`,
+    "ðŸ“… BÃ i viáº¿t Ä‘Ã£ Ä‘Æ°á»£c háº¹n giá» Ä‘Äƒng thÃ nh cÃ´ng!",
+    `Thá»i gian: ${scheduleTime}`,
     postId ? `Post ID: ${postId}` : "",
   ].filter(Boolean).join("\n");
 
@@ -1588,7 +1645,7 @@ function schedulePostAction(context, state) {
 }
 
 /**
- * Sửa bài đã đăng (EDIT_PUBLISHED intent).
+ * Sá»­a bÃ i Ä‘Ã£ Ä‘Äƒng (EDIT_PUBLISHED intent).
  */
 async function editPublishedFlow(context) {
   const workflowId = `wf_edit_${randomUUID()}`;
@@ -1598,13 +1655,13 @@ async function editPublishedFlow(context) {
   if (!postId) {
     return buildResult({
       status: "blocked",
-      summary: "⚠️ Cần cung cấp Post ID của bài viết muốn sửa. Ví dụ: \"Sửa bài đã đăng, post ID: 643048852218433_123456\"",
+      summary: "âš ï¸ Cáº§n cung cáº¥p Post ID cá»§a bÃ i viáº¿t muá»‘n sá»­a. VÃ­ dá»¥: \"Sá»­a bÃ i Ä‘Ã£ Ä‘Äƒng, post ID: 643048852218433_123456\"",
     });
   }
 
-  logger.logPhase("SỬA BÀI ĐÃ ĐĂNG", `Post ID: ${postId}`);
+  logger.logPhase("Sá»¬A BÃ€I ÄÃƒ ÄÄ‚NG", `Post ID: ${postId}`);
   logger.logHandoff(
-    "Phó phòng", "NV Content",
+    "PhÃ³ phÃ²ng", "NV Content",
     logger.buildHumanMessage("pho_phong", "nv_content", "edit_post", context.message.slice(0, 80)),
   );
 
@@ -1613,7 +1670,7 @@ async function editPublishedFlow(context) {
     stepId,
     originalBrief: context.message,
     feedback: context.message,
-    oldContent: "(Bài cũ trên Facebook — viết mới theo yêu cầu sếp)",
+    oldContent: "(BÃ i cÅ© trÃªn Facebook â€” viáº¿t má»›i theo yÃªu cáº§u sáº¿p)",
     openClawHome: context.openClawHome,
   });
 
@@ -1629,7 +1686,7 @@ async function editPublishedFlow(context) {
 
   const content = contentAgent.parseContentResult(reply);
 
-  // Lưu state chờ duyệt nội dung mới trước khi update lên FB
+  // LÆ°u state chá» duyá»‡t ná»™i dung má»›i trÆ°á»›c khi update lÃªn FB
   const state = saveWorkflow(context.paths, {
     workflow_id: workflowId,
     created_at: nowIso(),
@@ -1644,15 +1701,15 @@ async function editPublishedFlow(context) {
   });
 
   const summary = [
-    "✏️ NV Content đã viết nội dung mới cho bài đã đăng, đang chờ Sếp duyệt.",
-    `Post ID sẽ cập nhật: ${postId}`,
+    "âœï¸ NV Content Ä‘Ã£ viáº¿t ná»™i dung má»›i cho bÃ i Ä‘Ã£ Ä‘Äƒng, Ä‘ang chá» Sáº¿p duyá»‡t.",
+    `Post ID sáº½ cáº­p nháº­t: ${postId}`,
     "",
-    "━━━ NỘI DUNG MỚI ━━━",
+    "â”â”â” Ná»˜I DUNG Má»šI â”â”â”",
     content.approvedContent,
-    "━━━━━━━━━━━━━━━━━━━━━",
+    "â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”",
     "",
-    "👉 Duyệt: \"Duyệt content\" — nội dung sẽ được cập nhật lên Facebook",
-    "👉 Sửa: ghi rõ nhận xét",
+    "ðŸ‘‰ Duyá»‡t: \"Duyá»‡t content\" â€” ná»™i dung sáº½ Ä‘Æ°á»£c cáº­p nháº­t lÃªn Facebook",
+    "ðŸ‘‰ Sá»­a: ghi rÃµ nháº­n xÃ©t",
   ].join("\n");
 
   logger.logApprovalWait("awaiting_edit_approval", content.approvedContent);
@@ -1667,12 +1724,12 @@ async function editPublishedFlow(context) {
 }
 
 /**
- * Xử lý approve cho bài edit → gọi facebook_edit_post.
+ * Xá»­ lÃ½ approve cho bÃ i edit â†’ gá»i facebook_edit_post.
  */
 function applyEditToPublished(context, state) {
   const postId = state.post_id;
 
-  logger.logPhase("CẬP NHẬT BÀI ĐÃ ĐĂNG", `Đang cập nhật post ${postId}...`);
+  logger.logPhase("Cáº¬P NHáº¬T BÃ€I ÄÃƒ ÄÄ‚NG", `Äang cáº­p nháº­t post ${postId}...`);
 
   const editResult = publisher.editPublishedPost({
     postId,
@@ -1691,7 +1748,7 @@ function applyEditToPublished(context, state) {
   logger.logEdited(postId);
 
   const summary = [
-    "✏️ Bài viết trên Facebook đã được cập nhật thành công!",
+    "âœï¸ BÃ i viáº¿t trÃªn Facebook Ä‘Ã£ Ä‘Æ°á»£c cáº­p nháº­t thÃ nh cÃ´ng!",
     `Post ID: ${postId}`,
   ].join("\n");
 
@@ -1705,17 +1762,17 @@ function applyEditToPublished(context, state) {
 }
 
 /**
- * Xử lý intent TRAIN — ghi quy tắc thủ công.
+ * Xá»­ lÃ½ intent TRAIN â€” ghi quy táº¯c thá»§ cÃ´ng.
  */
 function handleTrainIntent(context) {
   const feedback = context.intent?.feedback_or_brief || context.message;
   const targetAgent = context.intent?.target_agent;
 
-  logger.logPhase("TRAINING", `Sếp dạy quy tắc mới`);
+  logger.logPhase("TRAINING", `Sáº¿p dáº¡y quy táº¯c má»›i`);
 
   const results = [];
 
-  // Ghi rule cho agent được chỉ định, hoặc cả hai nếu "self"
+  // Ghi rule cho agent Ä‘Æ°á»£c chá»‰ Ä‘á»‹nh, hoáº·c cáº£ hai náº¿u "self"
   const agents = targetAgent === "nv_content"
     ? ["nv_content"]
     : targetAgent === "nv_media"
@@ -1731,11 +1788,11 @@ function handleTrainIntent(context) {
   }
 
   const summary = [
-    "🧠 Đã ghi nhớ quy tắc mới!",
-    `Áp dụng cho: ${results.join(", ")}`,
-    `Nội dung: "${feedback.slice(0, 200)}"`,
+    "ðŸ§  ÄÃ£ ghi nhá»› quy táº¯c má»›i!",
+    `Ãp dá»¥ng cho: ${results.join(", ")}`,
+    `Ná»™i dung: "${feedback.slice(0, 200)}"`,
     "",
-    "Quy tắc này sẽ tự động được nhúng vào prompt mỗi khi nhân viên làm việc.",
+    "Quy táº¯c nÃ y sáº½ tá»± Ä‘á»™ng Ä‘Æ°á»£c nhÃºng vÃ o prompt má»—i khi nhÃ¢n viÃªn lÃ m viá»‡c.",
   ].join("\n");
 
   return buildResult({
@@ -1747,10 +1804,10 @@ function handleTrainIntent(context) {
   });
 }
 
-// ─── MAIN ROUTING ────────────────────────────────────────────────────
+// â”€â”€â”€ MAIN ROUTING â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 /**
- * Xử lý workflow đang pending.
+ * Xá»­ lÃ½ workflow Ä‘ang pending.
  */
 async function continueWorkflow(context, state) {
   state = migrateState(state);
@@ -1863,7 +1920,7 @@ async function continueWorkflow(context, state) {
   }
 
   if (state.stage === "revising_media") {
-    // Phục hồi sau crash của reviseMedia: tìm ảnh mới nhất (không phải screenshot/final cũ)
+    // Phá»¥c há»“i sau crash cá»§a reviseMedia: tÃ¬m áº£nh má»›i nháº¥t (khÃ´ng pháº£i screenshot/final cÅ©)
     const imagesDir = path.join(context.openClawHome, "workspace_media", "artifacts", "images");
     const currentBg = state.media?.generatedImagePath || "";
     let latestImage = "";
@@ -1873,7 +1930,7 @@ async function continueWorkflow(context, state) {
           .filter((f) => {
             if (f.includes("-before-") || f.includes("-after-") || f.includes("_final")) return false;
             if (!(/\.(png|jpg|jpeg|webp)$/i.test(f))) return false;
-            // Bỏ file cũ nếu đượng dẫn khớp với nền cũ (trước khi revise)
+            // Bá» file cÅ© náº¿u Ä‘Æ°á»£ng dáº«n khá»›p vá»›i ná»n cÅ© (trÆ°á»›c khi revise)
             const fullPath = path.join(imagesDir, f);
             if (currentBg && path.resolve(fullPath) === path.resolve(currentBg)) return false;
             return true;
@@ -1885,7 +1942,7 @@ async function continueWorkflow(context, state) {
     } catch { /* ignore */ }
 
     if (latestImage) {
-      logger.log("media", `✅ Phục hồi ảnh sửa từ lượt trước: ${latestImage}`);
+      logger.log("media", `âœ… Phá»¥c há»“i áº£nh sá»­a tá»« lÆ°á»£t trÆ°á»›c: ${latestImage}`);
       let finalPath = latestImage;
       if (state.content?.primaryProductImage) {
         try {
@@ -1900,7 +1957,7 @@ async function continueWorkflow(context, state) {
       const recoveredMedia = {
         generatedImagePath: finalPath,
         mediaType: "image",
-        imagePrompt: state.media?.imagePrompt || "(phục hồi sau sửa)",
+        imagePrompt: state.media?.imagePrompt || "(phá»¥c há»“i sau sá»­a)",
         composited: finalPath !== latestImage,
       };
       const nextState = saveWorkflow(context.paths, {
@@ -1910,14 +1967,14 @@ async function continueWorkflow(context, state) {
       });
       const finalLink = `file:///${finalPath.replace(/\\/g, "/")}`;
       const summary = [
-        "🎨 Đã phục hồi ảnh sửa từ lượt trước, đang chờ Sếp duyệt.",
-        recoveredMedia.composited ? "✅ Đã ghép: Nền AI mới + Sản phẩm thật + Logo" : "",
+        "ðŸŽ¨ ÄÃ£ phá»¥c há»“i áº£nh sá»­a tá»« lÆ°á»£t trÆ°á»›c, Ä‘ang chá» Sáº¿p duyá»‡t.",
+        recoveredMedia.composited ? "âœ… ÄÃ£ ghÃ©p: Ná»n AI má»›i + Sáº£n pháº©m tháº­t + Logo" : "",
         "",
-        `🖼️ Xem ảnh: ${finalLink}`,
+        `ðŸ–¼ï¸ Xem áº£nh: ${finalLink}`,
         `File: ${finalPath}`,
         "",
-        "👉 Duyệt và đăng bài: \"Duyệt ảnh và đăng bài\"",
-        "👉 Sửa tiếp: ghi rõ nhận xét",
+        "ðŸ‘‰ Duyá»‡t vÃ  Ä‘Äƒng bÃ i: \"Duyá»‡t áº£nh vÃ  Ä‘Äƒng bÃ i\"",
+        "ðŸ‘‰ Sá»­a tiáº¿p: ghi rÃµ nháº­n xÃ©t",
       ].filter(Boolean).join("\n");
       return buildResult({
         workflowId: state.workflow_id,
@@ -1928,12 +1985,12 @@ async function continueWorkflow(context, state) {
       });
     }
 
-    // Không có ảnh mới — quay lại awaiting_media_approval với ảnh cũ
+    // KhÃ´ng cÃ³ áº£nh má»›i â€” quay láº¡i awaiting_media_approval vá»›i áº£nh cÅ©
     saveWorkflow(context.paths, { ...state, stage: "awaiting_media_approval" });
     const summary = [
-      "❌ Bước sửa ảnh bị ngắt giữa chừng, chưa có ảnh mới.",
+      "âŒ BÆ°á»›c sá»­a áº£nh bá»‹ ngáº¯t giá»¯a chá»«ng, chÆ°a cÃ³ áº£nh má»›i.",
       "",
-      "👉 Nhắn lại nhận xét để thử sửa ảnh lần nữa",
+      "ðŸ‘‰ Nháº¯n láº¡i nháº­n xÃ©t Ä‘á»ƒ thá»­ sá»­a áº£nh láº§n ná»¯a",
     ].join("\n");
     return buildResult({
       workflowId: state.workflow_id,
@@ -1944,20 +2001,20 @@ async function continueWorkflow(context, state) {
     });
   }
 
-  // generating_media — Đang tạo ảnh, chặn loop.
-  // Stage này được set ngay trước khi gọi NV Media. Nếu orchestrator
-  // crash sau khi có ảnh nhưng trước khi save, lần sau sẽ vào bộ này.
+  // generating_media â€” Äang táº¡o áº£nh, cháº·n loop.
+  // Stage nÃ y Ä‘Æ°á»£c set ngay trÆ°á»›c khi gá»i NV Media. Náº¿u orchestrator
+  // crash sau khi cÃ³ áº£nh nhÆ°ng trÆ°á»›c khi save, láº§n sau sáº½ vÃ o bá»™ nÃ y.
   if (state.stage === "generating_media") {
-    // Ưu tiên dùng đường dẫn đã lưu trong state (chính xác, không nhầm workflow cũ)
+    // Æ¯u tiÃªn dÃ¹ng Ä‘Æ°á»ng dáº«n Ä‘Ã£ lÆ°u trong state (chÃ­nh xÃ¡c, khÃ´ng nháº§m workflow cÅ©)
     const savedBg = state.generating_bg_image_path || "";
     const savedProduct = state.generating_product_image_path || state.content?.primaryProductImage || "";
 
     let bgImagePath = "";
     if (savedBg && fs.existsSync(savedBg)) {
       bgImagePath = savedBg;
-      logger.log("media", `✅ Dùng path nền đã lưu trong state: ${bgImagePath}`);
+      logger.log("media", `âœ… DÃ¹ng path ná»n Ä‘Ã£ lÆ°u trong state: ${bgImagePath}`);
     } else {
-      // Fallback: scan thư mục, chỉ lấy ảnh được tạo sau khi bắt đầu workflow
+      // Fallback: scan thÆ° má»¥c, chá»‰ láº¥y áº£nh Ä‘Æ°á»£c táº¡o sau khi báº¯t Ä‘áº§u workflow
       const imagesDir = path.join(context.openClawHome, "workspace_media", "artifacts", "images");
       const startedAt = state.generating_started_at ? new Date(state.generating_started_at).getTime() : 0;
       try {
@@ -1968,7 +2025,7 @@ async function continueWorkflow(context, state) {
               if (!(/\.(png|jpg|jpeg|webp)$/i.test(f))) return false;
               const fullPath = path.join(imagesDir, f);
               const mtime = fs.statSync(fullPath).mtimeMs;
-              return mtime >= startedAt; // chỉ lấy file mới hơn thời điểm bắt đầu
+              return mtime >= startedAt; // chá»‰ láº¥y file má»›i hÆ¡n thá»i Ä‘iá»ƒm báº¯t Ä‘áº§u
             })
             .map((f) => ({ f, t: fs.statSync(path.join(imagesDir, f)).mtimeMs }))
             .sort((a, b) => b.t - a.t);
@@ -1978,7 +2035,7 @@ async function continueWorkflow(context, state) {
     }
 
     if (bgImagePath) {
-      logger.log("media", `✅ Phục hồi: chạy lại composite với nền: ${bgImagePath}`);
+      logger.log("media", `âœ… Phá»¥c há»“i: cháº¡y láº¡i composite vá»›i ná»n: ${bgImagePath}`);
       let finalPath = bgImagePath;
       if (savedProduct && fs.existsSync(savedProduct)) {
         try {
@@ -1988,18 +2045,18 @@ async function continueWorkflow(context, state) {
             outputPath: bgImagePath.replace(/(\.[a-z]+)$/i, "_final$1"),
           });
           finalPath = compositePath;
-          logger.log("media", `✅ Ghép 3 lớp thành công: ${compositePath}`);
+          logger.log("media", `âœ… GhÃ©p 3 lá»›p thÃ nh cÃ´ng: ${compositePath}`);
         } catch (compErr) {
           process.stderr.write(`[COMPOSITE_RECOVERY_ERROR] ${compErr.stack || compErr.message}\n`);
           logger.logError("composite", compErr);
-          logger.log("info", "⚠️ Dùng ảnh nền gốc (composite thất bại).");
+          logger.log("info", "âš ï¸ DÃ¹ng áº£nh ná»n gá»‘c (composite tháº¥t báº¡i).");
         }
       }
 
       const recoveredMedia = {
         generatedImagePath: finalPath,
         mediaType: "image",
-        imagePrompt: state.media?.imagePrompt || "(phục hồi)",
+        imagePrompt: state.media?.imagePrompt || "(phá»¥c há»“i)",
         composited: finalPath !== bgImagePath,
       };
 
@@ -2011,14 +2068,14 @@ async function continueWorkflow(context, state) {
 
       const finalLink = `file:///${finalPath.replace(/\\/g, "/")}`;
       const summary = [
-        "🎨 Đã ghép xong ảnh, đang chờ Sếp duyệt.",
-        recoveredMedia.composited ? "✅ Đã ghép: Nền AI + Sản phẩm thật + Logo" : "⚠️ Chỉ có ảnh nền AI (chưa ghép sản phẩm).",
+        "ðŸŽ¨ ÄÃ£ ghÃ©p xong áº£nh, Ä‘ang chá» Sáº¿p duyá»‡t.",
+        recoveredMedia.composited ? "âœ… ÄÃ£ ghÃ©p: Ná»n AI + Sáº£n pháº©m tháº­t + Logo" : "âš ï¸ Chá»‰ cÃ³ áº£nh ná»n AI (chÆ°a ghÃ©p sáº£n pháº©m).",
         "",
-        `🖼️ Xem ảnh: ${finalLink}`,
+        `ðŸ–¼ï¸ Xem áº£nh: ${finalLink}`,
         `File: ${finalPath}`,
         "",
-        "👉 Duyệt và đăng bài: \"Duyệt ảnh và đăng bài\"",
-        "👉 Sửa ảnh: ghi rõ nhận xét",
+        "ðŸ‘‰ Duyá»‡t vÃ  Ä‘Äƒng bÃ i: \"Duyá»‡t áº£nh vÃ  Ä‘Äƒng bÃ i\"",
+        "ðŸ‘‰ Sá»­a áº£nh: ghi rÃµ nháº­n xÃ©t",
       ].filter(Boolean).join("\n");
 
       return buildResult({
@@ -2030,15 +2087,15 @@ async function continueWorkflow(context, state) {
       });
     }
 
-    // Không tìm thấy ảnh nào — quay về step trước, cho phép re-trigger
+    // KhÃ´ng tÃ¬m tháº¥y áº£nh nÃ o â€” quay vá» step trÆ°á»›c, cho phÃ©p re-trigger
     saveWorkflow(context.paths, {
       ...state,
       stage: "awaiting_content_approval",
     });
     const noImgSummary = [
-      "❌ Bước tạo ảnh bị ngắt giữa chừng, chưa có file ảnh nào.",
+      "âŒ BÆ°á»›c táº¡o áº£nh bá»‹ ngáº¯t giá»¯a chá»«ng, chÆ°a cÃ³ file áº£nh nÃ o.",
       "",
-      "👉 Thử lại: \"Duyệt content, tạo ảnh\"",
+      "ðŸ‘‰ Thá»­ láº¡i: \"Duyá»‡t content, táº¡o áº£nh\"",
     ].join("\n");
     return buildResult({
       workflowId: state.workflow_id,
@@ -2058,7 +2115,7 @@ async function continueWorkflow(context, state) {
     if (decision === "reject") {
       return reviseContent(context, state);
     }
-    // Unknown — thử parse intent nếu là lệnh mới hoàn toàn
+    // Unknown â€” thá»­ parse intent náº¿u lÃ  lá»‡nh má»›i hoÃ n toÃ n
     return buildBlockedResult(state, context.message);
   }
 
@@ -2080,7 +2137,7 @@ async function continueWorkflow(context, state) {
       return publishNowAction(context, state);
     }
     if (decision === "schedule") {
-      // Trích schedule time từ message
+      // TrÃ­ch schedule time tá»« message
       const timeMatch = context.message.match(
         /(\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}(?::\d{2})?(?:[+-]\d{2}:\d{2})?)/,
       );
@@ -2101,43 +2158,43 @@ async function continueWorkflow(context, state) {
     return buildBlockedResult(state, context.message);
   }
 
-  // Unknown stage — archive and restart
+  // Unknown stage â€” archive and restart
   archiveWorkflow(context.paths, state);
   return startNewWorkflow(context);
 }
 
 function buildBlockedResult(state, message) {
   const stageLabels = {
-    awaiting_content_approval: "đang chờ duyệt content",
-    awaiting_media_approval: "đang chờ duyệt media",
-    awaiting_publish_decision: "đang chờ quyết định đăng bài",
-    awaiting_edit_approval: "đang chờ duyệt nội dung sửa",
-    generating_media: "đang tạo ảnh (vui lòng đợi)",
+    awaiting_content_approval: "Ä‘ang chá» duyá»‡t content",
+    awaiting_media_approval: "Ä‘ang chá» duyá»‡t media",
+    awaiting_publish_decision: "Ä‘ang chá» quyáº¿t Ä‘á»‹nh Ä‘Äƒng bÃ i",
+    awaiting_edit_approval: "Ä‘ang chá» duyá»‡t ná»™i dung sá»­a",
+    generating_media: "Ä‘ang táº¡o áº£nh (vui lÃ²ng Ä‘á»£i)",
   };
-  const stageLabel = stageLabels[state?.stage] || "đang chờ xử lý";
+  const stageLabel = stageLabels[state?.stage] || "Ä‘ang chá» xá»­ lÃ½";
 
   return buildResult({
     workflowId: state?.workflow_id || null,
     stage: state?.stage || null,
     status: "blocked",
     summary: [
-      `⏳ Đang có workflow pending: ${stageLabel}.`,
-      `Tin nhắn "${message.slice(0, 100)}" chưa được nhận diện rõ.`,
+      `â³ Äang cÃ³ workflow pending: ${stageLabel}.`,
+      `Tin nháº¯n "${message.slice(0, 100)}" chÆ°a Ä‘Æ°á»£c nháº­n diá»‡n rÃµ.`,
       "",
-      "Gợi ý lệnh phù hợp:",
+      "Gá»£i Ã½ lá»‡nh phÃ¹ há»£p:",
       state?.stage === "awaiting_content_approval"
-        ? '  • "Duyệt content" / "Sửa content, <nhận xét>"'
+        ? '  â€¢ "Duyá»‡t content" / "Sá»­a content, <nháº­n xÃ©t>"'
         : state?.stage === "awaiting_media_approval"
-          ? '  • "Duyệt ảnh" / "Sửa ảnh, <nhận xét>" / "Sửa prompt, <nhận xét>"'
+          ? '  â€¢ "Duyá»‡t áº£nh" / "Sá»­a áº£nh, <nháº­n xÃ©t>" / "Sá»­a prompt, <nháº­n xÃ©t>"'
           : state?.stage === "awaiting_publish_decision"
-            ? '  • "Đăng ngay" / "Hẹn giờ <thời gian>"'
-            : '  • "Duyệt" / "Sửa"',
+            ? '  â€¢ "ÄÄƒng ngay" / "Háº¹n giá» <thá»i gian>"'
+            : '  â€¢ "Duyá»‡t" / "Sá»­a"',
     ].join("\n"),
     data: { expected_stage: state?.stage || null },
   });
 }
 
-// ─── CLI ENTRY POINT ─────────────────────────────────────────────────
+// â”€â”€â”€ CLI ENTRY POINT â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 async function runCli(argv = process.argv.slice(2)) {
   const options = parseArgs(argv);
@@ -2155,8 +2212,8 @@ async function runCli(argv = process.argv.slice(2)) {
     printResult(
       buildResult({
         status: "reset",
-        summary: "🔄 Đã reset workflow pending của agent-orchestrator-test.",
-        humanMessage: "🔄 Đã reset workflow pending.",
+        summary: "ðŸ”„ ÄÃ£ reset workflow pending cá»§a agent-orchestrator-test.",
+        humanMessage: "ðŸ”„ ÄÃ£ reset workflow pending.",
       }),
       options.json,
     );
@@ -2175,7 +2232,7 @@ async function runCli(argv = process.argv.slice(2)) {
 
   const currentState = readJsonIfExists(paths.currentFile, null);
 
-  // Parse intent nếu không có workflow pending
+  // Parse intent náº¿u khÃ´ng cÃ³ workflow pending
   let intent = null;
   if (!currentState) {
     intent = await intentParser.parseIntent({
@@ -2210,27 +2267,27 @@ async function runCli(argv = process.argv.slice(2)) {
       supersededWorkflowId: currentState.workflow_id,
     });
   } else if (currentState) {
-    // Workflow đang pending — tiếp tục
+    // Workflow Ä‘ang pending â€” tiáº¿p tá»¥c
     result = await continueWorkflow(context, currentState);
   } else {
-    // Không có workflow pending — dispatch theo intent
+    // KhÃ´ng cÃ³ workflow pending â€” dispatch theo intent
     switch (intent.intent) {
       case "CREATE_NEW":
         result = await startNewWorkflow(context);
         break;
       case "EDIT_CONTENT":
-        // Không có workflow pending nhưng muốn sửa content → tạo workflow mới
+        // KhÃ´ng cÃ³ workflow pending nhÆ°ng muá»‘n sá»­a content â†’ táº¡o workflow má»›i
         result = await startNewWorkflow(context);
         break;
       case "EDIT_MEDIA":
-        // Không có workflow nên create new
+        // KhÃ´ng cÃ³ workflow nÃªn create new
         result = await startNewWorkflow(context);
         break;
       case "EDIT_PUBLISHED":
         result = await editPublishedFlow(context);
         break;
       case "SCHEDULE":
-        // Schedule nhưng không có workflow — cần tạo content trước
+        // Schedule nhÆ°ng khÃ´ng cÃ³ workflow â€” cáº§n táº¡o content trÆ°á»›c
         result = await startNewWorkflow(context);
         break;
       case "TRAIN":
@@ -2261,8 +2318,8 @@ if (require.main === module) {
   });
 }
 
-// ─── BACKWARD-COMPATIBLE EXPORTS ─────────────────────────────────────
-// Giữ nguyên exports cũ cho test file hiện tại.
+// â”€â”€â”€ BACKWARD-COMPATIBLE EXPORTS â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// Giá»¯ nguyÃªn exports cÅ© cho test file hiá»‡n táº¡i.
 
 function extractBlock(text, startMarker, endMarker) {
   const source = String(text || "");
@@ -2301,5 +2358,7 @@ module.exports = {
   extractField,
   parseContentReply,
   parseMediaReply,
+  scanLatestGeneratedMedia,
   shouldSupersedePendingWorkflow,
 };
+

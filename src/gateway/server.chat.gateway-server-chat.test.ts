@@ -631,6 +631,50 @@ describe("gateway server chat", () => {
     }
   });
 
+  test("chat.history converts MEDIA lines in assistant text into image_url blocks", async () => {
+    testState.gatewayControlUi = { basePath: "/openclaw" };
+    try {
+      const history = await loadChatHistoryWithMessages([
+        {
+          role: "assistant",
+          content: [
+            {
+              type: "text",
+              text:
+                "Ban nhap dang cho duyet.\nAnh goc san pham de doi chieu:\nMEDIA: \"C:/Users/Administrator/.openclaw/workspace_content/artifacts/references/search_product_text/demo/image_1920.png\"",
+            },
+          ],
+          timestamp: 11,
+        },
+      ]);
+
+      const first = history[0] as { content?: unknown } | undefined;
+      const firstContent = Array.isArray(first?.content) ? first.content : [];
+      expect(firstContent).toEqual(
+        expect.arrayContaining([
+          {
+            type: "image_url",
+            image_url: {
+              url: "/openclaw/__openclaw/chat-artifact?absolute_path=C%3A%2FUsers%2FAdministrator%2F.openclaw%2Fworkspace_content%2Fartifacts%2Freferences%2Fsearch_product_text%2Fdemo%2Fimage_1920.png",
+            },
+            filePath:
+              "C:/Users/Administrator/.openclaw/workspace_content/artifacts/references/search_product_text/demo/image_1920.png",
+          },
+        ]),
+      );
+      expect(firstContent).toEqual(
+        expect.arrayContaining([
+          {
+            type: "text",
+            text: "Ban nhap dang cho duyet.\nAnh goc san pham de doi chieu:",
+          },
+        ]),
+      );
+    } finally {
+      testState.gatewayControlUi = undefined;
+    }
+  });
+
   test("chat.history rejects sessions outside control-ui hierarchy access", async () => {
     const dir = await fs.mkdtemp(path.join(os.tmpdir(), "openclaw-gw-"));
     const gatedWs = new WebSocket(`ws://127.0.0.1:${port}`, {

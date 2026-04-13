@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { access, mkdir } from "node:fs/promises";
 import path from "node:path";
 import { chromium } from "playwright-core";
@@ -9,6 +10,7 @@ const DEFAULTS = {
   profile_name: "Default",
   target_gemini_url: "https://gemini.google.com/app/479df8c18606a9f0",
   image_paths: [],
+  output_dir: "",
   timeout_ms: 120000,
   retry_count: 2,
   dry_run: false,
@@ -39,6 +41,24 @@ function parseArgs(argv) {
   const params = { ...DEFAULTS };
   const logs = [];
   const args = argv.slice(2);
+
+  if (args.length >= 2 && (args[0] === "--input_file" || args[0] === "--input-file")) {
+    try {
+      const raw = readFileSync(args[1], "utf8").replace(/^\uFEFF/, "");
+      const parsed = JSON.parse(raw);
+      return {
+        ...params,
+        ...parsed,
+        image_paths: parseList(parsed.image_paths),
+        dry_run: parsed.dry_run === true || parsed["dry-run"] === true,
+        logs,
+      };
+    } catch (error) {
+      logs.push(
+        `[parse] Invalid JSON input file: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+  }
 
   if (args.length === 1 && args[0].trim().startsWith("{")) {
     try {
@@ -75,6 +95,11 @@ function parseArgs(argv) {
     }
     if (token === "--image_paths") {
       params.image_paths = parseList(next);
+      index += 1;
+      continue;
+    }
+    if (token === "--output_dir") {
+      params.output_dir = next;
       index += 1;
       continue;
     }
@@ -168,6 +193,7 @@ function normalizePrompt(text) {
 
 function canonicalizePromptForVerification(text) {
   return normalizePrompt(text)
+    .replace(/\*/g, "")
     .split("\n")
     .map((line) => line.trim())
     .filter((line, index, lines) => line !== "" || lines[index - 1] !== "")
@@ -917,12 +943,13 @@ async function downloadFromSpecificBlock(page, freshTarget, outputDir, logs) {
     ? Math.max(1, Math.min(4, Math.floor(parsed.retry_count)))
     : DEFAULTS.retry_count;
 
-  const artifactsDir = path.join(process.cwd(), "artifacts", "images");
+  const artifactsDir = path.resolve(parsed.output_dir || path.join(process.cwd(), "artifacts", "images"));
   await mkdir(artifactsDir, { recursive: true });
 
   logs.push(`[input] target_gemini_url=${targetGeminiUrl}`);
   logs.push(`[input] profile_name=${profileName}`);
   logs.push(`[input] image_paths=${imagePaths.length}`);
+  logs.push(`[input] output_dir=${artifactsDir}`);
   if (imagePaths.length > 0) {
     logs.push(`[input] Reference images=${imagePaths.join(" | ")}`);
   }
