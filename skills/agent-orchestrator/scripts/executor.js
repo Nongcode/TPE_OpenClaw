@@ -861,154 +861,7 @@ async function executePlan(registry, plan, options) {
       continue;
     }
 
-    if (
-      (step.type === "produce" || step.type === "media_revise") &&
-      step.to === "nv_media"
-    ) {
-      const mediaResult = await generateMediaAssets(workflowState, options);
-      const mediaReply = buildMediaProduceReply(workflowState);
-      const mediaRecord = {
-        ...step,
-        sessionKey: agent.transport?.sessionKey || agent.sessionKey,
-        envelope: {
-          type: step.type,
-          from: step.from,
-          to: step.to,
-          localSkillPipeline: true,
-        },
-        prompt: "[local] run gemini_generate_image + generate_video with product reference images",
-        reply: mediaReply,
-        mediaResult,
-      };
-      steps.push(mediaRecord);
-      simulation?.addStep(index, {
-        type: step.type,
-        from: step.from,
-        to: step.to,
-        sessionKey: mediaRecord.sessionKey,
-        replyPreview: compactReply(mediaReply, 1200),
-        referenceImages: Array.isArray(workflowState.referenceImages)
-          ? workflowState.referenceImages.map(safeRepoRelative)
-          : [],
-        generatedImages: Array.isArray(workflowState.generatedImagePaths)
-          ? workflowState.generatedImagePaths.map(safeRepoRelative)
-          : [],
-        generatedVideos: Array.isArray(workflowState.generatedVideoPaths)
-          ? workflowState.generatedVideoPaths.map(safeRepoRelative)
-          : [],
-      });
-      continue;
-    }
 
-    if (step.type === "media_review") {
-      const reviewReply = buildMediaReviewApprovedReply(workflowState);
-      const reviewRecord = {
-        ...step,
-        sessionKey: agent.transport?.sessionKey || agent.sessionKey,
-        envelope: {
-          type: "media_review",
-          from: step.from,
-          to: step.to,
-          autoApproved: true,
-        },
-        prompt: "[local] auto-approve media review",
-        reply: reviewReply,
-      };
-      steps.push(reviewRecord);
-      simulation?.addStep(index, {
-        type: step.type,
-        from: step.from,
-        to: step.to,
-        sessionKey: reviewRecord.sessionKey,
-        replyPreview: compactReply(reviewReply, 1200),
-        decision: "approved",
-      });
-      continue;
-    }
-
-    if (step.type === "compile_post") {
-      const compileReply = buildCompilePostReply(workflowState);
-      const compileRecord = {
-        ...step,
-        sessionKey: agent.transport?.sessionKey || agent.sessionKey,
-        envelope: {
-          type: "compile_post",
-          from: step.from,
-          to: step.to,
-          localSkillPipeline: true,
-          published: false,
-        },
-        prompt: "[local] compile reviewed content + media package for final approval",
-        reply: compileReply,
-      };
-      steps.push(compileRecord);
-      simulation?.addStep(index, {
-        type: step.type,
-        from: step.from,
-        to: step.to,
-        sessionKey: compileRecord.sessionKey,
-        replyPreview: compactReply(compileReply, 1200),
-        mediaBundleDir: safeRepoRelative(workflowState.mediaBundleDir || ""),
-        readyState:
-          Array.isArray(workflowState.generatedImagePaths) && workflowState.generatedImagePaths.length > 0
-            ? Array.isArray(workflowState.generatedVideoPaths) &&
-              workflowState.generatedVideoPaths.length > 0
-              ? "READY_IMAGE_AND_VIDEO"
-              : "READY_IMAGE_ONLY"
-            : "MISSING_IMAGE",
-      });
-      continue;
-    }
-
-    if (shouldForceOriginalImageMedia(step, workflowState, plan)) {
-      const forcedReply = buildOriginalImageMediaReply(step, workflowState);
-      const forcedRecord = {
-        ...step,
-        sessionKey: agent.transport?.sessionKey || agent.sessionKey,
-        envelope: {
-          type: step.type,
-          from: step.from,
-          to: step.to,
-          forcedOriginalImages: true,
-        },
-        prompt: "[local] force media workflow to use original product images",
-        reply: forcedReply,
-      };
-      steps.push(forcedRecord);
-
-      const forcedStepRecord = {
-        type: step.type,
-        from: step.from,
-        to: step.to,
-        sessionKey: forcedRecord.sessionKey,
-        replyPreview: compactReply(forcedReply, 1200),
-        decision:
-          ["content_review", "media_review", "final_review"].includes(step.type)
-            ? classifyReviewDecision(forcedReply)
-            : null,
-      };
-      simulation?.addStep(index, forcedStepRecord);
-
-      const forcedImagePrompt = extractPromptByLabel(forcedReply, [
-        "IMAGE_PROMPT",
-        "PROMPT_ANH",
-        "PROMPT TẠO ẢNH",
-        "PROMPT TAO ANH",
-      ]);
-      const forcedVideoPrompt = extractPromptByLabel(forcedReply, [
-        "VIDEO_PROMPT",
-        "PROMPT_VIDEO",
-        "PROMPT TẠO VIDEO",
-        "PROMPT TAO VIDEO",
-      ]);
-      if (forcedImagePrompt) {
-        workflowState.imagePrompt = forcedImagePrompt;
-      }
-      if (forcedVideoPrompt) {
-        workflowState.videoPrompt = forcedVideoPrompt;
-      }
-      continue;
-    }
 
     const priorSteps = steps.map((item) => ({
       stepIndex: item.envelope?.stepIndex ?? null,
@@ -1092,7 +945,7 @@ async function executePlan(registry, plan, options) {
     if (
       demoSmoothMode &&
       !reply &&
-      ["produce", "media_revise", "media_review", "compile_post", "final_review"].includes(
+      ["compile_post", "final_review"].includes(
         step.type,
       )
     ) {
@@ -1109,28 +962,8 @@ async function executePlan(registry, plan, options) {
 
     let decision =
       ["content_review", "media_review", "final_review"].includes(step.type)
-        ? demoSmoothMode
-          ? "approved"
-          : classifyReviewDecision(reply)
+        ? classifyReviewDecision(reply)
         : null;
-
-    if (step.type === "final_review" && decision === "approved") {
-      const publishResult = await publishCampaignPosts(workflowState, options);
-      reply = appendPublishResultToFinalReply(reply, workflowState);
-      steps[steps.length - 1].reply = reply;
-      steps[steps.length - 1].publishResult = publishResult;
-      simulation?.setPublishExecution({
-        image: workflowState.publishResults?.image || null,
-        video: workflowState.publishResults?.video || null,
-        generatedImagePaths: Array.isArray(workflowState.generatedImagePaths)
-          ? workflowState.generatedImagePaths.map(safeRepoRelative)
-          : [],
-        generatedVideoPaths: Array.isArray(workflowState.generatedVideoPaths)
-          ? workflowState.generatedVideoPaths.map(safeRepoRelative)
-          : [],
-        mediaBundleDir: safeRepoRelative(workflowState.mediaBundleDir || ""),
-      });
-    }
 
     const stepRecord = {
       type: step.type,

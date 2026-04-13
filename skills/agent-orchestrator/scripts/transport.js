@@ -42,169 +42,66 @@ function buildTaskEnvelope(step, registry, index, total, context = {}) {
 function buildTaskPrompt(envelope, registry) {
   const source = registry.byId[envelope.from];
   const target = registry.byId[envelope.to];
-  const normalizedGoal = String(envelope.goal || "").toLowerCase();
+  
   const lines = [
-    `[HE THONG DIEU PHOI] Buoc ${envelope.stepIndex}/${envelope.totalSteps}`,
+    `[HỆ THỐNG ĐIỀU PHỐI] Bước ${envelope.stepIndex}/${envelope.totalSteps}`,
+    `Từ: ${envelope.sourceLabel || envelope.from} (${envelope.sourceRole || 'unknown'}) -> Đến: ${envelope.targetLabel || envelope.to} (${envelope.targetRole || 'unknown'})`,
     "",
-    `${envelope.sourceLabel || envelope.from} (${envelope.from}) dang giao viec cho ${envelope.targetLabel || envelope.to} (${envelope.to}).`,
-    "",
-    "NHIEM VU:",
+    "📝 NHIỆM VỤ:",
     envelope.goal,
-    "",
-    "THONG TIN DIEU PHOI:",
-    `- Nguoi giao viec: ${envelope.sourceLabel || envelope.from}`,
-    `- Vai tro nguoi giao: ${envelope.sourceRole}`,
-    `- Nguoi nhan viec: ${envelope.targetLabel || envelope.to}`,
-    `- Vai tro nguoi nhan: ${envelope.targetRole}`,
-    `- Loai buoc: ${envelope.type}`,
+    ""
   ];
 
-  if (source?.canDelegateTo?.length) {
-    lines.push(`- Nguon co the giao cho: ${source.canDelegateTo.join(", ")}`);
-  }
-  if (target?.canDelegateTo?.length) {
-    lines.push(`- Dich co the giao tiep cho: ${target.canDelegateTo.join(", ")}`);
-  }
-  if (envelope.requiresReviewBy) {
-    lines.push(`- Ket qua can duoc review boi: ${envelope.requiresReviewBy}`);
-  }
-  if (envelope.deliverToUser) {
-    lines.push("- Sau khi buoc nay dat, ban phai tong hop ket qua va tra thang cho nguoi dung trong chinh khung chat nay.");
-  }
-  if (envelope.reportsTo) {
-    lines.push(`- Cap tren truc tiep cua ban: ${envelope.reportsTo}`);
-  }
-  lines.push(
-    `- Co can phe duyet cap quan ly khong: ${envelope.requiresExecutiveApproval ? "co" : "khong"}`,
-  );
-  if (!envelope.requiresExecutiveApproval) {
-    lines.push(
-      "- Viec nam trong tham quyen van hanh thuong ngay cua phong. Truong phong duoc quyen tu duyet va cho trien khai.",
-    );
-  }
-  if (envelope.type === "propose") {
-    lines.push(
-      "- Day la buoc LAP KE HOACH DE XIN DUYET. Tuyet doi KHONG tu trien khai, KHONG tu viet bai dang hoan chinh, KHONG tu tao media, KHONG tu dang bai.",
-    );
-  }
-  if (envelope.type === "plan") {
-    lines.push(
-      "- Day la buoc pho phong boc tach ke hoach da duoc truong phong chot thanh dau viec thuc thi cho doi san xuat.",
-    );
-    lines.push(
-      "- Sau khi nhan lenh nay, pho phong phai brief cho nv_content viet bai. Chua duoc giao media truoc khi content da duoc pho phong duyet.",
-    );
-  }
-  if (envelope.type === "plan_execute") {
-    lines.push(
-      "- Day la buoc pho phong mo pha trien khai theo ke hoach da duoc truong phong va nguoi dung chot. Bat dau tu content, khong duoc nhay thang sang media.",
-    );
-  }
-  if (envelope.type === "product_research") {
-    lines.push(
-      "- Day la buoc thu thap du lieu san pham bat buoc cho content. Hay su dung skill search_product_text de lay text day du + anh goc san pham.",
-    );
-    lines.push(
-      "- Ket qua phai neu ro: ten san pham, url, thong so chinh, duong dan thu muc anh goc, danh sach anh tai ve.",
-    );
-  }
-  if (envelope.type === "content_revise") {
-    lines.push(
-      "- Day la buoc nhan vien content sua lai noi dung theo nhan xet review. Chua duoc nhay sang media cho den khi content duoc duyet lai.",
-    );
-  }
-  if (envelope.type === "media_revise") {
-    lines.push(
-      "- Day la buoc nhan vien media sua lai media theo nhan xet review. Chi tap trung sua media bi loi.",
-    );
-  }
-  if (envelope.to === "nv_media") {
-    lines.push(
-      "- Quy dinh bat buoc cho nhan vien media: nhan content da duyet + image_prompt + video_prompt, sau do goi skill gemini_generate_image va generate_video de tao media that.",
-    );
-    lines.push(
-      "- Bat buoc dung anh goc san pham trong THU_MUC_ANH_GOC / danh sach anh da research lam anh tham chieu cho ca tao anh va tao video.",
-    );
-  }
-  if (envelope.type === "content_review") {
-    lines.push(
-      "- Day la buoc duyet noi dung. Neu content chua dat, yeu cau lam lai dung vao phan noi dung, chua chuyen sang media. Neu content da dat, luc do moi duoc brief media.",
-    );
-    if (envelope.deliverToUser) {
-      lines.push(
-        "- Day la diem ket thuc workflow cho yeu cau chi can content. Neu content dat, tra truc tiep ban content final cho nguoi dung, khong trinh truong_phong.",
-      );
-    }
-  }
-  if (envelope.type === "media_review") {
-    lines.push(
-      "- Day la buoc duyet media. Chi xac nhan dat khi media khop voi content da duoc duyet.",
-    );
-    if (envelope.deliverToUser) {
-      lines.push(
-        "- Day la diem ket thuc workflow cho yeu cau nguoi dung giao truc tiep cho pho_phong. Neu media dat, tra truc tiep goi ket qua gom content va anh cho nguoi dung, khong trinh truong_phong.",
-      );
-    }
-  }
-  if (envelope.type === "compile_post") {
-    lines.push(
-      "- Day la buoc pho phong tong hop content da duyet + media da duyet thanh ho so san sang dang.",
-    );
-    lines.push(
-      "- KHONG dang Facebook o buoc nay. Ket qua phai neu ro media da chot, caption tom tat, prompt da chot va trang thai san sang de truong_phong final_review.",
-    );
-  }
-  if (envelope.type === "final_review") {
-    lines.push(
-      "- Day la buoc truong phong review goi bai viet cuoi cung truoc khi he thong goi facebook_publish_post.",
-    );
-    lines.push(
-      "- Neu truong_phong duyet PASS, he thong se dang bai that sau buoc nay: uu tien 1 bai image, va 1 bai video neu video da tao thanh cong; neu video bi quota thi chi dang image.",
-    );
-  }
-  if (envelope.type === "publish") {
-    lines.push(
-      "- Day la buoc mo phong dang bai sau khi nguoi dung da xac nhan ro rang rang duoc phep dang.",
-    );
-    lines.push(
-      "- KHONG dang that. Chi tao bao cao mo phong dang bai va luu thong tin can post de he thong main xu ly sau.",
-    );
-  }
   if (envelope.handoffContext) {
     const handoffHeading =
-      envelope.type === "content_review"
-          ? "BAN NHAP CONTENT TU BUOC TRUOC:"
-          : envelope.type === "media_review"
-            ? "BAN NHAP MEDIA TU BUOC TRUOC:"
-            : "BAN GIAO TU BUOC TRUOC:";
-    lines.push("", handoffHeading, envelope.handoffContext);
-  }
-  if (Array.isArray(envelope.completedSteps) && envelope.completedSteps.length > 0) {
-    lines.push("", "TOM TAT CAC BUOC DA HOAN THANH:");
-    for (const item of envelope.completedSteps) {
-      lines.push(`- ${item.stepIndex}. ${item.from} -> ${item.to} [${item.type}]`);
-      if (item.summary && (envelope.type === "final_review" || !envelope.type.endsWith("_review"))) {
-        lines.push(`  ${item.summary}`);
-      }
-    }
+      envelope.type === "content_review" ? "BẢN NHÁP CONTENT TỪ BƯỚC TRƯỚC:" :
+      envelope.type === "media_review" ? "BẢN NHÁP MEDIA TỪ BƯỚC TRƯỚC:" :
+      "BÀN GIAO TỪ BƯỚC TRƯỚC:";
+    lines.push(handoffHeading, envelope.handoffContext, "");
   }
 
-  lines.push(
-    "",
-    "YEU CAU TRA LOI:",
-    "- Lam dung vai tro cua ban.",
-    "- Neu can giao tiep cho cap duoi hoac cap tren, neu ro ten agent tiep theo trong phan DE_XUAT_BUOC_TIEP.",
-    "- Neu task KHONG can phe duyet cap quan ly, khong de xuat xin duyet len quan_ly chi de cho phe duyet hinh thuc.",
-    "- Neu dang o buoc propose, chi tra ban ke hoach de xin duyet va dung lai cho quyet dinh cua cap tren.",
-    "- Khong duoc bo qua thu tu: truong phong lap ke hoach va cho nguoi dung duyet -> pho phong brief content -> phe duyet content -> media -> phe duyet media -> pho phong dong goi ho so dang -> truong phong final_review -> he thong moi dang Facebook that.",
-    "- Truong phong khong duoc tu san xuat noi dung, prompt anh, prompt video, caption, hay bai dang hoan chinh cho dau viec nhieu buoc. Truong phong phai giao xuong pho phong de trien khai.",
-    "- Tra loi bang tieng Viet.",
-    "- Bat buoc dung 3 muc: KET_QUA, RUI_RO, DE_XUAT_BUOC_TIEP.",
-    "- Khi step type la compile_post, ket qua phai phan anh trang thai san sang dang, KHONG duoc bao la da publish.",
-    "",
-    "TASK_ENVELOPE_JSON:",
-    JSON.stringify(envelope, null, 2),
-  );
+  lines.push("📌 YÊU CẦU TRẢ LỜI & LUẬT VẬN HÀNH:");
+  lines.push("- Bắt buộc dùng tiếng Việt có dấu, đáp ứng đúng chuyên môn.");
+  lines.push("- Ghi đúng 3 đề mục: KẾT_QUẢ (giải quyết yêu cầu), RỦI_RO (nếu có), ĐỀ_XUẤT_BƯỚC_TIẾP (chỉ đích danh agent nhận việc tiếp theo).");
+
+  if (envelope.type === "propose") {
+    lines.push("- Lên kế hoạch xin ý kiến, tuyệt đối chưa viết bài hay làm media.");
+  }
+  if (envelope.type === "plan_execute" || envelope.type === "plan") {
+    lines.push("- Bóc tách kế hoạch thành việc cho cấp dưới. Phải qua content xong mới gọi media.");
+  }
+  if (envelope.type === "product_research") {
+    lines.push("- Bắt buộc gọi lệnh lấy data chuẩn. Trả ra thông số text & list đường dẫn ảnh gốc.");
+  }
+  if (envelope.type === "content_revise") {
+    lines.push("- Bạn phải sửa nháp content hiện tại ngay theo yêu cầu feedback.");
+  }
+  if (envelope.type === "media_revise") {
+    lines.push("- Bạn phải render lại ảnh/video khác theo yêu cầu sửa.");
+  }
+  if (envelope.to === "nv_media") {
+    lines.push("- Dùng bài content đã chốt và gọi tool render media. Phải gắn ảnh reference nếu có yêu cầu.");
+  }
+  if (envelope.type === "content_review" || envelope.type === "media_review") {
+    lines.push("- Đánh giá đầu ra của cấp dưới. Khen chê công tâm để có cớ cho qua hoặc bắt làm lại.");
+  }
+  if (envelope.type === "compile_post") {
+    lines.push("- Gom gọn content + media lại, kiểm tra thành phẩm bài đăng (Chưa upload FB).");
+  }
+  if (envelope.type === "publish") {
+    lines.push("- Đã được cấp thẻ Publish. Gọi tool đăng Facebook hoặc ghi nhận log.");
+  }
+  if (envelope.deliverToUser) {
+    lines.push("- Hãy dừng lại, đợi Người dùng xác nhận quyết định ở màn hình chat này rồi mới tính tiếp.");
+  }
+
+  if (Array.isArray(envelope.completedSteps) && envelope.completedSteps.length > 0) {
+    lines.push("", "✅ TÓM TẮT TIẾN ĐỘ:");
+    for (const item of envelope.completedSteps) {
+      lines.push(`- Bước ${item.stepIndex}: ${item.from} -> ${item.to} [${item.type}]`);
+      if (item.summary) lines.push(`  ${item.summary}`);
+    }
+  }
 
   return lines.join("\n");
 }

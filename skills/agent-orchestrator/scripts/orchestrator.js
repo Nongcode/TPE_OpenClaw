@@ -20,6 +20,7 @@ function parseArgs(argv) {
     artifactsDir: null,
     disableSimulationArtifacts: false,
     demoSmoothMode: true,
+    file: null,
   };
 
   const positional = [];
@@ -84,6 +85,11 @@ function parseArgs(argv) {
       options.demoSmoothMode = false;
       continue;
     }
+    if (token === "--file") {
+      options.file = argv[index + 1] || null;
+      index += 1;
+      continue;
+    }
     positional.push(token);
   }
 
@@ -93,17 +99,17 @@ function parseArgs(argv) {
 
   if (positional[0] === "auto") {
     options.mode = "auto";
-    options.message = positional.slice(1).join(" ").trim();
+    options.message = options.file ? require("fs").readFileSync(options.file, "utf8").trim() : positional.slice(1).join(" ").trim();
     return options;
   }
   if (positional[0] === "hierarchy") {
     options.mode = "hierarchy";
-    options.message = positional.slice(1).join(" ").trim();
+    options.message = options.file ? require("fs").readFileSync(options.file, "utf8").trim() : positional.slice(1).join(" ").trim();
     return options;
   }
 
   options.target = positional[0] || null;
-  options.message = positional.slice(1).join(" ").trim();
+  options.message = options.file ? require("fs").readFileSync(options.file, "utf8").trim() : positional.slice(1).join(" ").trim();
   return options;
 }
 
