@@ -1,3 +1,3 @@
 display_name: Agent Orchestrator Test
 short_description: Run the pho_phong approval-gated Facebook flow
-default_prompt: Coordinate the separate pho_phong workflow that drafts content, waits for user approval, creates one image, waits for user approval again, and then publishes the Facebook post.
+default_prompt: Coordinate the separate pho_phong workflow that drafts content, waits for user approval, creates one image, waits for user approval again, publishes the Facebook post, and proactively sends short progress updates to the user while each long-running step is still in progress.

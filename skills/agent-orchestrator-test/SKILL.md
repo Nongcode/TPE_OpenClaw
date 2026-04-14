@@ -30,6 +30,13 @@ Workflow hien tai:
 
 - User luon duyet content truoc khi sang media.
 - User luon duyet media truoc khi dang bai.
+- `pho_phong` phai chu dong gui thong bao tien do cho user o moi buoc chay lau:
+  - vua nhan brief va dang giao `nv_content`
+  - da nhan duyet content va dang giao `nv_prompt` / `nv_media`
+  - dang sua content hoac sua media theo feedback
+  - dang cho ket qua render media / dang publish / dang schedule
+- Moi thong bao tien do phai ngan, ro va noi dung dung giai doan dang chay; khong im lang trong luc workflow dang lam viec.
+- Neu tien trinh van chua xong sau lan thong bao dau, `pho_phong` phai gui them thong bao cho user biet la he thong van dang xu ly.
 - Khi `pho_phong` goi entry point orchestrator, phai cho lenh chay xong va lay ket qua cuoi cung roi moi tra loi user.
 - Khong duoc dung o trang thai `Process still running` trong luc dang cho `nv_content`; buoc nay bat buoc phai doi den khi co ban content de trinh duyet.
 - Chi duoc gui thong bao tien do tam thoi khi buoc tao media render lau da duoc xac minh la van dang chay, va khong duoc coi do la ket qua workflow cuoi cung.
@@ -43,6 +50,16 @@ Workflow hien tai:
 - O buoc tao media, neu lenh chay tra ve `Command still running`, `pho_phong` phai tiep tuc `process poll` thay vi dung lai sau lan poll dau.
 - Truoc khi gui thong bao tien do tam thoi, can kiem tra `workspace_phophong/agent-orchestrator-test/current-workflow.json`; neu da sang `awaiting_media_approval` thi phai trinh ngay media cho user duyet.
 - Chi cho phep thong bao tam thoi khi da doi lau ma tien trinh van chua ket thuc; khong dung thong bao tam thoi lam ket qua cuoi cung cua workflow.
+
+## Progress protocol
+
+- Ngay khi bat dau mot buoc co do tre, `pho_phong` phai gui 1 thong bao ngan de user biet dang xu ly.
+- Mau thong bao duoc khuyen nghi:
+  - `Da nhan brief, toi dang giao NV Content len bai cho ban.`
+  - `Da nhan duyet content, toi dang giao NV Prompt va NV Media tao anh.`
+  - `He thong van dang render media, toi se gui anh ngay khi co ket qua.`
+  - `Toi dang day len page / dat lich dang bai, vui long doi them mot chut.`
+- Thong bao tien do chi la thong bao tam thoi; sau do `pho_phong` van phai tiep tuc doi va gui ket qua cuoi cung khi workflow xong.
 
 ## Learning
 

@@ -8,7 +8,7 @@ const DEFAULTS = {
   browser_path: "C:/Program Files/CocCoc/Browser/Application/browser.exe",
   user_data_dir: "C:/Users/Administrator/AppData/Local/CocCoc/Browser/User Data",
   profile_name: "Default",
-  target_gemini_url: "https://gemini.google.com/app/479df8c18606a9f0",
+  target_gemini_url: "https://gemini.google.com/app/1f2fad6cc8341bd5",
   image_paths: [],
   output_dir: "",
   timeout_ms: 120000,
@@ -276,7 +276,9 @@ async function clearPromptEditor(page, locator, logs) {
   await locator.click({ timeout: 3000 });
 
   for (let attempt = 1; attempt <= 3; attempt += 1) {
-    await page.keyboard.press(process.platform === "darwin" ? "Meta+A" : "Control+A").catch(() => undefined);
+    await page.keyboard
+      .press(process.platform === "darwin" ? "Meta+A" : "Control+A")
+      .catch(() => undefined);
     await page.keyboard.press("Backspace").catch(() => undefined);
     await page.keyboard.press("Delete").catch(() => undefined);
 
@@ -287,7 +289,13 @@ async function clearPromptEditor(page, locator, logs) {
         if (typeof el.replaceChildren === "function") {
           el.replaceChildren();
         }
-        el.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "deleteContentBackward", data: null }));
+        el.dispatchEvent(
+          new InputEvent("input", {
+            bubbles: true,
+            inputType: "deleteContentBackward",
+            data: null,
+          }),
+        );
       } else {
         el.value = "";
         el.dispatchEvent(new Event("input", { bubbles: true }));
@@ -593,7 +601,10 @@ async function uploadReferencesSequentially(page, imagePaths, logs) {
 
   const getPreviewCount = async () => {
     for (const selector of previewSignals) {
-      const count = await page.locator(selector).count().catch(() => 0);
+      const count = await page
+        .locator(selector)
+        .count()
+        .catch(() => 0);
       if (count > 0) return count;
     }
     return 0;
@@ -605,11 +616,18 @@ async function uploadReferencesSequentially(page, imagePaths, logs) {
 
     while (Date.now() - startedAt < 15000) {
       const bodyText = normalizePrompt(
-        await page.locator("body").innerText({ timeout: 1000 }).catch(() => ""),
+        await page
+          .locator("body")
+          .innerText({ timeout: 1000 })
+          .catch(() => ""),
       );
       const folded = stripDiacritics(bodyText).toLowerCase();
 
-      if (folded.includes("tep trong") || folded.includes("empty file") || folded.includes("file is empty")) {
+      if (
+        folded.includes("tep trong") ||
+        folded.includes("empty file") ||
+        folded.includes("file is empty")
+      ) {
         throw new Error("UPLOAD_EMPTY_FILE: Gemini reported the uploaded reference file is empty");
       }
 
@@ -618,14 +636,21 @@ async function uploadReferencesSequentially(page, imagePaths, logs) {
         return foldedName && folded.includes(foldedName);
       });
       if (hasReferenceName) {
-        logs.push(`[step3] Gemini acknowledged uploaded reference image by file name: ${path.basename(imagePath)}`);
+        logs.push(
+          `[step3] Gemini acknowledged uploaded reference image by file name: ${path.basename(imagePath)}`,
+        );
         return;
       }
 
       for (const selector of previewSignals) {
-        const count = await page.locator(selector).count().catch(() => 0);
+        const count = await page
+          .locator(selector)
+          .count()
+          .catch(() => 0);
         if (count > previousPreviewCount) {
-          logs.push(`[step3] Gemini showed new attachment preview via ${selector} for ${path.basename(imagePath)}`);
+          logs.push(
+            `[step3] Gemini showed new attachment preview via ${selector} for ${path.basename(imagePath)}`,
+          );
           return;
         }
       }
@@ -633,7 +658,9 @@ async function uploadReferencesSequentially(page, imagePaths, logs) {
       await page.waitForTimeout(500);
     }
 
-    throw new Error(`UPLOAD_NOT_ACKNOWLEDGED: Gemini did not confirm uploaded reference image ${path.basename(imagePath)}`);
+    throw new Error(
+      `UPLOAD_NOT_ACKNOWLEDGED: Gemini did not confirm uploaded reference image ${path.basename(imagePath)}`,
+    );
   };
 
   const uploadViaAnyFileInput = async (label, imagePath, previousPreviewCount) => {
@@ -646,10 +673,14 @@ async function uploadReferencesSequentially(page, imagePaths, logs) {
         if (accept && !accept.includes("image")) continue;
         await input.setInputFiles(imagePath, { timeout: 15000 });
         await waitForSingleUploadAcknowledgement(imagePath, previousPreviewCount);
-        logs.push(`[step3] Uploaded reference image via ${label} file input #${index + 1}: ${path.basename(imagePath)}`);
+        logs.push(
+          `[step3] Uploaded reference image via ${label} file input #${index + 1}: ${path.basename(imagePath)}`,
+        );
         return true;
       } catch (error) {
-        logs.push(`[step3] File input #${index + 1} upload failed via ${label} for ${path.basename(imagePath)}: ${error instanceof Error ? error.message : String(error)}`);
+        logs.push(
+          `[step3] File input #${index + 1} upload failed via ${label} for ${path.basename(imagePath)}: ${error instanceof Error ? error.message : String(error)}`,
+        );
       }
     }
     return false;
@@ -667,10 +698,14 @@ async function uploadReferencesSequentially(page, imagePaths, logs) {
         const chooser = await chooserPromise;
         await chooser.setFiles(imagePath);
         await waitForSingleUploadAcknowledgement(imagePath, previousPreviewCount);
-        logs.push(`[step3] Uploaded reference image via visible file chooser ${selector}: ${path.basename(imagePath)}`);
+        logs.push(
+          `[step3] Uploaded reference image via visible file chooser ${selector}: ${path.basename(imagePath)}`,
+        );
         return;
       } catch (error) {
-        logs.push(`[step3] Visible chooser ${selector} failed for ${path.basename(imagePath)}: ${error instanceof Error ? error.message : String(error)}`);
+        logs.push(
+          `[step3] Visible chooser ${selector} failed for ${path.basename(imagePath)}: ${error instanceof Error ? error.message : String(error)}`,
+        );
       }
     }
 
@@ -694,10 +729,14 @@ async function uploadReferencesSequentially(page, imagePaths, logs) {
         const chooser = await chooserPromise;
         await chooser.setFiles(imagePath);
         await waitForSingleUploadAcknowledgement(imagePath, previousPreviewCount);
-        logs.push(`[step3] Uploaded reference image via file chooser ${selector}: ${path.basename(imagePath)}`);
+        logs.push(
+          `[step3] Uploaded reference image via file chooser ${selector}: ${path.basename(imagePath)}`,
+        );
         return;
       } catch (error) {
-        logs.push(`[step3] Chooser ${selector} failed for ${path.basename(imagePath)}: ${error instanceof Error ? error.message : String(error)}`);
+        logs.push(
+          `[step3] Chooser ${selector} failed for ${path.basename(imagePath)}: ${error instanceof Error ? error.message : String(error)}`,
+        );
       }
     }
 
@@ -705,7 +744,9 @@ async function uploadReferencesSequentially(page, imagePaths, logs) {
       return;
     }
 
-    throw new Error(`Cannot find a working Gemini upload control for reference image ${path.basename(imagePath)}`);
+    throw new Error(
+      `Cannot find a working Gemini upload control for reference image ${path.basename(imagePath)}`,
+    );
   };
 
   for (const imagePath of imagePaths) {
@@ -943,7 +984,9 @@ async function downloadFromSpecificBlock(page, freshTarget, outputDir, logs) {
     ? Math.max(1, Math.min(4, Math.floor(parsed.retry_count)))
     : DEFAULTS.retry_count;
 
-  const artifactsDir = path.resolve(parsed.output_dir || path.join(process.cwd(), "artifacts", "images"));
+  const artifactsDir = path.resolve(
+    parsed.output_dir || path.join(process.cwd(), "artifacts", "images"),
+  );
   await mkdir(artifactsDir, { recursive: true });
 
   logs.push(`[input] target_gemini_url=${targetGeminiUrl}`);
