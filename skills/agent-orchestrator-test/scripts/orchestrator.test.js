@@ -17,6 +17,7 @@ const {
 const intentParser = require("./intent_parser");
 const memory = require("./memory");
 const mediaAgent = require("./media_agent");
+const videoAgent = require("./video_agent");
 const promptAgent = require("./prompt_agent");
 const contentAgent = require("./content_agent");
 const publisherModule = require("./publisher");
@@ -62,7 +63,10 @@ DE_XUAT_BUOC_TIEP:
 - cho user duyet
 `;
   assert.equal(extractField(reply, "PRODUCT_NAME"), "Cau nang 2 tru");
-  assert.equal(extractBlock(reply, "APPROVED_CONTENT_BEGIN", "APPROVED_CONTENT_END"), "Noi dung bai dang");
+  assert.equal(
+    extractBlock(reply, "APPROVED_CONTENT_BEGIN", "APPROVED_CONTENT_END"),
+    "Noi dung bai dang",
+  );
   const parsed = parseContentReply(reply);
   assert.equal(parsed.productUrl, "https://example.test/product");
   assert.equal(parsed.imageDir, "D:\\images");
@@ -146,7 +150,9 @@ test("parseIntentByKeywords: SCHEDULE", () => {
 });
 
 test("parseIntentByKeywords: TRAIN can target nv_prompt", () => {
-  const result = intentParser.parseIntentByKeywords("Nho nhan vien prompt tu gio giu nguyen ket cau san pham");
+  const result = intentParser.parseIntentByKeywords(
+    "Nho nhan vien prompt tu gio giu nguyen ket cau san pham",
+  );
   assert.equal(result.intent, "TRAIN");
   assert.equal(result.target_agent, "nv_prompt");
 });
@@ -163,41 +169,119 @@ test("parseIntentByKeywords: EDIT_MEDIA can target nv_prompt", () => {
   assert.equal(result.target_agent, "nv_prompt");
 });
 
+test("parseIntentByKeywords: EDIT_MEDIA can target media_video", () => {
+  const result = intentParser.parseIntentByKeywords("Sua video, can chan that hon");
+  assert.equal(result.intent, "EDIT_MEDIA");
+  assert.equal(result.target_agent, "media_video");
+});
+
 test("classifyPendingDecision: content approve", () => {
-  assert.equal(intentParser.classifyPendingDecision("Duyet content", "awaiting_content_approval"), "approve");
-  assert.equal(intentParser.classifyPendingDecision("ok bai", "awaiting_content_approval"), "approve");
-  assert.equal(intentParser.classifyPendingDecision("cho lam anh", "awaiting_content_approval"), "approve");
+  assert.equal(
+    intentParser.classifyPendingDecision("Duyet content", "awaiting_content_approval"),
+    "approve",
+  );
+  assert.equal(
+    intentParser.classifyPendingDecision("ok bai", "awaiting_content_approval"),
+    "approve",
+  );
+  assert.equal(
+    intentParser.classifyPendingDecision("cho lam anh", "awaiting_content_approval"),
+    "approve",
+  );
+  assert.equal(
+    intentParser.classifyPendingDecision("Anh duyet nhe", "awaiting_content_approval"),
+    "approve",
+  );
 });
 
 test("classifyPendingDecision: content reject", () => {
-  assert.equal(intentParser.classifyPendingDecision("Sua content, viet lai", "awaiting_content_approval"), "reject");
-  assert.equal(intentParser.classifyPendingDecision("Bai chua dat", "awaiting_content_approval"), "reject");
+  assert.equal(
+    intentParser.classifyPendingDecision("Sua content, viet lai", "awaiting_content_approval"),
+    "reject",
+  );
+  assert.equal(
+    intentParser.classifyPendingDecision("Bai chua dat", "awaiting_content_approval"),
+    "reject",
+  );
 });
 
 test("classifyPendingDecision: media approve", () => {
-  assert.equal(intentParser.classifyPendingDecision("Duyet anh", "awaiting_media_approval"), "approve");
-  assert.equal(intentParser.classifyPendingDecision("dang bai", "awaiting_media_approval"), "approve");
+  assert.equal(
+    intentParser.classifyPendingDecision("Duyet anh", "awaiting_media_approval"),
+    "approve",
+  );
+  assert.equal(
+    intentParser.classifyPendingDecision("dang bai", "awaiting_media_approval"),
+    "approve",
+  );
+  assert.equal(
+    intentParser.classifyPendingDecision("Duyet nhe", "awaiting_media_approval"),
+    "approve",
+  );
 });
 
 test("classifyPendingDecision: media reject", () => {
-  assert.equal(intentParser.classifyPendingDecision("Sua anh, may sai mau", "awaiting_media_approval"), "reject");
-  assert.equal(intentParser.classifyPendingDecision("Prompt chua dat", "awaiting_media_approval"), "reject");
+  assert.equal(
+    intentParser.classifyPendingDecision("Sua anh, may sai mau", "awaiting_media_approval"),
+    "reject",
+  );
+  assert.equal(
+    intentParser.classifyPendingDecision("Prompt chua dat", "awaiting_media_approval"),
+    "reject",
+  );
 });
 
 test("classifyPendingDecision: publish decision", () => {
-  assert.equal(intentParser.classifyPendingDecision("Dang ngay", "awaiting_publish_decision"), "publish_now");
-  assert.equal(intentParser.classifyPendingDecision("Hen gio 20:00", "awaiting_publish_decision"), "schedule");
+  assert.equal(
+    intentParser.classifyPendingDecision("Dang ngay", "awaiting_publish_decision"),
+    "publish_now",
+  );
+  assert.equal(
+    intentParser.classifyPendingDecision("Hen gio 20:00", "awaiting_publish_decision"),
+    "schedule",
+  );
+});
+
+test("classifyPendingDecision: publish stage can trigger optional video flow", () => {
+  assert.equal(
+    intentParser.classifyPendingDecision("Tao video", "awaiting_publish_decision"),
+    "generate_video",
+  );
+  assert.equal(
+    intentParser.classifyPendingDecision("Khong can video", "awaiting_publish_decision"),
+    "skip_video",
+  );
+});
+
+test("classifyPendingDecision: video approval stage works", () => {
+  assert.equal(
+    intentParser.classifyPendingDecision("Duyet video", "awaiting_video_approval"),
+    "approve",
+  );
+  assert.equal(
+    intentParser.classifyPendingDecision("Sua video, can chan that hon", "awaiting_video_approval"),
+    "reject",
+  );
 });
 
 test("classifyPendingDecision: unknown message", () => {
-  assert.equal(intentParser.classifyPendingDecision("Xin chao", "awaiting_content_approval"), "unknown");
+  assert.equal(
+    intentParser.classifyPendingDecision("Xin chao", "awaiting_content_approval"),
+    "unknown",
+  );
 });
 
 test("shouldSupersedePendingWorkflow detects explicit workflow reset", () => {
   const state = { stage: "awaiting_publish_decision" };
-  const intent = intentParser.parseIntentByKeywords("Huy workflow cu do, thuc hien workflow moi cho anh");
+  const intent = intentParser.parseIntentByKeywords(
+    "Huy workflow cu do, thuc hien workflow moi cho anh",
+  );
   assert.equal(
-    shouldSupersedePendingWorkflow("Huy workflow cu do, thuc hien workflow moi cho anh", state, intent),
+    shouldSupersedePendingWorkflow(
+      "Huy workflow cu do, thuc hien workflow moi cho anh",
+      state,
+      intent,
+    ),
     true,
   );
 });
@@ -208,9 +292,24 @@ test("shouldSupersedePendingWorkflow keeps pending approval replies in current w
   assert.equal(shouldSupersedePendingWorkflow("Duyet content, tao anh", state, intent), false);
 });
 
+test("shouldSupersedePendingWorkflow keeps timestamp-prefixed approval replies in current workflow", () => {
+  const state = { stage: "awaiting_content_approval" };
+  const message = "[Tue 2026-04-14 18:56 PDT] Duyệt content, tạo ảnh";
+  const intent = { intent: "CREATE_NEW" };
+  assert.equal(shouldSupersedePendingWorkflow(message, state, intent), false);
+});
+
+test("shouldSupersedePendingWorkflow keeps natural-language content approval in current workflow", () => {
+  const state = { stage: "awaiting_content_approval" };
+  const message = "Duyet noi dung bai vua roi va tao anh theo content da duyet";
+  const intent = intentParser.parseIntentByKeywords(message);
+  assert.equal(shouldSupersedePendingWorkflow(message, state, intent), false);
+});
+
 test("shouldSupersedePendingWorkflow prefers a full new product brief over stale pending approvals", () => {
   const state = { stage: "awaiting_media_approval" };
-  const message = 'triển khai quảng cáo cho sản phẩm "Thiết bị kiểm tra góc đặt bánh xe tự động 4 Robot (màu đỏ)" tạo content kèm ảnh đăng bài lên page cho Anh ngay nhé!';
+  const message =
+    'triển khai quảng cáo cho sản phẩm "Thiết bị kiểm tra góc đặt bánh xe tự động 4 Robot (màu đỏ)" tạo content kèm ảnh đăng bài lên page cho Anh ngay nhé!';
   const intent = intentParser.parseIntentByKeywords(message);
   assert.equal(shouldSupersedePendingWorkflow(message, state, intent), true);
 });
@@ -391,6 +490,34 @@ test("buildMediaGeneratePrompt includes prompt package and references", () => {
   assert.ok(prompt.includes("D:\\images\\product.png"));
   assert.ok(prompt.includes("C:\\logos\\logo.png"));
   assert.ok(prompt.includes("khong phai background-only"));
+  assert.ok(prompt.includes("skills/gemini_generate_image/action.js"));
+});
+
+test("buildVideoGeneratePrompt uses absolute veo action path and required references", () => {
+  const prompt = videoAgent.buildVideoGeneratePrompt({
+    workflowId: "wf_test",
+    stepId: "step_06_video_generate",
+    state: {
+      original_brief: "Test brief",
+      content: {
+        approvedContent: "Noi dung test",
+        productName: "May can chinh",
+        primaryProductImage: "D:\\images\\product.png",
+      },
+      media: {
+        generatedImagePath: "D:\\output\\approved-image.png",
+      },
+    },
+    openClawHome: "/nonexistent",
+    promptPackage: {
+      videoPrompt: "Prompt video final",
+    },
+    logoPaths: ["C:\\logos\\logo.png"],
+  });
+  assert.ok(prompt.includes("skills/generate_veo_video/action.js"));
+  assert.ok(prompt.includes("D:\\images\\product.png"));
+  assert.ok(prompt.includes("C:\\logos\\logo.png"));
+  assert.ok(prompt.includes("Prompt video final"));
 });
 
 test("buildMediaRevisePrompt includes revised prompt package", () => {
@@ -449,7 +576,8 @@ gui nv_prompt
 
 test("parseImageResult rejects placeholder generated image path", () => {
   assert.throws(
-    () => mediaAgent.parseImageResult(`
+    () =>
+      mediaAgent.parseImageResult(`
 WORKFLOW_META
 workflow_id: wf_test
 step_id: step_03_media
@@ -459,6 +587,26 @@ IMAGE_PROMPT_BEGIN
 Prompt anh
 IMAGE_PROMPT_END
 GENERATED_IMAGE_PATH: KHONG_CO_DO_SKILL_TRA_VE_LOI
+USED_PRODUCT_IMAGE: C:\\product.png
+USED_LOGO_PATHS: C:\\logo.png
+`),
+    /thieu duong dan anh that/i,
+  );
+});
+
+test("parseImageResult rejects screenshot fallback generated image path", () => {
+  assert.throws(
+    () =>
+      mediaAgent.parseImageResult(`
+WORKFLOW_META
+workflow_id: wf_test
+step_id: step_03_media
+
+KET_QUA
+IMAGE_PROMPT_BEGIN
+Prompt anh
+IMAGE_PROMPT_END
+GENERATED_IMAGE_PATH: C:\\Users\\Administrator\\.openclaw\\workspace_media\\artifacts\\images\\gemini-image-screenshot-2026-04-14T09-08-28-808Z.png
 USED_PRODUCT_IMAGE: C:\\product.png
 USED_LOGO_PATHS: C:\\logo.png
 `),
@@ -503,16 +651,19 @@ test("loadPromptKnowledgeSection reads prompt knowledge files", () => {
   const workspaceDir = path.join(tmpDir, "workspace_prompt");
   const knowledgeDir = path.join(workspaceDir, "knowledge");
   fs.mkdirSync(knowledgeDir, { recursive: true });
-  fs.writeFileSync(path.join(tmpDir, "openclaw.json"), JSON.stringify({
-    agents: {
-      list: [
-        {
-          id: "nv_prompt",
-          workspace: workspaceDir,
-        },
-      ],
-    },
-  }));
+  fs.writeFileSync(
+    path.join(tmpDir, "openclaw.json"),
+    JSON.stringify({
+      agents: {
+        list: [
+          {
+            id: "nv_prompt",
+            workspace: workspaceDir,
+          },
+        ],
+      },
+    }),
+  );
   fs.writeFileSync(path.join(workspaceDir, "prompt-library.md"), "# Prompt Library\nRule A");
   fs.writeFileSync(path.join(knowledgeDir, "sample.txt"), "Rule B");
 
@@ -602,7 +753,9 @@ test("parseJsonFromOutput handles clean JSON", () => {
 });
 
 test("parseJsonFromOutput extracts JSON from noisy output", () => {
-  const result = publisherModule.parseJsonFromOutput('Some text {"success":true,"data":{}} more text');
+  const result = publisherModule.parseJsonFromOutput(
+    'Some text {"success":true,"data":{}} more text',
+  );
   assert.deepEqual(result, { success: true, data: {} });
 });
 
@@ -635,6 +788,12 @@ test("buildHumanMessage supports media-owned prompt flow", () => {
   assert.ok(msg.includes("NV Prompt"));
 });
 
+test("buildHumanMessage supports video-owned prompt flow", () => {
+  const msg = logger.buildHumanMessage("media_video", "nv_prompt", "prompt_from_video", "video");
+  assert.ok(msg.includes("Media_Video"));
+  assert.ok(msg.includes("NV Prompt"));
+});
+
 test("buildHumanMessage fallback for unknown action", () => {
   const msg = logger.buildHumanMessage("A", "B", "unknown_action", "details");
   assert.ok(msg.includes("A"));
@@ -652,10 +811,11 @@ test("compositeImage3Layers is exported as async function", () => {
 
 test("compositeImage3Layers rejects with invalid background path", async () => {
   await assert.rejects(
-    () => mediaAgent.compositeImage3Layers({
-      backgroundPath: "/nonexistent/bg.png",
-      productImagePath: "/nonexistent/product.png",
-    }),
+    () =>
+      mediaAgent.compositeImage3Layers({
+        backgroundPath: "/nonexistent/bg.png",
+        productImagePath: "/nonexistent/product.png",
+      }),
     /Anh nen khong ton tai|sharp/i,
   );
 });

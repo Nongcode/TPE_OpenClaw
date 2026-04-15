@@ -22,12 +22,13 @@ const {
   loadOpenClawConfig,
 } = require("../../agent-orchestrator/scripts/common");
 const { discoverRegistry } = require("../../agent-orchestrator/scripts/registry");
-const transport = require("../../agent-orchestrator/scripts/transport");
+const transport = require("./transport");
 
 const intentParser = require("./intent_parser");
 const contentAgent = require("./content_agent");
 const promptAgent = require("./prompt_agent");
 const mediaAgent = require("./media_agent");
+const videoAgent = require("./video_agent");
 const publisher = require("./publisher");
 const memory = require("./memory");
 const logger = require("./logger");
@@ -53,14 +54,42 @@ function parseArgs(argv) {
   const positional = [];
   for (let index = 0; index < argv.length; index += 1) {
     const token = argv[index];
-    if (token === "--json") { options.json = true; continue; }
-    if (token === "--from") { options.from = argv[index + 1] || options.from; index += 1; continue; }
-    if (token === "--openclaw-home") { options.openClawHome = argv[index + 1] || null; index += 1; continue; }
-    if (token === "--message-file") { options.messageFile = argv[index + 1] || null; index += 1; continue; }
-    if (token === "--reset") { options.reset = true; continue; }
-    if (token === "--dry-run") { options.dryRun = true; continue; }
-    if (token === "--no-llm-intent") { options.useLLMIntent = false; continue; }
-    if (token === "--timeout-ms") { options.timeoutMs = Number(argv[index + 1] || options.timeoutMs); index += 1; continue; }
+    if (token === "--json") {
+      options.json = true;
+      continue;
+    }
+    if (token === "--from") {
+      options.from = argv[index + 1] || options.from;
+      index += 1;
+      continue;
+    }
+    if (token === "--openclaw-home") {
+      options.openClawHome = argv[index + 1] || null;
+      index += 1;
+      continue;
+    }
+    if (token === "--message-file") {
+      options.messageFile = argv[index + 1] || null;
+      index += 1;
+      continue;
+    }
+    if (token === "--reset") {
+      options.reset = true;
+      continue;
+    }
+    if (token === "--dry-run") {
+      options.dryRun = true;
+      continue;
+    }
+    if (token === "--no-llm-intent") {
+      options.useLLMIntent = false;
+      continue;
+    }
+    if (token === "--timeout-ms") {
+      options.timeoutMs = Number(argv[index + 1] || options.timeoutMs);
+      index += 1;
+      continue;
+    }
     positional.push(token);
   }
 
@@ -70,7 +99,10 @@ function parseArgs(argv) {
 
 function loadMessage(options) {
   if (options.messageFile) {
-    return fs.readFileSync(options.messageFile, "utf8").replace(/^\uFEFF/, "").trim();
+    return fs
+      .readFileSync(options.messageFile, "utf8")
+      .replace(/^\uFEFF/, "")
+      .trim();
   }
   return String(options.message || "").trim();
 }
@@ -112,7 +144,9 @@ function getMediaTimeoutMs(baseTimeoutMs) {
 }
 
 function normalizeMediaPathForDirective(filePath) {
-  return String(filePath || "").trim().replace(/\\/g, "/");
+  return String(filePath || "")
+    .trim()
+    .replace(/\\/g, "/");
 }
 
 function buildMediaDirective(filePath) {
@@ -196,9 +230,7 @@ function validateCommonReply(reply, workflowId, stepId) {
 
   // Soft validation â€” chá»‰ warn náº¿u thiáº¿u token, khÃ´ng crash.
   // Agent LLM cÃ³ thá»ƒ viáº¿t hÆ¡i khÃ¡c (thÃªm dáº¥u, space, format) nhÆ°ng ná»™i dung Ä‘Ãºng.
-  const requiredTokens = [
-    "WORKFLOW_META", "TRANG_THAI", "KET_QUA",
-  ];
+  const requiredTokens = ["WORKFLOW_META", "TRANG_THAI", "KET_QUA"];
   for (const token of requiredTokens) {
     if (!text.includes(token)) {
       logger.log("warn", `âš ï¸ Agent reply thiáº¿u token "${token}" â€” tiáº¿p tá»¥c xá»­ lÃ½.`);
@@ -268,8 +300,14 @@ function looksLikeFreshWorkflowBrief(message, parsedIntent) {
   const hasQuotedProduct = /["â€œâ€].+["â€œâ€]/.test(raw);
   const longEnough = normalized.length >= 40;
   const hasStructuredBrief = raw.includes("\n") || raw.includes(":");
+  const hasStructuredBriefWithStrongSignals = hasStructuredBrief && strongSignalCount >= 1;
 
-  return longEnough && (strongSignalCount >= 2 || (hasQuotedProduct && strongSignalCount >= 1) || hasStructuredBrief);
+  return (
+    longEnough &&
+    (strongSignalCount >= 2 ||
+      (hasQuotedProduct && strongSignalCount >= 1) ||
+      hasStructuredBriefWithStrongSignals)
+  );
 }
 
 function shouldSupersedePendingWorkflow(message, state, parsedIntent) {
@@ -281,13 +319,15 @@ function shouldSupersedePendingWorkflow(message, state, parsedIntent) {
     return true;
   }
 
-  if (looksLikeFreshWorkflowBrief(message, parsedIntent)) {
-    return true;
+  const freshBrief = looksLikeFreshWorkflowBrief(message, parsedIntent);
+  const pendingDecision = intentParser.classifyPendingDecision(message, state.stage);
+
+  if (pendingDecision !== "unknown" && !freshBrief) {
+    return false;
   }
 
-  const pendingDecision = intentParser.classifyPendingDecision(message, state.stage);
-  if (pendingDecision !== "unknown") {
-    return false;
+  if (freshBrief) {
+    return true;
   }
 
   return false;
@@ -314,23 +354,61 @@ function buildPromptPreview(promptPackage) {
   return parts.join("\n");
 }
 
+function mergeUniquePaths(values) {
+  return [...new Set((values || []).map((item) => String(item || "").trim()).filter(Boolean))];
+}
+
+function mergeMediaData(existingMedia, incomingMedia, content = {}) {
+  const merged = {
+    ...(existingMedia || {}),
+    ...(incomingMedia || {}),
+  };
+
+  merged.generatedImagePath =
+    incomingMedia?.generatedImagePath || existingMedia?.generatedImagePath || "";
+  merged.generatedVideoPath =
+    incomingMedia?.generatedVideoPath || existingMedia?.generatedVideoPath || "";
+  merged.imagePrompt = incomingMedia?.imagePrompt || existingMedia?.imagePrompt || "";
+  merged.videoPrompt = incomingMedia?.videoPrompt || existingMedia?.videoPrompt || "";
+  merged.usedProductImage =
+    incomingMedia?.usedProductImage ||
+    existingMedia?.usedProductImage ||
+    content?.primaryProductImage ||
+    "";
+  merged.usedLogoPaths = mergeUniquePaths([
+    ...(existingMedia?.usedLogoPaths || []),
+    ...(incomingMedia?.usedLogoPaths || []),
+  ]);
+
+  if (merged.generatedImagePath && merged.generatedVideoPath) {
+    merged.mediaType = "both";
+  } else if (merged.generatedVideoPath) {
+    merged.mediaType = "video";
+  } else {
+    merged.mediaType = "image";
+  }
+
+  return merged;
+}
+
 function buildMediaApprovalSummary(params) {
   const { media, promptPackage, route } = params;
-  const mediaPaths = collectMediaPaths(media);
-  const previewFile = media?.generatedImagePath || media?.generatedVideoPath || "";
   const promptPreview = buildPromptPreview(promptPackage);
   const referenceText = [
     media?.usedProductImage ? `Anh san pham goc da dung: ${media.usedProductImage}` : "",
     Array.isArray(media?.usedLogoPaths) && media.usedLogoPaths.length > 0
       ? `Logo da dung: ${media.usedLogoPaths.join(" ; ")}`
       : "",
-  ].filter(Boolean).join("\n");
+  ]
+    .filter(Boolean)
+    .join("\n");
 
   return [
     `NV Media da tao xong media (${route.effectiveType}), dang cho Sep duyet.`,
-    mediaPaths.length > 0 ? `Media tao ra: ${mediaPaths.join(" ; ")}` : "",
-    previewFile ? "Anh media vua tao:" : "",
-    buildMediaDirective(previewFile),
+    media?.generatedImagePath ? "Anh media vua tao:" : "",
+    buildMediaDirective(media?.generatedImagePath),
+    media?.generatedVideoPath ? "Video media vua tao:" : "",
+    buildMediaDirective(media?.generatedVideoPath),
     media?.usedProductImage ? "Anh goc san pham de doi chieu:" : "",
     buildMediaDirective(media?.usedProductImage),
     referenceText,
@@ -339,7 +417,65 @@ function buildMediaApprovalSummary(params) {
     "",
     'Duyet va sang buoc tiep: "Duyet anh va dang bai" hoac "Duyet media"',
     'Sua tiep: "Sua anh, <nhan xet>" hoac "Sua prompt, <nhan xet>"',
-  ].filter(Boolean).join("\n");
+  ]
+    .filter(Boolean)
+    .join("\n");
+}
+
+function buildVideoApprovalSummary(params) {
+  const { media, promptPackage } = params;
+  const promptPreview = buildPromptPreview({
+    videoPrompt: promptPackage?.videoPrompt || media?.videoPrompt || "",
+  });
+  const referenceText = [
+    media?.usedProductImage ? `Anh san pham goc da dung: ${media.usedProductImage}` : "",
+    Array.isArray(media?.usedLogoPaths) && media.usedLogoPaths.length > 0
+      ? `Logo da dung: ${media.usedLogoPaths.join(" ; ")}`
+      : "",
+  ]
+    .filter(Boolean)
+    .join("\n");
+
+  return [
+    "Media_Video da tao xong video quang cao, dang cho Sep duyet.",
+    media?.generatedVideoPath ? "Video quang cao vua tao:" : "",
+    buildMediaDirective(media?.generatedVideoPath),
+    media?.generatedImagePath ? "Anh quang cao da duyet de doi chieu:" : "",
+    buildMediaDirective(media?.generatedImagePath),
+    media?.usedProductImage ? "Anh goc san pham de doi chieu:" : "",
+    buildMediaDirective(media?.usedProductImage),
+    referenceText,
+    "",
+    promptPreview,
+    "",
+    'Duyet video: "Duyet video"',
+    'Sua video: "Sua video, <nhan xet>" hoac "Sua prompt video, <nhan xet>"',
+  ]
+    .filter(Boolean)
+    .join("\n");
+}
+
+function buildPublishDecisionSummary(state) {
+  const hasImage = Boolean(state.media?.generatedImagePath);
+  const hasVideo = Boolean(state.media?.generatedVideoPath);
+  const offerVideo = !hasVideo && !state.video_offer_declined;
+
+  return [
+    hasVideo
+      ? "✅ Sep da duyet content, anh va video. Da san sang dang bai."
+      : "✅ Sep da duyet content va anh. Da san sang dang bai.",
+    hasImage ? "Anh se dang:" : "",
+    buildMediaDirective(state.media?.generatedImagePath),
+    hasVideo ? "Video se dang:" : "",
+    buildMediaDirective(state.media?.generatedVideoPath),
+    offerVideo ? "" : "",
+    offerVideo ? "Co muon tao them video quang cao san pham tren roi dang len page khong?" : "",
+    offerVideo ? '👉 Tao video: "Tao video"' : "",
+    '👉 Dang ngay: "Dang ngay" hoac "Publish"',
+    '👉 Hen gio: "Hen gio 20:00 hom nay" hoac "Schedule 2026-04-10T20:00:00+07:00"',
+  ]
+    .filter(Boolean)
+    .join("\n");
 }
 
 function selectLatestArtifactPath(dirPath, extensions, sinceMs, excludePatterns = []) {
@@ -348,7 +484,8 @@ function selectLatestArtifactPath(dirPath, extensions, sinceMs, excludePatterns 
       return "";
     }
 
-    const files = fs.readdirSync(dirPath)
+    const files = fs
+      .readdirSync(dirPath)
       .filter((name) => {
         if (!extensions.includes(path.extname(name).toLowerCase())) {
           return false;
@@ -386,15 +523,19 @@ function selectLatestArtifactAcrossDirs(dirPaths, extensions, sinceMs, excludePa
 }
 
 function scanLatestGeneratedMedia(openClawHome, startedAtIso, overrides = {}) {
-  const workspaceDir = memory.resolveAgentWorkspace("nv_media", openClawHome);
+  const agentId = overrides.agentId || "nv_media";
+  const workspaceDir =
+    overrides.workspaceDir ||
+    memory.resolveAgentWorkspace(agentId, openClawHome) ||
+    path.join(
+      openClawHome,
+      agentId === "media_video" ? "workspace_media_video" : "workspace_media",
+    );
   const sinceMs = startedAtIso ? new Date(startedAtIso).getTime() : 0;
   const repoRoot = path.resolve(overrides.repoRoot || REPO_ROOT);
 
   const imagePath = selectLatestArtifactAcrossDirs(
-    [
-      path.join(workspaceDir, "artifacts", "images"),
-      path.join(repoRoot, "artifacts", "images"),
-    ],
+    [path.join(workspaceDir, "artifacts", "images"), path.join(repoRoot, "artifacts", "images")],
     [".png", ".jpg", ".jpeg", ".webp"],
     sinceMs,
     [/before/i, /screenshot/i, /test_/i],
@@ -418,7 +559,8 @@ function scanLatestGeneratedMedia(openClawHome, startedAtIso, overrides = {}) {
 function isDuplicateContent(historyDir, newContent) {
   try {
     if (!fs.existsSync(historyDir)) return false;
-    const files = fs.readdirSync(historyDir)
+    const files = fs
+      .readdirSync(historyDir)
       .filter((f) => f.endsWith(".json"))
       .sort()
       .reverse()
@@ -450,12 +592,24 @@ function isDuplicateContent(historyDir, newContent) {
 async function startNewWorkflow(context) {
   const workflowId = `wf_test_${randomUUID()}`;
   const stepId = "step_01_content";
-  const intent = context.intent;
+  const requestedMediaType = context.intent?.media_type_requested || "image";
+  const intent = {
+    ...(context.intent || {}),
+    media_type_requested: "image",
+    requested_video_after_publish: requestedMediaType === "video" || requestedMediaType === "both",
+    requested_original_media_type: requestedMediaType,
+  };
 
   logger.logPhase("Táº O BÃ€I Má»šI", `Sáº¿p giao brief: "${context.message.slice(0, 100)}..."`);
   logger.logHandoff(
-    "PhÃ³ phÃ²ng", "NV Content",
-    logger.buildHumanMessage("pho_phong", "nv_content", "content_draft", context.message.slice(0, 80)),
+    "PhÃ³ phÃ²ng",
+    "NV Content",
+    logger.buildHumanMessage(
+      "pho_phong",
+      "nv_content",
+      "content_draft",
+      context.message.slice(0, 80),
+    ),
   );
 
   const prompt = contentAgent.buildContentDraftPrompt({
@@ -479,7 +633,10 @@ async function startNewWorkflow(context) {
 
   // Content dedup check
   if (isDuplicateContent(context.paths.historyDir, content.approvedContent)) {
-    logger.log("info", "âš ï¸ Ná»™i dung nÃ y cÃ³ thá»ƒ trÃ¹ng vá»›i bÃ i Ä‘Ã£ Ä‘Äƒng gáº§n Ä‘Ã¢y.");
+    logger.log(
+      "info",
+      "âš ï¸ Ná»™i dung nÃ y cÃ³ thá»ƒ trÃ¹ng vá»›i bÃ i Ä‘Ã£ Ä‘Äƒng gáº§n Ä‘Ã¢y.",
+    );
   }
 
   const state = saveWorkflow(context.paths, {
@@ -506,15 +663,19 @@ async function startNewWorkflow(context) {
     content.approvedContent,
     "â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”",
     "",
-    "ðŸ‘‰ Sáº¿p muá»‘n duyá»‡t? NÃ³i: \"Duyá»‡t content, táº¡o áº£nh\"",
-    "ðŸ‘‰ Muá»‘n sá»­a? Ghi rÃµ nháº­n xÃ©t, vÃ­ dá»¥: \"Sá»­a content, thÃªm giÃ¡\"",
-  ].filter(Boolean).join("\n");
+    'ðŸ‘‰ Sáº¿p muá»‘n duyá»‡t? NÃ³i: "Duyá»‡t content, táº¡o áº£nh"',
+    'ðŸ‘‰ Muá»‘n sá»­a? Ghi rÃµ nháº­n xÃ©t, vÃ­ dá»¥: "Sá»­a content, thÃªm giÃ¡"',
+  ]
+    .filter(Boolean)
+    .join("\n");
   const summaryWithPreview = [
     summary,
     content.primaryProductImage ? "" : "",
     content.primaryProductImage ? "Anh goc san pham de doi chieu:" : "",
     buildMediaDirective(content.primaryProductImage),
-  ].filter(Boolean).join("\n");
+  ]
+    .filter(Boolean)
+    .join("\n");
 
   logger.logApprovalWait("awaiting_content_approval", content.approvedContent);
 
@@ -536,7 +697,11 @@ async function reviseContent(context, state) {
   logger.logRejected("content", context.message);
 
   // Memory learning: rÃºt quy táº¯c tá»« feedback
-  const feedbackRule = memory.learnFromFeedbackSync("nv_content", context.openClawHome, context.message);
+  const feedbackRule = memory.learnFromFeedbackSync(
+    "nv_content",
+    context.openClawHome,
+    context.message,
+  );
   if (feedbackRule) {
     const latestRule = feedbackRule.rules[feedbackRule.rules.length - 1];
     logger.logLearning("nv_content", latestRule?.text || context.message);
@@ -554,7 +719,10 @@ async function reviseContent(context, state) {
   // Smart retry guard
   const contentRejects = state.reject_history.filter((r) => r.stage === "content").length;
   if (contentRejects > MAX_REJECT_PER_STAGE) {
-    logger.logError("content", `NV Content Ä‘Ã£ bá»‹ tá»« chá»‘i ${contentRejects} láº§n. Cáº§n xem láº¡i brief.`);
+    logger.logError(
+      "content",
+      `NV Content Ä‘Ã£ bá»‹ tá»« chá»‘i ${contentRejects} láº§n. Cáº§n xem láº¡i brief.`,
+    );
     return buildResult({
       workflowId: state.workflow_id,
       stage: "blocked",
@@ -565,8 +733,14 @@ async function reviseContent(context, state) {
   }
 
   logger.logHandoff(
-    "PhÃ³ phÃ²ng", "NV Content",
-    logger.buildHumanMessage("pho_phong", "nv_content", "content_revise", context.message.slice(0, 80)),
+    "PhÃ³ phÃ²ng",
+    "NV Content",
+    logger.buildHumanMessage(
+      "pho_phong",
+      "nv_content",
+      "content_revise",
+      context.message.slice(0, 80),
+    ),
   );
 
   const prompt = contentAgent.buildContentRevisePrompt({
@@ -602,7 +776,7 @@ async function reviseContent(context, state) {
     content.approvedContent,
     "â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”",
     "",
-    "ðŸ‘‰ Duyá»‡t: \"Duyá»‡t content, táº¡o áº£nh\"",
+    'ðŸ‘‰ Duyá»‡t: "Duyá»‡t content, táº¡o áº£nh"',
     "ðŸ‘‰ Sá»­a tiáº¿p: ghi rÃµ nháº­n xÃ©t",
   ].join("\n");
   const summaryWithPreview = [
@@ -610,7 +784,9 @@ async function reviseContent(context, state) {
     content.primaryProductImage ? "" : "",
     content.primaryProductImage ? "Anh goc san pham de doi chieu:" : "",
     buildMediaDirective(content.primaryProductImage),
-  ].filter(Boolean).join("\n");
+  ]
+    .filter(Boolean)
+    .join("\n");
 
   logger.logApprovalWait("awaiting_content_approval", content.approvedContent);
 
@@ -638,7 +814,8 @@ async function generateMedia(context, state) {
 
   logger.logPhase("Táº O MEDIA", `Loáº¡i: ${route.effectiveType}`);
   logger.logHandoff(
-    "PhÃ³ phÃ²ng", "NV Media",
+    "PhÃ³ phÃ²ng",
+    "NV Media",
     logger.buildHumanMessage("pho_phong", "nv_media", "media_generate", ""),
   );
 
@@ -689,7 +866,7 @@ async function generateMedia(context, state) {
             "âŒ Táº¡o áº£nh khÃ´ng thÃ nh cÃ´ng sau 2 láº§n thá»­.",
             `Lá»—i: ${transportErr.message || "Káº¿t ná»‘i tá»›i NV Media bá»‹ ngáº¯t."}`,
             "",
-            "ðŸ‘‰ Thá»­ láº¡i: \"Duyá»‡t content, táº¡o áº£nh\"",
+            'ðŸ‘‰ Thá»­ láº¡i: "Duyá»‡t content, táº¡o áº£nh"',
           ].join("\n"),
           data: { error: transportErr.message },
         });
@@ -717,7 +894,7 @@ async function generateMedia(context, state) {
         "âŒ NV Media Ä‘Ã£ táº¡o áº£nh nhÆ°ng há»‡ thá»‘ng khÃ´ng Ä‘á»c Ä‘Æ°á»£c káº¿t quáº£.",
         `Lá»—i: ${parseErr.message}`,
         "",
-        "ðŸ‘‰ Thá»­ láº¡i: \"Duyá»‡t content, táº¡o áº£nh\"",
+        'ðŸ‘‰ Thá»­ láº¡i: "Duyá»‡t content, táº¡o áº£nh"',
       ].join("\n"),
       data: { error: parseErr.message },
     });
@@ -745,10 +922,7 @@ async function generateMedia(context, state) {
       const compositePath = await mediaAgent.compositeImage3Layers({
         backgroundPath: media.generatedImagePath,
         productImagePath: state.content.primaryProductImage,
-        outputPath: media.generatedImagePath.replace(
-          /(\.[a-z]+)$/i,
-          "_final$1",
-        ),
+        outputPath: media.generatedImagePath.replace(/(\.[a-z]+)$/i, "_final$1"),
       });
       media.generatedImagePath = compositePath;
       media.composited = true;
@@ -777,9 +951,7 @@ async function generateMedia(context, state) {
   });
 
   // Táº¡o file:// link Ä‘á»ƒ phÃ³ phÃ²ng hiá»ƒn thá»‹ áº£nh trong chat
-  const fileLink = finalMediaPath
-    ? `file:///${finalMediaPath.replace(/\\/g, "/")}`
-    : "";
+  const fileLink = finalMediaPath ? `file:///${finalMediaPath.replace(/\\/g, "/")}` : "";
 
   const summary = [
     `ðŸŽ¨ NV Media Ä‘Ã£ táº¡o ${route.effectiveType === "video" ? "video" : "áº£nh"} xong, Ä‘ang chá» Sáº¿p duyá»‡t.`,
@@ -789,9 +961,11 @@ async function generateMedia(context, state) {
     finalMediaPath ? `ðŸ–¼ï¸ Xem áº£nh: ${fileLink}` : "",
     `File: ${finalMediaPath}`,
     "",
-    "ðŸ‘‰ Duyá»‡t vÃ  Ä‘Äƒng bÃ i: \"Duyá»‡t áº£nh vÃ  Ä‘Äƒng bÃ i\"",
-    "ðŸ‘‰ Sá»­a áº£nh: ghi rÃµ nháº­n xÃ©t, vÃ­ dá»¥: \"Sá»­a áº£nh, ná»n chÆ°a Ä‘áº¹p\"",
-  ].filter(Boolean).join("\n");
+    'ðŸ‘‰ Duyá»‡t vÃ  Ä‘Äƒng bÃ i: "Duyá»‡t áº£nh vÃ  Ä‘Äƒng bÃ i"',
+    'ðŸ‘‰ Sá»­a áº£nh: ghi rÃµ nháº­n xÃ©t, vÃ­ dá»¥: "Sá»­a áº£nh, ná»n chÆ°a Ä‘áº¹p"',
+  ]
+    .filter(Boolean)
+    .join("\n");
   const summaryWithPreview = [
     summary,
     finalMediaPath ? "" : "",
@@ -799,7 +973,9 @@ async function generateMedia(context, state) {
     buildMediaDirective(finalMediaPath),
     state.content?.primaryProductImage ? "Anh goc san pham de doi chieu:" : "",
     buildMediaDirective(state.content?.primaryProductImage),
-  ].filter(Boolean).join("\n");
+  ]
+    .filter(Boolean)
+    .join("\n");
 
   logger.logApprovalWait("awaiting_media_approval", `File: ${finalMediaPath}`);
 
@@ -808,7 +984,11 @@ async function generateMedia(context, state) {
     stage: nextState.stage,
     summary: summaryWithPreview,
     humanMessage: summaryWithPreview,
-    data: { media, approved_content: state.content.approvedContent, next_expected_action: "media_approval" },
+    data: {
+      media,
+      approved_content: state.content.approvedContent,
+      next_expected_action: "media_approval",
+    },
   });
 }
 
@@ -822,7 +1002,11 @@ async function reviseMedia(context, state) {
   logger.logRejected("media", context.message);
 
   // Memory learning
-  const feedbackRule = memory.learnFromFeedbackSync("nv_media", context.openClawHome, context.message);
+  const feedbackRule = memory.learnFromFeedbackSync(
+    "nv_media",
+    context.openClawHome,
+    context.message,
+  );
   if (feedbackRule) {
     const latestRule = feedbackRule.rules[feedbackRule.rules.length - 1];
     logger.logLearning("nv_media", latestRule?.text || context.message);
@@ -850,7 +1034,8 @@ async function reviseMedia(context, state) {
   }
 
   logger.logHandoff(
-    "PhÃ³ phÃ²ng", "NV Media",
+    "PhÃ³ phÃ²ng",
+    "NV Media",
     logger.buildHumanMessage("pho_phong", "nv_media", "media_revise", context.message.slice(0, 80)),
   );
 
@@ -938,20 +1123,13 @@ async function reviseMedia(context, state) {
 
   // â”€â”€â”€ PIPELINE GHÃ‰P 3 Lá»šP (giá»‘ng generateMedia) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   let finalMediaPath = media.generatedImagePath || media.generatedVideoPath || "";
-  if (
-    mediaType === "image" &&
-    media.generatedImagePath &&
-    state.content?.primaryProductImage
-  ) {
+  if (mediaType === "image" && media.generatedImagePath && state.content?.primaryProductImage) {
     try {
       logger.log("media", "ðŸ”§ Äang ghÃ©p láº¡i 3 lá»›p vá»›i ná»n má»›i...");
       const compositePath = await mediaAgent.compositeImage3Layers({
         backgroundPath: media.generatedImagePath,
         productImagePath: state.content.primaryProductImage,
-        outputPath: media.generatedImagePath.replace(
-          /(\.[a-z]+)$/i,
-          "_final$1",
-        ),
+        outputPath: media.generatedImagePath.replace(/(\.[a-z]+)$/i, "_final$1"),
       });
       media.generatedImagePath = compositePath;
       media.composited = true;
@@ -981,9 +1159,7 @@ async function reviseMedia(context, state) {
   });
 
   // Táº¡o file:// link Ä‘á»ƒ phÃ³ phÃ²ng hiá»ƒn thá»‹ áº£nh trong chat
-  const fileLink = finalMediaPath
-    ? `file:///${finalMediaPath.replace(/\\/g, "/")}`
-    : "";
+  const fileLink = finalMediaPath ? `file:///${finalMediaPath.replace(/\\/g, "/")}` : "";
 
   const summary = [
     "ðŸŽ¨ NV Media Ä‘Ã£ sá»­a láº¡i theo nháº­n xÃ©t, Ä‘ang chá» Sáº¿p duyá»‡t.",
@@ -992,9 +1168,11 @@ async function reviseMedia(context, state) {
     finalMediaPath ? `ðŸ–¼ï¸ Xem áº£nh: ${fileLink}` : "",
     `File má»›i: ${finalMediaPath}`,
     "",
-    "ðŸ‘‰ Duyá»‡t: \"Duyá»‡t áº£nh vÃ  Ä‘Äƒng bÃ i\"",
+    'ðŸ‘‰ Duyá»‡t: "Duyá»‡t áº£nh vÃ  Ä‘Äƒng bÃ i"',
     "ðŸ‘‰ Sá»­a tiáº¿p: ghi rÃµ nháº­n xÃ©t",
-  ].filter(Boolean).join("\n");
+  ]
+    .filter(Boolean)
+    .join("\n");
   const summaryWithPreview = [
     summary,
     finalMediaPath ? "" : "",
@@ -1002,7 +1180,9 @@ async function reviseMedia(context, state) {
     buildMediaDirective(finalMediaPath),
     state.content?.primaryProductImage ? "Anh goc san pham de doi chieu:" : "",
     buildMediaDirective(state.content?.primaryProductImage),
-  ].filter(Boolean).join("\n");
+  ]
+    .filter(Boolean)
+    .join("\n");
 
   return buildResult({
     workflowId: state.workflow_id,
@@ -1026,7 +1206,8 @@ async function generateMediaFlow(context, state) {
 
   logger.logPhase("TAO MEDIA", `Loai: ${route.effectiveType}`);
   logger.logHandoff(
-    "Pho phong", "NV Media",
+    "Pho phong",
+    "NV Media",
     logger.buildHumanMessage("pho_phong", "nv_media", "media_prepare_prompt", route.effectiveType),
   );
 
@@ -1071,7 +1252,8 @@ async function generateMediaFlow(context, state) {
   }
 
   logger.logHandoff(
-    "NV Media", "NV Prompt",
+    "NV Media",
+    "NV Prompt",
     logger.buildHumanMessage("nv_media", "nv_prompt", "prompt_from_media", route.effectiveType),
   );
 
@@ -1128,7 +1310,8 @@ async function generateMediaFlow(context, state) {
   }
 
   logger.logHandoff(
-    "NV Prompt", "NV Media",
+    "NV Prompt",
+    "NV Media",
     logger.buildHumanMessage("nv_prompt", "nv_media", "prompt_back_to_media", route.effectiveType),
   );
 
@@ -1144,7 +1327,8 @@ async function generateMediaFlow(context, state) {
   });
 
   logger.logHandoff(
-    "NV Prompt", "NV Media",
+    "NV Prompt",
+    "NV Media",
     logger.buildHumanMessage("pho_phong", "nv_media", "media_generate", route.effectiveType),
   );
 
@@ -1266,13 +1450,21 @@ async function reviseMediaFlow(context, state) {
 
   logger.logRejected("media", context.message);
 
-  const feedbackRule = memory.learnFromFeedbackSync("nv_media", context.openClawHome, context.message);
+  const feedbackRule = memory.learnFromFeedbackSync(
+    "nv_media",
+    context.openClawHome,
+    context.message,
+  );
   if (feedbackRule) {
     const latestRule = feedbackRule.rules[feedbackRule.rules.length - 1];
     logger.logLearning("nv_media", latestRule?.text || context.message);
   }
   if (promptFocused) {
-    const promptRule = memory.learnFromFeedbackSync("nv_prompt", context.openClawHome, context.message);
+    const promptRule = memory.learnFromFeedbackSync(
+      "nv_prompt",
+      context.openClawHome,
+      context.message,
+    );
     if (promptRule) {
       const latestPromptRule = promptRule.rules[promptRule.rules.length - 1];
       logger.logLearning("nv_prompt", latestPromptRule?.text || context.message);
@@ -1308,8 +1500,14 @@ async function reviseMediaFlow(context, state) {
   }
 
   logger.logHandoff(
-    "Pho phong", "NV Media",
-    logger.buildHumanMessage("pho_phong", "nv_media", "media_prepare_revise", context.message.slice(0, 80)),
+    "Pho phong",
+    "NV Media",
+    logger.buildHumanMessage(
+      "pho_phong",
+      "nv_media",
+      "media_prepare_revise",
+      context.message.slice(0, 80),
+    ),
   );
 
   let mediaRequestBrief;
@@ -1354,7 +1552,8 @@ async function reviseMediaFlow(context, state) {
   }
 
   logger.logHandoff(
-    "NV Media", "NV Prompt",
+    "NV Media",
+    "NV Prompt",
     logger.buildHumanMessage("nv_media", "nv_prompt", "prompt_from_media", route.effectiveType),
   );
 
@@ -1413,7 +1612,8 @@ async function reviseMediaFlow(context, state) {
   }
 
   logger.logHandoff(
-    "NV Prompt", "NV Media",
+    "NV Prompt",
+    "NV Media",
     logger.buildHumanMessage("nv_prompt", "nv_media", "prompt_back_to_media", route.effectiveType),
   );
 
@@ -1430,7 +1630,8 @@ async function reviseMediaFlow(context, state) {
   });
 
   logger.logHandoff(
-    "NV Prompt", "NV Media",
+    "NV Prompt",
+    "NV Media",
     logger.buildHumanMessage("pho_phong", "nv_media", "media_revise", context.message.slice(0, 80)),
   );
 
@@ -1531,20 +1732,530 @@ async function reviseMediaFlow(context, state) {
   });
 }
 
+async function generateVideoFlow(context, state) {
+  if (!context.registry.byId.media_video) {
+    return buildResult({
+      workflowId: state.workflow_id,
+      stage: state.stage,
+      status: "error",
+      summary: [
+        "Chua tim thay agent media_video trong runtime registry.",
+        "Can them agent media_video vao openclaw config roi chay lai.",
+      ].join("\n"),
+    });
+  }
+
+  const videoRequestStepId = "step_04_video_prepare";
+  const promptStepId = "step_05_video_prompt";
+  const videoStepId = "step_06_video_generate";
+  const logoPaths = mediaAgent.resolveLogoAssetPaths(context.openClawHome);
+
+  logger.logPhase("TAO VIDEO", "Phat sinh them video quang cao theo yeu cau cua Sep");
+  logger.logHandoff(
+    "Pho phong",
+    "Media_Video",
+    logger.buildHumanMessage("pho_phong", "media_video", "video_prepare_prompt", "video"),
+  );
+
+  let videoRequestBrief;
+  try {
+    const videoPrepareReply = await runAgentStep({
+      agentId: "media_video",
+      sessionKey: context.registry.byId.media_video.transport.sessionKey,
+      openClawHome: context.openClawHome,
+      workflowId: state.workflow_id,
+      stepId: videoRequestStepId,
+      timeoutMs: context.options.timeoutMs,
+      prompt: videoAgent.buildVideoPromptRequestPrompt({
+        workflowId: state.workflow_id,
+        stepId: videoRequestStepId,
+        state,
+        openClawHome: context.openClawHome,
+        logoPaths,
+      }),
+    });
+    videoRequestBrief = videoAgent.parseVideoPromptRequest(videoPrepareReply).request;
+  } catch (videoPrepareErr) {
+    logger.logError("video_prepare_prompt", videoPrepareErr);
+    saveWorkflow(context.paths, {
+      ...state,
+      stage: "awaiting_publish_decision",
+      last_error: `video_prepare_prompt error: ${videoPrepareErr.message || videoPrepareErr}`,
+    });
+    return buildResult({
+      workflowId: state.workflow_id,
+      stage: "awaiting_publish_decision",
+      status: "error",
+      summary: [
+        "Media_Video chua tong hop duoc brief de gui NV Prompt.",
+        `Loi: ${videoPrepareErr.message || videoPrepareErr}`,
+        "",
+        'Thu lai: "Tao video"',
+      ].join("\n"),
+      data: { error: videoPrepareErr.message || String(videoPrepareErr) },
+    });
+  }
+
+  logger.logHandoff(
+    "Media_Video",
+    "NV Prompt",
+    logger.buildHumanMessage("media_video", "nv_prompt", "prompt_from_video", "video"),
+  );
+
+  let promptPackage;
+  let promptVersion;
+  try {
+    const promptReply = await runAgentStep({
+      agentId: "nv_prompt",
+      sessionKey: context.registry.byId.nv_prompt.transport.sessionKey,
+      openClawHome: context.openClawHome,
+      workflowId: state.workflow_id,
+      stepId: promptStepId,
+      timeoutMs: context.options.timeoutMs,
+      prompt: promptAgent.buildPromptDraftPrompt({
+        workflowId: state.workflow_id,
+        stepId: promptStepId,
+        state,
+        mediaType: "video",
+        openClawHome: context.openClawHome,
+        logoPaths,
+        mediaRequestBrief: videoRequestBrief,
+      }),
+    });
+    promptPackage = promptAgent.parsePromptResult(promptReply, "video");
+    promptVersion = promptAgent.trackPromptVersion(context.paths.baseDir, state.workflow_id, {
+      type: "video",
+      mode: "draft",
+      imagePrompt: state.prompt_package?.imagePrompt || state.media?.imagePrompt || "",
+      videoPrompt: promptPackage.videoPrompt || "",
+      promptDecision: "video",
+      product_image: state.content?.primaryProductImage || "",
+      logo_paths: logoPaths,
+      media_request_brief: videoRequestBrief,
+    });
+  } catch (promptErr) {
+    logger.logError("video_prompt_draft", promptErr);
+    saveWorkflow(context.paths, {
+      ...state,
+      stage: "awaiting_publish_decision",
+      last_error: `video_prompt_draft error: ${promptErr.message || promptErr}`,
+    });
+    return buildResult({
+      workflowId: state.workflow_id,
+      stage: "awaiting_publish_decision",
+      status: "error",
+      summary: [
+        "Khong the tao video prompt tu NV Prompt.",
+        `Loi: ${promptErr.message || promptErr}`,
+        "",
+        'Thu lai: "Tao video"',
+      ].join("\n"),
+      data: { error: promptErr.message || String(promptErr) },
+    });
+  }
+
+  logger.logHandoff(
+    "NV Prompt",
+    "Media_Video",
+    logger.buildHumanMessage("nv_prompt", "media_video", "prompt_back_to_video", "video"),
+  );
+
+  const mergedPromptPackage = {
+    ...(state.prompt_package || {}),
+    imagePrompt: state.prompt_package?.imagePrompt || state.media?.imagePrompt || "",
+    videoPrompt: promptPackage.videoPrompt || "",
+    promptDecision: state.media?.generatedImagePath ? "both" : "video",
+  };
+
+  const generatingState = saveWorkflow(context.paths, {
+    ...state,
+    stage: "generating_video",
+    video_generating_started_at: nowIso(),
+    video_request_brief: videoRequestBrief,
+    video_generating_logo_paths: logoPaths,
+    prompt_package: mergedPromptPackage,
+    prompt_versions: [...(state.prompt_versions || []), promptVersion],
+    video_offer_declined: false,
+  });
+
+  logger.logHandoff(
+    "Pho phong",
+    "Media_Video",
+    logger.buildHumanMessage("pho_phong", "media_video", "video_generate", "video"),
+  );
+
+  let videoReply;
+  try {
+    videoReply = await runAgentStep({
+      agentId: "media_video",
+      sessionKey: context.registry.byId.media_video.transport.sessionKey,
+      openClawHome: context.openClawHome,
+      workflowId: state.workflow_id,
+      stepId: videoStepId,
+      timeoutMs: getMediaTimeoutMs(context.options.timeoutMs),
+      prompt: videoAgent.buildVideoGeneratePrompt({
+        workflowId: state.workflow_id,
+        stepId: videoStepId,
+        state: generatingState,
+        openClawHome: context.openClawHome,
+        promptPackage: mergedPromptPackage,
+        logoPaths,
+      }),
+    });
+  } catch (videoErr) {
+    logger.logError("video_generate", videoErr);
+    saveWorkflow(context.paths, {
+      ...generatingState,
+      stage: "awaiting_publish_decision",
+      last_error: `video_generate error: ${videoErr.message || videoErr}`,
+    });
+    return buildResult({
+      workflowId: state.workflow_id,
+      stage: "awaiting_publish_decision",
+      status: "error",
+      summary: [
+        "Khong the tao video quang cao.",
+        `Loi: ${videoErr.message || videoErr}`,
+        "",
+        'Thu lai: "Tao video"',
+      ].join("\n"),
+      data: { error: videoErr.message || String(videoErr) },
+    });
+  }
+
+  let videoMedia;
+  try {
+    videoMedia = videoAgent.parseVideoResult(videoReply);
+  } catch (parseErr) {
+    logger.logError("parse_video", parseErr);
+    saveWorkflow(context.paths, {
+      ...generatingState,
+      stage: "awaiting_publish_decision",
+      last_error: `parse_video error: ${parseErr.message || parseErr}`,
+    });
+    return buildResult({
+      workflowId: state.workflow_id,
+      stage: "awaiting_publish_decision",
+      status: "error",
+      summary: [
+        "Media_Video da tao video nhung he thong khong doc duoc ket qua.",
+        `Loi: ${parseErr.message || parseErr}`,
+        "",
+        'Thu lai: "Tao video"',
+      ].join("\n"),
+      data: { error: parseErr.message || String(parseErr) },
+    });
+  }
+
+  const mergedMedia = mergeMediaData(state.media, videoMedia, state.content);
+  const nextState = saveWorkflow(context.paths, {
+    ...generatingState,
+    stage: "awaiting_video_approval",
+    video_generating_started_at: null,
+    media: mergedMedia,
+    prompt_package: mergedPromptPackage,
+  });
+
+  const summary = buildVideoApprovalSummary({
+    media: mergedMedia,
+    promptPackage: mergedPromptPackage,
+  });
+
+  logger.logApprovalWait("awaiting_video_approval", summary);
+
+  return buildResult({
+    workflowId: state.workflow_id,
+    stage: nextState.stage,
+    summary,
+    humanMessage: summary,
+    data: {
+      media: mergedMedia,
+      prompt_package: mergedPromptPackage,
+      next_expected_action: "video_approval",
+    },
+  });
+}
+
+async function reviseVideoFlow(context, state) {
+  if (!context.registry.byId.media_video) {
+    return buildResult({
+      workflowId: state.workflow_id,
+      stage: state.stage,
+      status: "error",
+      summary: "Chua tim thay agent media_video trong runtime registry.",
+    });
+  }
+
+  const videoRequestStepId = "step_06a_video_prepare_revise";
+  const promptStepId = "step_06b_video_prompt_revise";
+  const videoStepId = "step_06c_video_revise";
+  const logoPaths = mediaAgent.resolveLogoAssetPaths(context.openClawHome);
+  const promptFocused = isPromptFocusedFeedback(context.message);
+
+  logger.logRejected("video", context.message);
+
+  const videoRule = memory.learnFromFeedbackSync(
+    "media_video",
+    context.openClawHome,
+    context.message,
+  );
+  if (videoRule) {
+    const latestRule = videoRule.rules[videoRule.rules.length - 1];
+    logger.logLearning("media_video", latestRule?.text || context.message);
+  }
+  if (promptFocused) {
+    const promptRule = memory.learnFromFeedbackSync(
+      "nv_prompt",
+      context.openClawHome,
+      context.message,
+    );
+    if (promptRule) {
+      const latestPromptRule = promptRule.rules[promptRule.rules.length - 1];
+      logger.logLearning("nv_prompt", latestPromptRule?.text || context.message);
+    }
+  }
+
+  state.reject_history = state.reject_history || [];
+  state.reject_history.push({
+    stage: "video",
+    agent: "media_video",
+    feedback: context.message,
+    timestamp: nowIso(),
+  });
+
+  logger.logHandoff(
+    "Pho phong",
+    "Media_Video",
+    logger.buildHumanMessage(
+      "pho_phong",
+      "media_video",
+      "video_prepare_revise",
+      context.message.slice(0, 80),
+    ),
+  );
+
+  let videoRequestBrief;
+  try {
+    const videoPrepareReply = await runAgentStep({
+      agentId: "media_video",
+      sessionKey: context.registry.byId.media_video.transport.sessionKey,
+      openClawHome: context.openClawHome,
+      workflowId: state.workflow_id,
+      stepId: videoRequestStepId,
+      timeoutMs: context.options.timeoutMs,
+      prompt: videoAgent.buildVideoPromptReviseRequestPrompt({
+        workflowId: state.workflow_id,
+        stepId: videoRequestStepId,
+        state,
+        feedback: context.message,
+        openClawHome: context.openClawHome,
+        logoPaths,
+      }),
+    });
+    videoRequestBrief = videoAgent.parseVideoPromptRequest(videoPrepareReply).request;
+  } catch (videoPrepareErr) {
+    logger.logError("video_prepare_revise", videoPrepareErr);
+    saveWorkflow(context.paths, {
+      ...state,
+      stage: "awaiting_video_approval",
+      last_error: `video_prepare_revise error: ${videoPrepareErr.message || videoPrepareErr}`,
+    });
+    return buildResult({
+      workflowId: state.workflow_id,
+      stage: "awaiting_video_approval",
+      status: "error",
+      summary: [
+        "Media_Video chua tong hop duoc yeu cau prompt moi.",
+        `Loi: ${videoPrepareErr.message || videoPrepareErr}`,
+      ].join("\n"),
+      data: { error: videoPrepareErr.message || String(videoPrepareErr) },
+    });
+  }
+
+  logger.logHandoff(
+    "Media_Video",
+    "NV Prompt",
+    logger.buildHumanMessage("media_video", "nv_prompt", "prompt_from_video", "video"),
+  );
+
+  let promptPackage;
+  let promptVersion;
+  try {
+    const promptReply = await runAgentStep({
+      agentId: "nv_prompt",
+      sessionKey: context.registry.byId.nv_prompt.transport.sessionKey,
+      openClawHome: context.openClawHome,
+      workflowId: state.workflow_id,
+      stepId: promptStepId,
+      timeoutMs: context.options.timeoutMs,
+      prompt: promptAgent.buildPromptRevisePrompt({
+        workflowId: state.workflow_id,
+        stepId: promptStepId,
+        state,
+        mediaType: "video",
+        feedback: context.message,
+        openClawHome: context.openClawHome,
+        logoPaths,
+        mediaRequestBrief: videoRequestBrief,
+      }),
+    });
+    promptPackage = promptAgent.parsePromptResult(promptReply, "video");
+    promptVersion = promptAgent.trackPromptVersion(context.paths.baseDir, state.workflow_id, {
+      type: "video",
+      mode: "revise",
+      imagePrompt: state.prompt_package?.imagePrompt || state.media?.imagePrompt || "",
+      videoPrompt: promptPackage.videoPrompt || "",
+      promptDecision: state.media?.generatedImagePath ? "both" : "video",
+      product_image: state.content?.primaryProductImage || "",
+      logo_paths: logoPaths,
+      feedback: context.message,
+      media_request_brief: videoRequestBrief,
+    });
+  } catch (promptErr) {
+    logger.logError("video_prompt_revise", promptErr);
+    saveWorkflow(context.paths, {
+      ...state,
+      stage: "awaiting_video_approval",
+      last_error: `video_prompt_revise error: ${promptErr.message || promptErr}`,
+    });
+    return buildResult({
+      workflowId: state.workflow_id,
+      stage: "awaiting_video_approval",
+      status: "error",
+      summary: ["Khong the sua video prompt.", `Loi: ${promptErr.message || promptErr}`].join("\n"),
+      data: { error: promptErr.message || String(promptErr) },
+    });
+  }
+
+  logger.logHandoff(
+    "NV Prompt",
+    "Media_Video",
+    logger.buildHumanMessage("nv_prompt", "media_video", "prompt_back_to_video", "video"),
+  );
+
+  const mergedPromptPackage = {
+    ...(state.prompt_package || {}),
+    imagePrompt: state.prompt_package?.imagePrompt || state.media?.imagePrompt || "",
+    videoPrompt: promptPackage.videoPrompt || "",
+    promptDecision: state.media?.generatedImagePath ? "both" : "video",
+  };
+
+  const revisingState = saveWorkflow(context.paths, {
+    ...state,
+    stage: "revising_video",
+    video_revising_started_at: nowIso(),
+    video_revising_logo_paths: logoPaths,
+    video_request_brief: videoRequestBrief,
+    prompt_package: mergedPromptPackage,
+    prompt_versions: [...(state.prompt_versions || []), promptVersion],
+  });
+
+  logger.logHandoff(
+    "Pho phong",
+    "Media_Video",
+    logger.buildHumanMessage(
+      "pho_phong",
+      "media_video",
+      "video_revise",
+      context.message.slice(0, 80),
+    ),
+  );
+
+  let videoReply;
+  try {
+    videoReply = await runAgentStep({
+      agentId: "media_video",
+      sessionKey: context.registry.byId.media_video.transport.sessionKey,
+      openClawHome: context.openClawHome,
+      workflowId: state.workflow_id,
+      stepId: videoStepId,
+      timeoutMs: getMediaTimeoutMs(context.options.timeoutMs),
+      prompt: videoAgent.buildVideoRevisePrompt({
+        workflowId: state.workflow_id,
+        stepId: videoStepId,
+        state: revisingState,
+        feedback: context.message,
+        openClawHome: context.openClawHome,
+        promptPackage: mergedPromptPackage,
+        logoPaths,
+      }),
+    });
+  } catch (videoErr) {
+    logger.logError("video_revise", videoErr);
+    saveWorkflow(context.paths, {
+      ...revisingState,
+      stage: "awaiting_video_approval",
+      last_error: `video_revise error: ${videoErr.message || videoErr}`,
+    });
+    return buildResult({
+      workflowId: state.workflow_id,
+      stage: "awaiting_video_approval",
+      status: "error",
+      summary: ["Khong the sua video quang cao.", `Loi: ${videoErr.message || videoErr}`].join(
+        "\n",
+      ),
+      data: { error: videoErr.message || String(videoErr) },
+    });
+  }
+
+  let videoMedia;
+  try {
+    videoMedia = videoAgent.parseVideoResult(videoReply);
+  } catch (parseErr) {
+    logger.logError("parse_video_revise", parseErr);
+    saveWorkflow(context.paths, {
+      ...revisingState,
+      stage: "awaiting_video_approval",
+      last_error: `parse_video_revise error: ${parseErr.message || parseErr}`,
+    });
+    return buildResult({
+      workflowId: state.workflow_id,
+      stage: "awaiting_video_approval",
+      status: "error",
+      summary: [
+        "Media_Video da tao video moi nhung he thong khong doc duoc ket qua.",
+        `Loi: ${parseErr.message || parseErr}`,
+      ].join("\n"),
+      data: { error: parseErr.message || String(parseErr) },
+    });
+  }
+
+  const mergedMedia = mergeMediaData(state.media, videoMedia, state.content);
+  const nextState = saveWorkflow(context.paths, {
+    ...revisingState,
+    stage: "awaiting_video_approval",
+    video_revising_started_at: null,
+    media: mergedMedia,
+    prompt_package: mergedPromptPackage,
+  });
+
+  const summary = buildVideoApprovalSummary({
+    media: mergedMedia,
+    promptPackage: mergedPromptPackage,
+  });
+
+  return buildResult({
+    workflowId: state.workflow_id,
+    stage: nextState.stage,
+    summary,
+    humanMessage: summary,
+    data: {
+      media: mergedMedia,
+      prompt_package: mergedPromptPackage,
+      next_expected_action: "video_approval",
+    },
+  });
+}
+
 function askPublishDecision(context, state) {
   const nextState = saveWorkflow(context.paths, {
     ...state,
     stage: "awaiting_publish_decision",
   });
 
-  const summary = [
-    "âœ… Sáº¿p Ä‘Ã£ duyá»‡t cáº£ content vÃ  media!",
-    "",
-    "ðŸ‘‰ ÄÄƒng ngay: \"ÄÄƒng ngay\" hoáº·c \"Publish\"",
-    "ðŸ‘‰ Háº¹n giá»: \"Háº¹n giá» 20:00 hÃ´m nay\" hoáº·c \"Schedule 2026-04-10T20:00:00+07:00\"",
-  ].join("\n");
+  const summary = buildPublishDecisionSummary(nextState);
 
-  logger.logApprovalWait("awaiting_publish_decision", "Sáº¿p chá»n ÄÄƒng ngay hay Háº¹n giá»?");
+  logger.logApprovalWait("awaiting_publish_decision", summary);
 
   return buildResult({
     workflowId: state.workflow_id,
@@ -1587,7 +2298,9 @@ function publishNowAction(context, state) {
     "ðŸ“¤ BÃ i viáº¿t Ä‘Ã£ Ä‘Æ°á»£c Ä‘Äƒng thÃ nh cÃ´ng lÃªn Fanpage!",
     postId ? `Post ID: ${postId}` : "",
     `Media: ${mediaPaths.join(", ") || "khÃ´ng cÃ³"}`,
-  ].filter(Boolean).join("\n");
+  ]
+    .filter(Boolean)
+    .join("\n");
 
   return buildResult({
     workflowId: state.workflow_id,
@@ -1633,7 +2346,9 @@ function schedulePostAction(context, state) {
     "ðŸ“… BÃ i viáº¿t Ä‘Ã£ Ä‘Æ°á»£c háº¹n giá» Ä‘Äƒng thÃ nh cÃ´ng!",
     `Thá»i gian: ${scheduleTime}`,
     postId ? `Post ID: ${postId}` : "",
-  ].filter(Boolean).join("\n");
+  ]
+    .filter(Boolean)
+    .join("\n");
 
   return buildResult({
     workflowId: state.workflow_id,
@@ -1655,13 +2370,15 @@ async function editPublishedFlow(context) {
   if (!postId) {
     return buildResult({
       status: "blocked",
-      summary: "âš ï¸ Cáº§n cung cáº¥p Post ID cá»§a bÃ i viáº¿t muá»‘n sá»­a. VÃ­ dá»¥: \"Sá»­a bÃ i Ä‘Ã£ Ä‘Äƒng, post ID: 643048852218433_123456\"",
+      summary:
+        'âš ï¸ Cáº§n cung cáº¥p Post ID cá»§a bÃ i viáº¿t muá»‘n sá»­a. VÃ­ dá»¥: "Sá»­a bÃ i Ä‘Ã£ Ä‘Äƒng, post ID: 643048852218433_123456"',
     });
   }
 
   logger.logPhase("Sá»¬A BÃ€I ÄÃƒ ÄÄ‚NG", `Post ID: ${postId}`);
   logger.logHandoff(
-    "PhÃ³ phÃ²ng", "NV Content",
+    "PhÃ³ phÃ²ng",
+    "NV Content",
     logger.buildHumanMessage("pho_phong", "nv_content", "edit_post", context.message.slice(0, 80)),
   );
 
@@ -1708,7 +2425,7 @@ async function editPublishedFlow(context) {
     content.approvedContent,
     "â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”",
     "",
-    "ðŸ‘‰ Duyá»‡t: \"Duyá»‡t content\" â€” ná»™i dung sáº½ Ä‘Æ°á»£c cáº­p nháº­t lÃªn Facebook",
+    'ðŸ‘‰ Duyá»‡t: "Duyá»‡t content" â€” ná»™i dung sáº½ Ä‘Æ°á»£c cáº­p nháº­t lÃªn Facebook',
     "ðŸ‘‰ Sá»­a: ghi rÃµ nháº­n xÃ©t",
   ].join("\n");
 
@@ -1773,13 +2490,16 @@ function handleTrainIntent(context) {
   const results = [];
 
   // Ghi rule cho agent Ä‘Æ°á»£c chá»‰ Ä‘á»‹nh, hoáº·c cáº£ hai náº¿u "self"
-  const agents = targetAgent === "nv_content"
-    ? ["nv_content"]
-    : targetAgent === "nv_media"
-      ? ["nv_media"]
-      : targetAgent === "nv_prompt"
-        ? ["nv_prompt"]
-        : ["nv_content", "nv_prompt", "nv_media"];
+  const agents =
+    targetAgent === "nv_content"
+      ? ["nv_content"]
+      : targetAgent === "nv_media"
+        ? ["nv_media"]
+        : targetAgent === "media_video"
+          ? ["media_video"]
+          : targetAgent === "nv_prompt"
+            ? ["nv_prompt"]
+            : ["nv_content", "nv_prompt", "nv_media", "media_video"];
 
   for (const agentId of agents) {
     memory.appendRule(agentId, context.openClawHome, feedback);
@@ -1813,13 +2533,126 @@ async function continueWorkflow(context, state) {
   state = migrateState(state);
   const decision = intentParser.classifyPendingDecision(context.message, state.stage);
 
+  if (state.stage === "revising_video") {
+    const recoveredArtifacts = scanLatestGeneratedMedia(
+      context.openClawHome,
+      state.video_revising_started_at,
+      { agentId: "media_video" },
+    );
+    const recoveredMedia = mergeMediaData(
+      state.media,
+      {
+        generatedVideoPath: recoveredArtifacts.videoPath || "",
+        videoPrompt: state.prompt_package?.videoPrompt || state.media?.videoPrompt || "",
+        usedProductImage: state.content?.primaryProductImage || state.media?.usedProductImage || "",
+        usedLogoPaths: state.video_revising_logo_paths || state.media?.usedLogoPaths || [],
+      },
+      state.content,
+    );
+
+    if (recoveredMedia.generatedVideoPath) {
+      const nextState = saveWorkflow(context.paths, {
+        ...state,
+        stage: "awaiting_video_approval",
+        media: recoveredMedia,
+      });
+      const summary = buildVideoApprovalSummary({
+        media: recoveredMedia,
+        promptPackage: state.prompt_package || {},
+      });
+      return buildResult({
+        workflowId: state.workflow_id,
+        stage: nextState.stage,
+        summary,
+        humanMessage: summary,
+        data: {
+          media: recoveredMedia,
+          prompt_package: state.prompt_package || {},
+          next_expected_action: "video_approval",
+        },
+      });
+    }
+
+    saveWorkflow(context.paths, { ...state, stage: "awaiting_video_approval" });
+    return buildResult({
+      workflowId: state.workflow_id,
+      stage: "awaiting_video_approval",
+      status: "error",
+      summary: [
+        "Buoc sua video bi ngat giua chung, chua co video moi.",
+        "",
+        "Gui lai nhan xet de thu sua video lan nua.",
+      ].join("\n"),
+    });
+  }
+
+  if (state.stage === "generating_video") {
+    const recoveredArtifacts = scanLatestGeneratedMedia(
+      context.openClawHome,
+      state.video_generating_started_at,
+      { agentId: "media_video" },
+    );
+    const recoveredMedia = mergeMediaData(
+      state.media,
+      {
+        generatedVideoPath: recoveredArtifacts.videoPath || "",
+        videoPrompt: state.prompt_package?.videoPrompt || "",
+        usedProductImage: state.content?.primaryProductImage || "",
+        usedLogoPaths: state.video_generating_logo_paths || [],
+      },
+      state.content,
+    );
+
+    if (recoveredMedia.generatedVideoPath) {
+      const nextState = saveWorkflow(context.paths, {
+        ...state,
+        stage: "awaiting_video_approval",
+        media: recoveredMedia,
+      });
+      const summary = buildVideoApprovalSummary({
+        media: recoveredMedia,
+        promptPackage: state.prompt_package || {},
+      });
+      return buildResult({
+        workflowId: state.workflow_id,
+        stage: nextState.stage,
+        summary,
+        humanMessage: summary,
+        data: {
+          media: recoveredMedia,
+          prompt_package: state.prompt_package || {},
+          next_expected_action: "video_approval",
+        },
+      });
+    }
+
+    saveWorkflow(context.paths, { ...state, stage: "awaiting_publish_decision" });
+    return buildResult({
+      workflowId: state.workflow_id,
+      stage: "awaiting_publish_decision",
+      status: "error",
+      summary: [
+        "Buoc tao video bi ngat giua chung, chua co file video nao.",
+        "",
+        'Thu lai: "Tao video"',
+      ].join("\n"),
+    });
+  }
+
   if (state.stage === "revising_media") {
-    const recoveredArtifacts = scanLatestGeneratedMedia(context.openClawHome, state.revising_started_at);
+    const recoveredArtifacts = scanLatestGeneratedMedia(
+      context.openClawHome,
+      state.revising_started_at,
+    );
     const recoveredMedia = {
       ...(state.media || {}),
       generatedImagePath: recoveredArtifacts.imagePath || state.media?.generatedImagePath || "",
       generatedVideoPath: recoveredArtifacts.videoPath || state.media?.generatedVideoPath || "",
-      mediaType: state.revising_route || state.media?.mediaType || state.intent?.media_type_requested || "image",
+      mediaType:
+        state.revising_route ||
+        state.media?.mediaType ||
+        state.intent?.media_type_requested ||
+        "image",
       imagePrompt: state.prompt_package?.imagePrompt || state.media?.imagePrompt || "",
       videoPrompt: state.prompt_package?.videoPrompt || state.media?.videoPrompt || "",
       usedProductImage: state.content?.primaryProductImage || state.media?.usedProductImage || "",
@@ -1866,7 +2699,10 @@ async function continueWorkflow(context, state) {
   }
 
   if (state.stage === "generating_media") {
-    const recoveredArtifacts = scanLatestGeneratedMedia(context.openClawHome, state.generating_started_at);
+    const recoveredArtifacts = scanLatestGeneratedMedia(
+      context.openClawHome,
+      state.generating_started_at,
+    );
     const recoveredMedia = {
       generatedImagePath: recoveredArtifacts.imagePath || "",
       generatedVideoPath: recoveredArtifacts.videoPath || "",
@@ -1903,17 +2739,17 @@ async function continueWorkflow(context, state) {
 
     saveWorkflow(context.paths, {
       ...state,
-      stage: "awaiting_content_approval",
+      stage: "generating_media",
     });
     const summary = [
-      "Buoc tao media bi ngat giua chung, chua co file media nao.",
+      "He thong van dang render media, chua thay file media moi.",
       "",
-      'Thu lai: "Duyet content, tao anh"',
+      "Toi se tiep tuc doi va gui anh ngay khi co ket qua.",
     ].join("\n");
     return buildResult({
       workflowId: state.workflow_id,
-      stage: "awaiting_content_approval",
-      status: "error",
+      stage: "generating_media",
+      status: "running",
       summary,
       humanMessage: summary,
     });
@@ -1926,10 +2762,12 @@ async function continueWorkflow(context, state) {
     let latestImage = "";
     try {
       if (fs.existsSync(imagesDir)) {
-        const files = fs.readdirSync(imagesDir)
+        const files = fs
+          .readdirSync(imagesDir)
           .filter((f) => {
-            if (f.includes("-before-") || f.includes("-after-") || f.includes("_final")) return false;
-            if (!(/\.(png|jpg|jpeg|webp)$/i.test(f))) return false;
+            if (f.includes("-before-") || f.includes("-after-") || f.includes("_final"))
+              return false;
+            if (!/\.(png|jpg|jpeg|webp)$/i.test(f)) return false;
             // Bá» file cÅ© náº¿u Ä‘Æ°á»£ng dáº«n khá»›p vá»›i ná»n cÅ© (trÆ°á»›c khi revise)
             const fullPath = path.join(imagesDir, f);
             if (currentBg && path.resolve(fullPath) === path.resolve(currentBg)) return false;
@@ -1939,7 +2777,9 @@ async function continueWorkflow(context, state) {
           .sort((a, b) => b.t - a.t);
         if (files.length > 0) latestImage = path.join(imagesDir, files[0].f);
       }
-    } catch { /* ignore */ }
+    } catch {
+      /* ignore */
+    }
 
     if (latestImage) {
       logger.log("media", `âœ… Phá»¥c há»“i áº£nh sá»­a tá»« lÆ°á»£t trÆ°á»›c: ${latestImage}`);
@@ -1952,7 +2792,9 @@ async function continueWorkflow(context, state) {
             outputPath: latestImage.replace(/(\.[a-z]+)$/i, "_final$1"),
           });
           finalPath = compositePath;
-        } catch (e) { logger.logError("composite", e); }
+        } catch (e) {
+          logger.logError("composite", e);
+        }
       }
       const recoveredMedia = {
         generatedImagePath: finalPath,
@@ -1968,14 +2810,18 @@ async function continueWorkflow(context, state) {
       const finalLink = `file:///${finalPath.replace(/\\/g, "/")}`;
       const summary = [
         "ðŸŽ¨ ÄÃ£ phá»¥c há»“i áº£nh sá»­a tá»« lÆ°á»£t trÆ°á»›c, Ä‘ang chá» Sáº¿p duyá»‡t.",
-        recoveredMedia.composited ? "âœ… ÄÃ£ ghÃ©p: Ná»n AI má»›i + Sáº£n pháº©m tháº­t + Logo" : "",
+        recoveredMedia.composited
+          ? "âœ… ÄÃ£ ghÃ©p: Ná»n AI má»›i + Sáº£n pháº©m tháº­t + Logo"
+          : "",
         "",
         `ðŸ–¼ï¸ Xem áº£nh: ${finalLink}`,
         `File: ${finalPath}`,
         "",
-        "ðŸ‘‰ Duyá»‡t vÃ  Ä‘Äƒng bÃ i: \"Duyá»‡t áº£nh vÃ  Ä‘Äƒng bÃ i\"",
+        'ðŸ‘‰ Duyá»‡t vÃ  Ä‘Äƒng bÃ i: "Duyá»‡t áº£nh vÃ  Ä‘Äƒng bÃ i"',
         "ðŸ‘‰ Sá»­a tiáº¿p: ghi rÃµ nháº­n xÃ©t",
-      ].filter(Boolean).join("\n");
+      ]
+        .filter(Boolean)
+        .join("\n");
       return buildResult({
         workflowId: state.workflow_id,
         stage: nextState.stage,
@@ -2007,7 +2853,8 @@ async function continueWorkflow(context, state) {
   if (state.stage === "generating_media") {
     // Æ¯u tiÃªn dÃ¹ng Ä‘Æ°á»ng dáº«n Ä‘Ã£ lÆ°u trong state (chÃ­nh xÃ¡c, khÃ´ng nháº§m workflow cÅ©)
     const savedBg = state.generating_bg_image_path || "";
-    const savedProduct = state.generating_product_image_path || state.content?.primaryProductImage || "";
+    const savedProduct =
+      state.generating_product_image_path || state.content?.primaryProductImage || "";
 
     let bgImagePath = "";
     if (savedBg && fs.existsSync(savedBg)) {
@@ -2016,13 +2863,17 @@ async function continueWorkflow(context, state) {
     } else {
       // Fallback: scan thÆ° má»¥c, chá»‰ láº¥y áº£nh Ä‘Æ°á»£c táº¡o sau khi báº¯t Ä‘áº§u workflow
       const imagesDir = path.join(context.openClawHome, "workspace_media", "artifacts", "images");
-      const startedAt = state.generating_started_at ? new Date(state.generating_started_at).getTime() : 0;
+      const startedAt = state.generating_started_at
+        ? new Date(state.generating_started_at).getTime()
+        : 0;
       try {
         if (fs.existsSync(imagesDir)) {
-          const files = fs.readdirSync(imagesDir)
+          const files = fs
+            .readdirSync(imagesDir)
             .filter((f) => {
-              if (f.includes("-before-") || f.includes("-after-") || f.includes("_final")) return false;
-              if (!(/\.(png|jpg|jpeg|webp)$/i.test(f))) return false;
+              if (f.includes("-before-") || f.includes("-after-") || f.includes("_final"))
+                return false;
+              if (!/\.(png|jpg|jpeg|webp)$/i.test(f)) return false;
               const fullPath = path.join(imagesDir, f);
               const mtime = fs.statSync(fullPath).mtimeMs;
               return mtime >= startedAt; // chá»‰ láº¥y file má»›i hÆ¡n thá»i Ä‘iá»ƒm báº¯t Ä‘áº§u
@@ -2031,7 +2882,9 @@ async function continueWorkflow(context, state) {
             .sort((a, b) => b.t - a.t);
           if (files.length > 0) bgImagePath = path.join(imagesDir, files[0].f);
         }
-      } catch { /* ignore */ }
+      } catch {
+        /* ignore */
+      }
     }
 
     if (bgImagePath) {
@@ -2069,14 +2922,18 @@ async function continueWorkflow(context, state) {
       const finalLink = `file:///${finalPath.replace(/\\/g, "/")}`;
       const summary = [
         "ðŸŽ¨ ÄÃ£ ghÃ©p xong áº£nh, Ä‘ang chá» Sáº¿p duyá»‡t.",
-        recoveredMedia.composited ? "âœ… ÄÃ£ ghÃ©p: Ná»n AI + Sáº£n pháº©m tháº­t + Logo" : "âš ï¸ Chá»‰ cÃ³ áº£nh ná»n AI (chÆ°a ghÃ©p sáº£n pháº©m).",
+        recoveredMedia.composited
+          ? "âœ… ÄÃ£ ghÃ©p: Ná»n AI + Sáº£n pháº©m tháº­t + Logo"
+          : "âš ï¸ Chá»‰ cÃ³ áº£nh ná»n AI (chÆ°a ghÃ©p sáº£n pháº©m).",
         "",
         `ðŸ–¼ï¸ Xem áº£nh: ${finalLink}`,
         `File: ${finalPath}`,
         "",
-        "ðŸ‘‰ Duyá»‡t vÃ  Ä‘Äƒng bÃ i: \"Duyá»‡t áº£nh vÃ  Ä‘Äƒng bÃ i\"",
+        'ðŸ‘‰ Duyá»‡t vÃ  Ä‘Äƒng bÃ i: "Duyá»‡t áº£nh vÃ  Ä‘Äƒng bÃ i"',
         "ðŸ‘‰ Sá»­a áº£nh: ghi rÃµ nháº­n xÃ©t",
-      ].filter(Boolean).join("\n");
+      ]
+        .filter(Boolean)
+        .join("\n");
 
       return buildResult({
         workflowId: state.workflow_id,
@@ -2095,7 +2952,7 @@ async function continueWorkflow(context, state) {
     const noImgSummary = [
       "âŒ BÆ°á»›c táº¡o áº£nh bá»‹ ngáº¯t giá»¯a chá»«ng, chÆ°a cÃ³ file áº£nh nÃ o.",
       "",
-      "ðŸ‘‰ Thá»­ láº¡i: \"Duyá»‡t content, táº¡o áº£nh\"",
+      'ðŸ‘‰ Thá»­ láº¡i: "Duyá»‡t content, táº¡o áº£nh"',
     ].join("\n");
     return buildResult({
       workflowId: state.workflow_id,
@@ -2131,8 +2988,36 @@ async function continueWorkflow(context, state) {
     return buildBlockedResult(state, context.message);
   }
 
+  if (state.stage === "awaiting_video_approval") {
+    if (decision === "approve") {
+      logger.logApproved("video");
+      return askPublishDecision(context, state);
+    }
+    if (decision === "reject") {
+      return reviseVideoFlow(context, state);
+    }
+    return buildBlockedResult(state, context.message);
+  }
+
   // awaiting_publish_decision
   if (state.stage === "awaiting_publish_decision") {
+    if (decision === "generate_video") {
+      return generateVideoFlow(context, state);
+    }
+    if (decision === "skip_video") {
+      const nextState = saveWorkflow(context.paths, {
+        ...state,
+        video_offer_declined: true,
+      });
+      const summary = buildPublishDecisionSummary(nextState);
+      return buildResult({
+        workflowId: state.workflow_id,
+        stage: nextState.stage,
+        summary,
+        humanMessage: summary,
+        data: { next_expected_action: "publish_decision" },
+      });
+    }
     if (decision === "publish_now") {
       return publishNowAction(context, state);
     }
@@ -2149,10 +3034,18 @@ async function continueWorkflow(context, state) {
 
   // awaiting_edit_approval
   if (state.stage === "awaiting_edit_approval") {
-    if (decision === "approve" || intentParser.classifyPendingDecision(context.message, "awaiting_content_approval") === "approve") {
+    if (
+      decision === "approve" ||
+      intentParser.classifyPendingDecision(context.message, "awaiting_content_approval") ===
+        "approve"
+    ) {
       return applyEditToPublished(context, state);
     }
-    if (decision === "reject" || intentParser.classifyPendingDecision(context.message, "awaiting_content_approval") === "reject") {
+    if (
+      decision === "reject" ||
+      intentParser.classifyPendingDecision(context.message, "awaiting_content_approval") ===
+        "reject"
+    ) {
       return reviseContent(context, { ...state, stage: "awaiting_content_approval" });
     }
     return buildBlockedResult(state, context.message);
@@ -2167,9 +3060,12 @@ function buildBlockedResult(state, message) {
   const stageLabels = {
     awaiting_content_approval: "Ä‘ang chá» duyá»‡t content",
     awaiting_media_approval: "Ä‘ang chá» duyá»‡t media",
+    awaiting_video_approval: "Ä‘ang chá» duyá»‡t video",
     awaiting_publish_decision: "Ä‘ang chá» quyáº¿t Ä‘á»‹nh Ä‘Äƒng bÃ i",
     awaiting_edit_approval: "Ä‘ang chá» duyá»‡t ná»™i dung sá»­a",
     generating_media: "Ä‘ang táº¡o áº£nh (vui lÃ²ng Ä‘á»£i)",
+    generating_video: "Ä‘ang táº¡o video (vui lÃ²ng Ä‘á»£i)",
+    revising_video: "Ä‘ang sua video (vui lÃ²ng Ä‘á»£i)",
   };
   const stageLabel = stageLabels[state?.stage] || "Ä‘ang chá» xá»­ lÃ½";
 
@@ -2186,9 +3082,11 @@ function buildBlockedResult(state, message) {
         ? '  â€¢ "Duyá»‡t content" / "Sá»­a content, <nháº­n xÃ©t>"'
         : state?.stage === "awaiting_media_approval"
           ? '  â€¢ "Duyá»‡t áº£nh" / "Sá»­a áº£nh, <nháº­n xÃ©t>" / "Sá»­a prompt, <nháº­n xÃ©t>"'
-          : state?.stage === "awaiting_publish_decision"
-            ? '  â€¢ "ÄÄƒng ngay" / "Háº¹n giá» <thá»i gian>"'
-            : '  â€¢ "Duyá»‡t" / "Sá»­a"',
+          : state?.stage === "awaiting_video_approval"
+            ? '  â€¢ "Duyá»‡t video" / "Sá»­a video, <nháº­n xÃ©t>" / "Sá»­a prompt video, <nháº­n xÃ©t>"'
+            : state?.stage === "awaiting_publish_decision"
+              ? '  â€¢ "Táº¡o video" / "ÄÄƒng ngay" / "Háº¹n giá» <thá»i gian>"'
+              : '  â€¢ "Duyá»‡t" / "Sá»­a"',
     ].join("\n"),
     data: { expected_stage: state?.stage || null },
   });
@@ -2226,8 +3124,15 @@ async function runCli(argv = process.argv.slice(2)) {
   }
 
   const registry = discoverRegistry({ openClawHome });
-  if (!registry.byId.pho_phong || !registry.byId.nv_content || !registry.byId.nv_prompt || !registry.byId.nv_media) {
-    throw new Error("Missing required agents pho_phong / nv_content / nv_prompt / nv_media in runtime registry.");
+  if (
+    !registry.byId.pho_phong ||
+    !registry.byId.nv_content ||
+    !registry.byId.nv_prompt ||
+    !registry.byId.nv_media
+  ) {
+    throw new Error(
+      "Missing required agents pho_phong / nv_content / nv_prompt / nv_media in runtime registry.",
+    );
   }
 
   const currentState = readJsonIfExists(paths.currentFile, null);
@@ -2361,4 +3266,3 @@ module.exports = {
   scanLatestGeneratedMedia,
   shouldSupersedePendingWorkflow,
 };
-

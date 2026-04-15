@@ -20,7 +20,6 @@ import {
   stripInlineDirectiveTagsForDisplay,
   stripInlineDirectiveTagsFromMessageForDisplay,
 } from "../../utils/directive-tags.js";
-import { canControlUiAccessSessionKey } from "../control-ui-access.js";
 import {
   INTERNAL_MESSAGE_CHANNEL,
   isGatewayCliClient,
@@ -34,9 +33,10 @@ import {
   isChatStopCommandText,
   resolveChatRunExpiresAtMs,
 } from "../chat-abort.js";
-import { collectChatImageBlocksFromMessage } from "../chat-image-artifacts.js";
 import { type ChatImageContent, parseMessageWithAttachments } from "../chat-attachments.js";
+import { collectChatImageBlocksFromMessage } from "../chat-image-artifacts.js";
 import { stripEnvelopeFromMessage, stripEnvelopeFromMessages } from "../chat-sanitize.js";
+import { canControlUiAccessSessionKey } from "../control-ui-access.js";
 import { buildControlUiChatArtifactUrl } from "../control-ui-shared.js";
 import { ADMIN_SCOPE } from "../method-scopes.js";
 import {
@@ -436,12 +436,16 @@ function buildControlUiMediaBlock(
     ? {
         type: "video_url",
         video_url: { url },
-        ...(remote || !isLikelyAbsoluteMediaPath(normalizedPath) ? {} : { filePath: normalizedPath }),
+        ...(remote || !isLikelyAbsoluteMediaPath(normalizedPath)
+          ? {}
+          : { filePath: normalizedPath }),
       }
     : {
         type: "image_url",
         image_url: { url },
-        ...(remote || !isLikelyAbsoluteMediaPath(normalizedPath) ? {} : { filePath: normalizedPath }),
+        ...(remote || !isLikelyAbsoluteMediaPath(normalizedPath)
+          ? {}
+          : { filePath: normalizedPath }),
       };
 }
 
@@ -472,7 +476,10 @@ function normalizeMessageMediaBlocksForDisplay(params: {
         nextContent.push(block);
         continue;
       }
-      const text = typeof (block as { text?: unknown }).text === "string" ? (block as { text: string }).text : "";
+      const text =
+        typeof (block as { text?: unknown }).text === "string"
+          ? (block as { text: string }).text
+          : "";
       const split = splitMediaFromOutput(text);
       appendMediaBlocks(split.mediaUrls);
       if ((split.mediaUrls?.length ?? 0) > 0 || split.text !== text) {
@@ -644,6 +651,60 @@ function sanitizeChatHistoryMessage(params: {
   return { message: changed ? entry : message, changed };
 }
 
+function extractChatHistoryText(message: unknown): string {
+  if (!message || typeof message !== "object") {
+    return "";
+  }
+  const entry = message as Record<string, unknown>;
+  return typeof entry.text === "string"
+    ? entry.text
+    : typeof entry.content === "string"
+      ? entry.content
+      : Array.isArray(entry.content)
+        ? entry.content
+            .map((block) =>
+              block && typeof block === "object" && (block as { type?: unknown }).type === "text"
+                ? String((block as { text?: unknown }).text ?? "")
+                : "",
+            )
+            .filter(Boolean)
+            .join("\n")
+        : "";
+}
+
+function isInternalWorkflowRelayMessage(message: unknown): boolean {
+  const text = extractChatHistoryText(message);
+  if (!text) {
+    return false;
+  }
+
+  const entry = message as Record<string, unknown>;
+  const role = typeof entry.role === "string" ? entry.role : "";
+  if (role === "system" && /exec (completed|failed)/i.test(text)) {
+    return true;
+  }
+  if (/^System:\s*\[.*?\]\s*Exec (completed|failed)/i.test(text)) {
+    return true;
+  }
+  return (
+    (text.includes("BAN DANG XU LY WORKFLOW AGENT-ORCHESTRATOR-TEST.") &&
+      text.includes("workflow_id:") &&
+      text.includes("step_id:")) ||
+    (/^Ban la (nv_content|nv_media|media_video|nv_prompt|pho_phong)\b/i.test(text) &&
+      text.includes("BAN DANG XU LY WORKFLOW AGENT-ORCHESTRATOR-TEST.") &&
+      text.includes("NHIEM VU CHINH:"))
+  );
+}
+
+function shouldFilterInternalWorkflowRelayMessages(sessionKey?: string): boolean {
+  const key = String(sessionKey || "").trim();
+  // Agent lane sessions need full workflow relay text for orchestration correlation.
+  if (key.startsWith("agent:")) {
+    return false;
+  }
+  return true;
+}
+
 /**
  * Extract the visible text from an assistant history message for silent-token checks.
  * Returns `undefined` for non-assistant messages or messages with no extractable text.
@@ -684,16 +745,22 @@ function extractAssistantTextForSilentCheck(message: unknown): string | undefine
 
 function sanitizeChatHistoryMessages(params: {
   messages: unknown[];
+  sessionKey?: string;
   controlUiBasePath?: string;
   logDebug?: (message: string) => void;
 }): unknown[] {
-  const { messages, controlUiBasePath, logDebug } = params;
+  const { messages, sessionKey, controlUiBasePath, logDebug } = params;
   if (messages.length === 0) {
     return messages;
   }
+  const filterInternalWorkflowRelay = shouldFilterInternalWorkflowRelayMessages(sessionKey);
   let changed = false;
   const next: unknown[] = [];
   for (const message of messages) {
+    if (filterInternalWorkflowRelay && isInternalWorkflowRelayMessage(message)) {
+      changed = true;
+      continue;
+    }
     const res = sanitizeChatHistoryMessage({
       message,
       controlUiBasePath,
@@ -1087,7 +1154,10 @@ function broadcastChatFinal(params: {
     | undefined;
   const displayMessage = strippedEnvelopeMessage
     ? normalizeMessageMediaBlocksForDisplay({
-        message: stripInlineDirectiveTagsFromMessageForDisplay(strippedEnvelopeMessage) as Record<string, unknown>,
+        message: stripInlineDirectiveTagsFromMessageForDisplay(strippedEnvelopeMessage) as Record<
+          string,
+          unknown
+        >,
         controlUiBasePath: params.controlUiBasePath,
       }).message
     : undefined;
@@ -1182,6 +1252,7 @@ export const chatHandlers: GatewayRequestHandlers = {
     const sanitized = stripEnvelopeFromMessages(sliced);
     const normalized = sanitizeChatHistoryMessages({
       messages: sanitized,
+      sessionKey,
       controlUiBasePath: cfg.gateway?.controlUi?.basePath,
       logDebug: (message) => context.logGateway.debug(message),
     });

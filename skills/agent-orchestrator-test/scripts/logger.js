@@ -168,14 +168,26 @@ function buildHumanMessage(from, to, action, detail) {
   if (action === "media_prepare_prompt") {
     return "Content da duyet, NV Media tiep nhan brief media va chot yeu cau gui NV Prompt.";
   }
+  if (action === "video_prepare_prompt") {
+    return "Content va anh da duyet, Media_Video tiep nhan brief video va chot yeu cau gui NV Prompt.";
+  }
   if (action === "media_prepare_revise") {
     return `NV Media tiep nhan feedback media va tong hop lai yeu cau prompt: ${detail}`;
+  }
+  if (action === "video_prepare_revise") {
+    return `Media_Video tiep nhan feedback video va tong hop lai yeu cau prompt: ${detail}`;
   }
   if (action === "prompt_from_media") {
     return `NV Media gui brief cho NV Prompt de viet prompt ${detail || "media"} chi tiet.`;
   }
+  if (action === "prompt_from_video") {
+    return `Media_Video gui brief cho NV Prompt de viet prompt ${detail || "video"} chi tiet.`;
+  }
   if (action === "prompt_back_to_media") {
     return `NV Prompt da viet xong prompt ${detail || "media"}, chuyen lai cho NV Media thuc thi.`;
+  }
+  if (action === "prompt_back_to_video") {
+    return `NV Prompt da viet xong prompt ${detail || "video"}, chuyen lai cho Media_Video thuc thi.`;
   }
   const messages = {
     content_draft: `Sếp vừa giao bài mới, anh em Content nhận brief và làm nhé: ${detail}`,

@@ -1,5 +1,5 @@
 import { readFileSync } from "node:fs";
-import { access, mkdir } from "node:fs/promises";
+import { access, mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { chromium } from "playwright-core";
 import { buildChatImageReplyPayload } from "../shared/chat-image-result.js";
@@ -8,7 +8,7 @@ const DEFAULTS = {
   browser_path: "C:/Program Files/CocCoc/Browser/Application/browser.exe",
   user_data_dir: "C:/Users/Administrator/AppData/Local/CocCoc/Browser/User Data",
   profile_name: "Default",
-  target_gemini_url: "https://gemini.google.com/app/1f2fad6cc8341bd5",
+  target_gemini_url: "https://gemini.google.com/app/724f8593947f13df",
   image_paths: [],
   output_dir: "",
   timeout_ms: 120000,
@@ -930,7 +930,7 @@ async function downloadFromSpecificBlock(page, freshTarget, outputDir, logs) {
     return await openMenuAndDownload(page, freshTarget, outputDir, logs);
   } catch (menuError) {
     logs.push(
-      `[step6] Menu-based download failed, fallback to image capture: ${menuError instanceof Error ? menuError.message : String(menuError)}`,
+      `[step6] Menu-based download failed, fallback to blob extraction: ${menuError instanceof Error ? menuError.message : String(menuError)}`,
     );
   }
 
@@ -942,13 +942,32 @@ async function downloadFromSpecificBlock(page, freshTarget, outputDir, logs) {
     .then((n) => n > 0)
     .catch(() => false);
   if (hasImage) {
-    const imagePath = path.join(outputDir, `gemini-image-screenshot-${nowStamp()}.png`);
-    await imgLocator.screenshot({ path: imagePath });
-    logs.push(`[step6] Saved screenshot of fresh image as fallback -> ${imagePath}`);
-    return imagePath;
+    const src = await imgLocator.getAttribute("src").catch(() => "");
+    if (src && src.startsWith("blob:")) {
+      const blobPayload = await page.evaluate(async (blobUrl) => {
+        const response = await fetch(blobUrl);
+        const blob = await response.blob();
+        const arrayBuffer = await blob.arrayBuffer();
+        return {
+          mimeType: blob.type || "",
+          bytes: Array.from(new Uint8Array(arrayBuffer)),
+        };
+      }, src);
+
+      const extension =
+        {
+          "image/png": ".png",
+          "image/jpeg": ".jpg",
+          "image/webp": ".webp",
+        }[blobPayload?.mimeType] || ".png";
+      const imagePath = path.join(outputDir, `gemini-image-fallback-${nowStamp()}${extension}`);
+      await writeFile(imagePath, Buffer.from(blobPayload?.bytes || []));
+      logs.push(`[step6] Saved blob-backed fallback image -> ${imagePath}`);
+      return imagePath;
+    }
   }
 
-  throw new Error("Cannot download or capture the fresh generated image");
+  throw new Error("Cannot download the fresh generated image as a real file");
 }
 
 (async function main() {

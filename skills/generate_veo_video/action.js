@@ -3,6 +3,7 @@ import { readFileSync, existsSync } from "node:fs";
 import { access, mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { chromium } from "playwright-core";
+import { buildChatVideoReplyPayload } from "../shared/chat-video-result.js";
 
 const DEFAULTS = {
   browser_path: "C:/Program Files/CocCoc/Browser/Application/browser.exe",
@@ -10,6 +11,7 @@ const DEFAULTS = {
   profile_name: "Default",
   project_url: "https://labs.google/fx/vi/tools/flow/project/c5c6d835-fae3-4140-af60-9a54ab1dd804",
   reference_image: "",
+  logo_paths: [],
   prompt: "Tạo video quảng cáo",
   output_dir: "",
   cdp_url: "",
@@ -28,6 +30,19 @@ function printResult(result) {
   process.stdout.write(JSON.stringify(result, null, 2) + "\n");
 }
 
+function parseList(value) {
+  if (Array.isArray(value)) {
+    return value.map((item) => String(item).trim()).filter(Boolean);
+  }
+  if (typeof value === "string") {
+    return value
+      .split(/\r?\n|;|,/g)
+      .map((item) => item.trim())
+      .filter(Boolean);
+  }
+  return [];
+}
+
 function parseArgs(argv) {
   const params = { ...DEFAULTS };
   const logs = [];
@@ -40,6 +55,7 @@ function parseArgs(argv) {
         const raw = readFileSync(args[idx + 1], "utf8").replace(/^\uFEFF/, "");
         const parsed = JSON.parse(raw);
         Object.assign(params, parsed);
+        params.logo_paths = parseList(parsed.logo_paths);
         if (parsed.dry_run === true || parsed["dry-run"] === true) params.dry_run = true;
       } catch (error) {
         logs.push(`[parse] Invalid JSON input file: ${error.message}`);
@@ -49,6 +65,7 @@ function parseArgs(argv) {
     try {
       const parsed = JSON.parse(args[0]);
       Object.assign(params, parsed);
+      params.logo_paths = parseList(parsed.logo_paths);
       if (parsed.dry_run === true || parsed["dry-run"] === true) params.dry_run = true;
     } catch (error) {
       logs.push(`[parse] Invalid JSON input: ${error.message}`);
@@ -70,6 +87,9 @@ function parseArgs(argv) {
       index += 1;
     } else if (token === "--reference_image") {
       params.reference_image = next;
+      index += 1;
+    } else if (token === "--logo_paths") {
+      params.logo_paths = parseList(next);
       index += 1;
     } else if (token === "--output_dir") {
       params.output_dir = next;
@@ -111,6 +131,75 @@ function nowStamp() {
 async function ensureReadableFile(filePath) {
   if (filePath) {
     await access(filePath);
+  }
+}
+
+async function ensureReadableFiles(filePaths) {
+  for (const filePath of filePaths) {
+    if (filePath) {
+      await access(filePath);
+    }
+  }
+}
+
+async function loadSharp() {
+  try {
+    const sharpModule = await import("sharp");
+    return sharpModule.default || sharpModule;
+  } catch {
+    return null;
+  }
+}
+
+async function buildCompositeReferenceImage(referenceImage, logoPaths, outputDir, logs) {
+  const normalizedLogoPaths = parseList(logoPaths).filter((filePath) => existsSync(filePath));
+  if (!referenceImage || !existsSync(referenceImage) || normalizedLogoPaths.length === 0) {
+    return referenceImage;
+  }
+
+  const sharp = await loadSharp();
+  if (!sharp) {
+    logs.push("[step1] sharp unavailable, skip composite reference image");
+    return referenceImage;
+  }
+
+  try {
+    const firstLogoPath = normalizedLogoPaths[0];
+    const referenceMeta = await sharp(referenceImage).metadata();
+    const referenceWidth = referenceMeta.width || 1280;
+    const referenceHeight = referenceMeta.height || 720;
+    const targetLogoWidth = Math.max(96, Math.round(referenceWidth * 0.16));
+    const logoMargin = Math.max(16, Math.round(referenceWidth * 0.03));
+
+    const resizedLogo = await sharp(firstLogoPath)
+      .resize({
+        width: targetLogoWidth,
+        fit: "inside",
+        withoutEnlargement: true,
+      })
+      .png()
+      .toBuffer();
+    const logoMeta = await sharp(resizedLogo).metadata();
+    const logoWidth = logoMeta.width || targetLogoWidth;
+    const logoHeight = logoMeta.height || Math.round(targetLogoWidth / 3);
+
+    const compositePath = path.join(outputDir, `veo-reference-${nowStamp()}.png`);
+    await sharp(referenceImage)
+      .composite([
+        {
+          input: resizedLogo,
+          top: Math.max(0, referenceHeight - logoHeight - logoMargin),
+          left: Math.max(0, referenceWidth - logoWidth - logoMargin),
+        },
+      ])
+      .png()
+      .toFile(compositePath);
+
+    logs.push(`[step1] Built composite reference image with logo -> ${compositePath}`);
+    return compositePath;
+  } catch (error) {
+    logs.push(`[step1] Could not build composite reference image: ${error.message}`);
+    return referenceImage;
   }
 }
 
@@ -816,6 +905,7 @@ async function tryDownloadLatestVideoWithFallbacks(
   const {
     project_url,
     reference_image,
+    logo_paths,
     prompt,
     output_dir,
     browser_path,
@@ -827,12 +917,13 @@ async function tryDownloadLatestVideoWithFallbacks(
     auto_close_browser,
   } = parsed;
 
-  const outDir = path.resolve(output_dir || path.join(process.cwd(), "artifacts", "video"));
+  const outDir = path.resolve(output_dir || path.join(process.cwd(), "artifacts", "videos"));
   await mkdir(outDir, { recursive: true });
 
   logs.push(`[input] project_url=${project_url}`);
   logs.push(`[input] browser=${browser_path} ${profile_name}`);
   logs.push(`[input] target_dir=${outDir}`);
+  logs.push(`[input] logo_paths=${parseList(logo_paths).length}`);
 
   if (reference_image) {
     try {
@@ -850,6 +941,24 @@ async function tryDownloadLatestVideoWithFallbacks(
       );
       process.exit(1);
     }
+  }
+
+  try {
+    await ensureReadableFiles(parseList(logo_paths));
+    if (parseList(logo_paths).length > 0) {
+      logs.push("[step1] Checked logo readability");
+    }
+  } catch (err) {
+    logs.push(`[fail] Logo error: ${err.message}`);
+    printResult(
+      buildResult({
+        success: false,
+        message: "Logo unreadable",
+        logs,
+        error: err.message,
+      }),
+    );
+    process.exit(1);
   }
 
   if (parsed.dry_run) {
@@ -918,7 +1027,14 @@ async function tryDownloadLatestVideoWithFallbacks(
       .catch(() => 0);
     const beforeVideoSources = await collectVideoSources(page);
 
-    await prepareImageUpload(page, reference_image, logs);
+    const uploadReferenceImage = await buildCompositeReferenceImage(
+      reference_image,
+      logo_paths,
+      outDir,
+      logs,
+    );
+
+    await prepareImageUpload(page, uploadReferenceImage, logs);
     await setPromptRobust(page, prompt, logs);
     await submitPrompt(page, logs);
 
@@ -947,18 +1063,36 @@ async function tryDownloadLatestVideoWithFallbacks(
     }
 
     logs.push("[step8] Flow finished successfully");
+    const chatReply = downloadedVideoPath
+      ? buildChatVideoReplyPayload({
+          videoPath: downloadedVideoPath,
+          data: {
+            project_url,
+            prompt,
+            downloaded_video_path: relVideoPath || downloadedVideoPath,
+            used_reference_image: uploadReferenceImage || reference_image,
+            used_logo_paths: parseList(logo_paths),
+          },
+          artifacts,
+        })
+      : null;
     printResult(
       buildResult({
         success: true,
-        message: downloadedVideoPath
-          ? "Video generated and downloaded."
-          : "Video generated but could not be downloaded.",
+        message:
+          chatReply?.assistantText ||
+          (downloadedVideoPath
+            ? "Video generated and downloaded."
+            : "Video generated but could not be downloaded."),
         data: {
           project_url,
           prompt,
           downloaded_video_path: relVideoPath || downloadedVideoPath,
+          used_reference_image: uploadReferenceImage || reference_image,
+          used_logo_paths: parseList(logo_paths),
+          ...(chatReply?.data || {}),
         },
-        artifacts,
+        artifacts: chatReply?.artifacts || artifacts,
         logs,
       }),
     );

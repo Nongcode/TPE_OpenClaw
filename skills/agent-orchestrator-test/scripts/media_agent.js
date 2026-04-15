@@ -37,6 +37,12 @@ function isPlaceholderGeneratedPath(value) {
   ].includes(normalized);
 }
 
+function isTransientGeneratedImagePath(value) {
+  const normalized = String(value || "").trim().replace(/\\/g, "/").toLowerCase();
+  if (!normalized) return false;
+  return /(?:^|\/)gemini-image-screenshot-[^/]+\.(png|jpg|jpeg|webp)$/.test(normalized);
+}
+
 /**
  * Lazy-load sharp — trả null nếu chưa cài.
  */
@@ -231,6 +237,7 @@ function buildMediaGeneratePrompt(params) {
   } = params;
   const agentId = "nv_media";
   const systemPrompt = buildMediaSystemPrompt(agentId, openClawHome);
+  const imageActionPath = path.join(REPO_ROOT, "skills", "gemini_generate_image", "action.js").replace(/\\/g, "/");
 
   const productImagePath = state.content?.primaryProductImage || "";
   const mediaOutputDir = resolveMediaOutputDir(openClawHome);
@@ -257,7 +264,7 @@ function buildMediaGeneratePrompt(params) {
   const imageInstruction = [
     "NEU CAN TAO ANH:",
     "- Goi skill gemini_generate_image trong lane cua ban.",
-    "- Tren Windows/PowerShell, tao 1 file JSON tam chua image_prompt + image_paths + output_dir roi goi: node skills/gemini_generate_image/action.js --input_file <duong_dan_file_json>.",
+    `- Tren Windows/PowerShell, tao 1 file JSON tam chua image_prompt + image_paths + output_dir roi goi: node ${imageActionPath} --input_file <duong_dan_file_json>.`,
     "- Dung DUNG IMAGE_PROMPT_DUOC_GIAO, khong tu y doi nghia.",
     "- image_paths BAT BUOC gom: [anh san pham goc, ...tat ca logo cong ty].",
     `- output_dir BAT BUOC la: ${mediaOutputDir}. Khong duoc de tool tu suy ra theo cwd.`,
@@ -507,12 +514,15 @@ function parseImageResult(reply) {
   // Ưu tiên extractField, nếu chưa có thì scan toàn bộ reply
   let generatedImagePath = extractField(text, "GENERATED_IMAGE_PATH");
   // Normalize forward/backslash
-  if (isPlaceholderGeneratedPath(generatedImagePath)) {
+  if (isPlaceholderGeneratedPath(generatedImagePath) || isTransientGeneratedImagePath(generatedImagePath)) {
     generatedImagePath = "";
   } else if (generatedImagePath) {
     generatedImagePath = path.resolve(generatedImagePath);
   } else {
     generatedImagePath = extractFirstExistingPath(text, [".png", ".jpg", ".jpeg", ".webp"]);
+    if (isTransientGeneratedImagePath(generatedImagePath)) {
+      generatedImagePath = "";
+    }
   }
 
   if (!imagePrompt) {

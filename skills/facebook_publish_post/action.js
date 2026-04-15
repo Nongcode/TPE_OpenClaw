@@ -68,6 +68,47 @@ async function ensureReadableFiles(pathsToCheck) {
   for (const filePath of pathsToCheck) await access(filePath);
 }
 
+function isVideoFile(filePath) {
+  const ext = path.extname(filePath || "").toLowerCase();
+  return [".mp4", ".mov", ".avi", ".webm", ".mkv"].includes(ext);
+}
+
+async function uploadUnpublishedMedia({ pageId, accessToken, filePath, logs }) {
+  const video = isVideoFile(filePath);
+  const endpoint = video ? "/videos" : "/photos";
+  const apiUrl = `https://graph.facebook.com/v20.0/${pageId}${endpoint}`;
+
+  const formData = new FormData();
+  formData.append("access_token", accessToken);
+  formData.append("published", "false");
+
+  const fileBuffer = await readFile(filePath);
+  const mimeType = video ? "video/mp4" : "image/jpeg";
+  const blob = new Blob([fileBuffer], { type: mimeType });
+  formData.append("source", blob, path.basename(filePath));
+
+  logs.push(`[upload] Uploading unpublished ${video ? "video" : "photo"}: ${filePath}`);
+  const response = await fetch(apiUrl, {
+    method: "POST",
+    body: formData,
+  });
+  const result = await response.json();
+  if (!response.ok || result.error) {
+    throw new Error(result.error ? result.error.message : JSON.stringify(result));
+  }
+
+  const mediaId = result.id || result.post_id || result.video_id;
+  if (!mediaId) {
+    throw new Error(`Upload ${path.basename(filePath)} khong tra ve media ID hop le`);
+  }
+
+  return {
+    mediaId,
+    mediaType: video ? "video" : "photo",
+    raw: result,
+  };
+}
+
 (async function main() {
   const parsed = parseArgs(process.argv);
   const logs = [...parsed.logs, "[start] facebook_publish_post (Graph API) invoked"];
@@ -113,6 +154,59 @@ async function ensureReadableFiles(pathsToCheck) {
     if (mediaPaths.length > 0) {
       await ensureReadableFiles(mediaPaths);
       logs.push("[step1] Media files verified");
+    }
+
+    if (mediaPaths.length > 1) {
+      logs.push("[step2] Multiple media detected, using attached_media flow");
+
+      const uploads = [];
+      for (const filePath of mediaPaths) {
+        uploads.push(await uploadUnpublishedMedia({
+          pageId,
+          accessToken,
+          filePath,
+          logs,
+        }));
+      }
+
+      const apiUrl = `https://graph.facebook.com/v20.0/${pageId}/feed`;
+      const formData = new FormData();
+      formData.append("access_token", accessToken);
+      formData.append("message", caption);
+      uploads.forEach((upload, index) => {
+        formData.append(`attached_media[${index}]`, JSON.stringify({ media_fbid: upload.mediaId }));
+      });
+
+      logs.push("[step3] Creating combined feed post with attached_media...");
+      const response = await fetch(apiUrl, {
+        method: "POST",
+        body: formData,
+      });
+      const result = await response.json();
+      if (!response.ok || result.error) {
+        throw new Error(result.error ? result.error.message : JSON.stringify(result));
+      }
+
+      const finalPostId = result.id || result.post_id || result.video_id;
+      logs.push(`[step4] Combined post published successfully! FB Response ID: ${finalPostId}`);
+
+      printResult(
+        buildResult({
+          success: true,
+          message: "Facebook post published successfully via attached_media",
+          data: {
+            page_id: pageId,
+            post_id: finalPostId,
+            media_uploaded: true,
+            media_type: "multi",
+            attached_media_count: uploads.length,
+            attached_media_ids: uploads.map((item) => item.mediaId),
+            raw_fb_response: result,
+          },
+          logs,
+        }),
+      );
+      return;
     }
 
     const file = mediaPaths.length > 0 ? mediaPaths[0] : null;

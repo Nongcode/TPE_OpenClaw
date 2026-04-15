@@ -15,7 +15,8 @@
           "allowAgents": [
             "nv_content",
             "nv_prompt",
-            "nv_media"
+            "nv_media",
+            "media_video"
           ]
         }
       },
@@ -50,6 +51,19 @@
         "model": "openai-codex/gpt-5.4",
         "skills": [
           "gemini-generate-image",
+          "generate-veo-video"
+        ],
+        "subagents": {
+          "allowAgents": [
+            "pho_phong"
+          ]
+        }
+      },
+      {
+        "id": "media_video",
+        "workspace": "C:\\Users\\Administrator\\.openclaw\\workspace_media_video",
+        "model": "openai-codex/gpt-5.4",
+        "skills": [
           "generate-veo-video"
         ],
         "subagents": {

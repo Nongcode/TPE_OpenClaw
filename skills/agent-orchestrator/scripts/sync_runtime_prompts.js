@@ -8,6 +8,7 @@ const PROMPT_FILE_BY_AGENT = {
   pho_phong: "pho_phong.SOUL.md",
   nv_content: "nv_content.SOUL.md",
   nv_media: "nv_media.SOUL.md",
+  media_video: "media_video.SOUL.md",
 };
 
 function resolveWorkspaceByAgent(config, agentId, openClawHome) {
@@ -21,6 +22,7 @@ function resolveWorkspaceByAgent(config, agentId, openClawHome) {
     pho_phong: path.join(openClawHome, "workspace_phophong"),
     nv_content: path.join(openClawHome, "workspace_content"),
     nv_media: path.join(openClawHome, "workspace_media"),
+    media_video: path.join(openClawHome, "workspace_media_video"),
   };
   return fallbacks[agentId] || null;
 }
