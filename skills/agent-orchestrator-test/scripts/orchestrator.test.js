@@ -600,6 +600,12 @@ test("buildMediaGeneratePrompt includes prompt package and references", () => {
 });
 
 test("buildVideoGeneratePrompt uses absolute veo action path and required references", () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "openclaw-video-prompt-"));
+  const productImage = path.join(tempDir, "product.png");
+  const logoPath = path.join(tempDir, "logo.png");
+  fs.writeFileSync(productImage, "product");
+  fs.writeFileSync(logoPath, "logo");
+
   const prompt = videoAgent.buildVideoGeneratePrompt({
     workflowId: "wf_test",
     stepId: "step_06_video_generate",
@@ -608,7 +614,7 @@ test("buildVideoGeneratePrompt uses absolute veo action path and required refere
       content: {
         approvedContent: "Noi dung test",
         productName: "May can chinh",
-        primaryProductImage: "D:\\images\\product.png",
+        primaryProductImage: productImage,
       },
       media: {
         generatedImagePath: "D:\\output\\approved-image.png",
@@ -618,14 +624,58 @@ test("buildVideoGeneratePrompt uses absolute veo action path and required refere
     promptPackage: {
       videoPrompt: "Prompt video final",
     },
-    logoPaths: ["C:\\logos\\logo.png"],
+    logoPaths: [logoPath],
   });
   assert.ok(prompt.includes("skills/generate_veo_video/action.js"));
-  assert.ok(prompt.includes("D:\\images\\product.png"));
-  assert.ok(prompt.includes("C:\\logos\\logo.png"));
+  assert.ok(prompt.includes(productImage));
+  assert.ok(prompt.includes(logoPath));
   assert.ok(prompt.includes("Prompt video final"));
   assert.ok(prompt.includes("8 giay"));
   assert.ok(prompt.includes("tieng Viet"));
+  assert.ok(!prompt.includes("D:\\output\\approved-image.png"));
+});
+
+test("buildVideoGeneratePrompt fails fast when primaryProductImage is missing", () => {
+  assert.throws(
+    () =>
+      videoAgent.buildVideoGeneratePrompt({
+        workflowId: "wf_test",
+        stepId: "step_06_video_generate",
+        state: {
+          original_brief: "Test brief",
+          content: {
+            approvedContent: "Noi dung test",
+            productName: "May can chinh",
+            primaryProductImage: "",
+          },
+        },
+        openClawHome: "/nonexistent",
+        promptPackage: {
+          videoPrompt: "Prompt video final",
+        },
+        logoPaths: [],
+      }),
+    /Thieu primaryProductImage/,
+  );
+});
+
+test("parseVideoResult rejects mismatched product image", () => {
+  const reply = `
+VIDEO_PROMPT_BEGIN
+Video quang cao san pham
+VIDEO_PROMPT_END
+GENERATED_VIDEO_PATH: D:\\output\\test.mp4
+USED_PRODUCT_IMAGE: D:\\images\\wrong-product.png
+USED_LOGO_PATHS: C:\\logos\\logo-a.png
+`;
+  assert.throws(
+    () =>
+      videoAgent.parseVideoResult(reply, {
+        productImage: "D:\\images\\product.png",
+        logoPaths: ["C:\\logos\\logo-a.png"],
+      }),
+    /Sai reference image/,
+  );
 });
 
 test("buildMediaRevisePrompt includes revised prompt package", () => {

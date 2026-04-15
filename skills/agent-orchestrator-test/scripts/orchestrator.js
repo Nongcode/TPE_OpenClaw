@@ -388,15 +388,22 @@ function collectMediaPaths(media) {
 }
 
 function buildPromptPreview(promptPackage) {
+  const shortenPrompt = (value, maxLength = 420) => {
+    const normalized = String(value || "").replace(/\s+/g, " ").trim();
+    if (!normalized) return "";
+    if (normalized.length <= maxLength) return normalized;
+    return `${normalized.slice(0, maxLength).trimEnd()}...`;
+  };
+
   const parts = [];
   if (promptPackage?.imagePrompt) {
     parts.push("PROMPT ANH DA DUNG:");
-    parts.push(promptPackage.imagePrompt);
+    parts.push(shortenPrompt(promptPackage.imagePrompt));
   }
   if (promptPackage?.videoPrompt) {
     if (parts.length > 0) parts.push("");
     parts.push("PROMPT VIDEO DA DUNG:");
-    parts.push(promptPackage.videoPrompt);
+    parts.push(shortenPrompt(promptPackage.videoPrompt));
   }
   return parts.join("\n");
 }
@@ -2149,7 +2156,10 @@ async function generateVideoFlow(context, state) {
 
   let videoMedia;
   try {
-    videoMedia = videoAgent.parseVideoResult(videoReply);
+    videoMedia = videoAgent.parseVideoResult(videoReply, {
+      productImage: generatingState.content?.primaryProductImage || "",
+      logoPaths,
+    });
   } catch (parseErr) {
     logger.logError("parse_video", parseErr);
     saveWorkflow(context.paths, {
@@ -2431,7 +2441,10 @@ async function reviseVideoFlow(context, state) {
 
   let videoMedia;
   try {
-    videoMedia = videoAgent.parseVideoResult(videoReply);
+    videoMedia = videoAgent.parseVideoResult(videoReply, {
+      productImage: revisingState.content?.primaryProductImage || "",
+      logoPaths,
+    });
   } catch (parseErr) {
     logger.logError("parse_video_revise", parseErr);
     saveWorkflow(context.paths, {

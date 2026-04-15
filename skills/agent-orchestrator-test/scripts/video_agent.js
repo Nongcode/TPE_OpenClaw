@@ -40,6 +40,30 @@ function resolveVideoOutputDir(openClawHome) {
   );
 }
 
+function assertVideoInputs(state, logoPaths = []) {
+  const productImage = state?.content?.primaryProductImage;
+  if (!productImage || !String(productImage).trim()) {
+    throw new Error("Thieu primaryProductImage. Dung workflow video_generate/video_revise.");
+  }
+
+  const resolvedProductImage = path.resolve(String(productImage).trim());
+  if (!fs.existsSync(resolvedProductImage)) {
+    throw new Error(`primaryProductImage khong ton tai: ${productImage}`);
+  }
+
+  const normalizedLogos = (logoPaths || []).filter((item) => String(item || "").trim());
+  for (const logoPath of normalizedLogos) {
+    const resolvedLogoPath = path.resolve(String(logoPath).trim());
+    if (!fs.existsSync(resolvedLogoPath)) {
+      throw new Error(`Logo khong ton tai: ${logoPath}`);
+    }
+  }
+}
+
+function normalizePathForCompare(value) {
+  return path.resolve(String(value || "").trim()).replace(/\\/g, "/").toLowerCase();
+}
+
 function buildVideoSystemPrompt(agentId, openClawHome) {
   const rulesSection = memory.buildRulesPromptSection(agentId, openClawHome);
 
@@ -56,6 +80,10 @@ function buildVideoSystemPrompt(agentId, openClawHome) {
     "NGUYEN TAC BAT BUOC:",
     "- Video khong duoc long text vao khung hinh",
     "- San pham trong video phai trung thanh voi anh goc, khong duoc bien tau thanh san pham khac",
+    "- DOI TUONG CHINH BAT BUOC la TOAN BO SAN PHAM trong anh goc, khong phai motor, bom, bo nguon, xi lanh, khung phu kien hay bat ky bo phan tach roi nao.",
+    "- Cam cac canh close-up khien vat the chinh bi hieu thanh mot linh kien rieng.",
+    "- Moi canh quay phai giu ty le, ket cau va hinh dang tong the trung voi anh goc.",
+    "- Neu khong the giu dung hinh dang tong the cua san pham, phai dung lai va bao loi thay vi tao sai san pham.",
     "- Logo cong ty phai dung thuong hieu, tach nen sach, va xuat hien o goc duoi ben phai",
     "- Video can ngan gon khoang 8 giay va co loi thuyet minh tieng Viet gioi thieu nhanh thong so chinh cua san pham",
     "- Khong tao cac canh phi thuc te, vo ly, qua CGI hay qua vi tuong",
@@ -75,6 +103,7 @@ function buildVideoPromptRequestPrompt(params) {
     openClawHome,
     logoPaths = mediaAgent.resolveLogoAssetPaths(openClawHome),
   } = params;
+  assertVideoInputs(state, logoPaths);
 
   return [
     buildVideoSystemPrompt("media_video", openClawHome),
@@ -89,7 +118,6 @@ function buildVideoPromptRequestPrompt(params) {
     state.content?.productName ? `Ten san pham: ${state.content.productName}` : "",
     state.content?.productUrl ? `URL san pham: ${state.content.productUrl}` : "",
     state.content?.primaryProductImage ? `Anh san pham goc bat buoc giu dung: ${state.content.primaryProductImage}` : "",
-    state.media?.generatedImagePath ? `Anh quang cao da duyet: ${state.media.generatedImagePath}` : "",
     logoPaths.length > 0 ? `Logo cong ty bat buoc dung: ${logoPaths.join(" ; ")}` : "",
     "",
     "NOI DUNG DA DUYET:",
@@ -99,8 +127,8 @@ function buildVideoPromptRequestPrompt(params) {
     "- Ban chua tao video o buoc nay.",
     "- Hay tong hop 1 yeu cau ngan gon nhung cu the de gui sang nv_prompt viet VIDEO prompt.",
     "- Bat buoc neu ro: khong long text vao video, san pham trung thanh anh goc, logo tach nen dat goc duoi ben phai, canh quay chan that tuyet doi.",
+    "- DOI TUONG CHINH BAT BUOC la toan bo san pham trong anh goc. Cam close-up lam san pham bi hieu thanh linh kien rieng.",
     "- Bat buoc them yeu cau video ngan khoang 8 giay va co giong doc tieng Viet gioi thieu rat gon 2-4 thong so/chuc nang chinh cua san pham.",
-    "- Neu da co anh quang cao da duyet, xem do la context tham khao bo cuc chuyen nghiep nhung khong duoc bien no thanh scene phi thuc te.",
     "",
     "MARKER BAT BUOC:",
     "PROMPT_REQUEST_BEGIN",
@@ -124,6 +152,7 @@ function buildVideoPromptReviseRequestPrompt(params) {
     openClawHome,
     logoPaths = mediaAgent.resolveLogoAssetPaths(openClawHome),
   } = params;
+  assertVideoInputs(state, logoPaths);
 
   return [
     buildVideoSystemPrompt("media_video", openClawHome),
@@ -149,6 +178,7 @@ function buildVideoPromptReviseRequestPrompt(params) {
     "- Ban chua tao lai video o buoc nay.",
     "- Hay tong hop 1 yeu cau prompt moi de gui sang nv_prompt dua tren feedback cua sep.",
     "- Bat buoc giu cac rule cot loi: khong text trong video, san pham dung anh goc, logo tach nen o goc duoi ben phai, canh quay chan that tuyet doi.",
+    "- DOI TUONG CHINH BAT BUOC la toan bo san pham trong anh goc. Cam close-up lam san pham bi hieu thanh linh kien rieng.",
     "- Neu sep yeu cau clip ngan, uu tien giu tong thoi luong khoang 8 giay va co giong doc tieng Viet gioi thieu rat gon thong so/chuc nang chinh.",
     "",
     "MARKER BAT BUOC:",
@@ -173,6 +203,7 @@ function buildVideoGeneratePrompt(params) {
     promptPackage = {},
     logoPaths = mediaAgent.resolveLogoAssetPaths(openClawHome),
   } = params;
+  assertVideoInputs(state, logoPaths);
   const videoOutputDir = resolveVideoOutputDir(openClawHome);
   const videoActionPath = path.join(REPO_ROOT, "skills", "generate_veo_video", "action.js").replace(/\\/g, "/");
 
@@ -189,7 +220,6 @@ function buildVideoGeneratePrompt(params) {
     state.content?.productName ? `Ten san pham: ${state.content.productName}` : "",
     state.content?.productUrl ? `URL san pham: ${state.content.productUrl}` : "",
     state.content?.primaryProductImage ? `Anh san pham goc bat buoc gui cho skill: ${state.content.primaryProductImage}` : "",
-    state.media?.generatedImagePath ? `Anh quang cao da duyet de tham khao: ${state.media.generatedImagePath}` : "",
     logoPaths.length > 0 ? `Logo cong ty bat buoc gui cho skill va prompt: ${logoPaths.join(" ; ")}` : "",
     `Thu muc output video bat buoc: ${videoOutputDir}`,
     "",
@@ -207,6 +237,10 @@ function buildVideoGeneratePrompt(params) {
     `- logo_paths BAT BUOC la: ${logoPaths.join(" ; ")}`,
     `- output_dir BAT BUOC la: ${videoOutputDir}`,
     "- Prompt video phai ep model giu dung san pham theo anh goc, khong duoc sinh mot san pham khac.",
+    "- DOI TUONG CHINH BAT BUOC la TOAN BO SAN PHAM trong anh goc, khong phai motor, bom, bo nguon, xi lanh, khung phu kien hay bat ky bo phan tach roi nao.",
+    "- Cam cac canh close-up khien vat the chinh bi hieu thanh mot linh kien rieng.",
+    "- Moi canh quay phai giu ty le, ket cau va hinh dang tong the trung voi anh goc.",
+    "- Neu khong the giu dung hinh dang tong the cua san pham, phai dung lai va bao loi thay vi tao sai san pham.",
     "- Prompt video phai neu ro clip ngan khoang 8 giay va co giong doc tieng Viet gioi thieu ngan gon thong so chinh cua san pham.",
     "- Khong doc lai SKILL.md ra chat. Khong dump log terminal raw vao reply.",
     "- Neu tool loi, chi tom tat loi that gon nhat.",
@@ -218,6 +252,9 @@ function buildVideoGeneratePrompt(params) {
     "GENERATED_VIDEO_PATH: <duong dan video that vua tao>",
     "USED_PRODUCT_IMAGE: <duong dan anh san pham goc da truyen vao skill>",
     "USED_LOGO_PATHS: <danh sach logo da truyen, ngan cach boi ;>",
+    "REFERENCE_IMAGE_SHA256: <sha256 cua anh reference da dung>",
+    "VIDEO_QC_STATUS: <PASS|FAIL>",
+    "VIDEO_QC_REASON: <tom tat ket qua QC>",
     "",
     "BAT BUOC:",
     "- Tra loi 100% tieng Viet co dau.",
@@ -237,6 +274,7 @@ function buildVideoRevisePrompt(params) {
     promptPackage = state.prompt_package || {},
     logoPaths = mediaAgent.resolveLogoAssetPaths(openClawHome),
   } = params;
+  assertVideoInputs(state, logoPaths);
   const videoOutputDir = resolveVideoOutputDir(openClawHome);
   const videoActionPath = path.join(REPO_ROOT, "skills", "generate_veo_video", "action.js").replace(/\\/g, "/");
 
@@ -253,7 +291,6 @@ function buildVideoRevisePrompt(params) {
     `Nhan xet tu sep: ${feedback}`,
     state.content?.productName ? `Ten san pham: ${state.content.productName}` : "",
     state.content?.primaryProductImage ? `Anh san pham goc bat buoc gui cho skill: ${state.content.primaryProductImage}` : "",
-    state.media?.generatedImagePath ? `Anh quang cao da duyet de tham khao: ${state.media.generatedImagePath}` : "",
     state.media?.generatedVideoPath ? `Video cu: ${state.media.generatedVideoPath}` : "",
     logoPaths.length > 0 ? `Logo cong ty bat buoc gui cho skill va prompt: ${logoPaths.join(" ; ")}` : "",
     `Thu muc output video bat buoc: ${videoOutputDir}`,
@@ -268,6 +305,10 @@ function buildVideoRevisePrompt(params) {
     "- Hay tao lai video theo dung prompt package da duoc giao va feedback moi.",
     `- Tren Windows/PowerShell, tao 1 file JSON tam chua prompt + reference_image + logo_paths + output_dir roi goi: node ${videoActionPath} --input_file <duong_dan_file_json>.`,
     "- Khong duoc bo qua reference product image va logo_paths.",
+    "- DOI TUONG CHINH BAT BUOC la TOAN BO SAN PHAM trong anh goc, khong phai motor, bom, bo nguon, xi lanh, khung phu kien hay bat ky bo phan tach roi nao.",
+    "- Cam cac canh close-up khien vat the chinh bi hieu thanh mot linh kien rieng.",
+    "- Moi canh quay phai giu ty le, ket cau va hinh dang tong the trung voi anh goc.",
+    "- Neu khong the giu dung hinh dang tong the cua san pham, phai dung lai va bao loi thay vi tao sai san pham.",
     "- Tiep tuc uu tien clip ngan khoang 8 giay va giong doc tieng Viet neu prompt duoc giao co yeu cau nay.",
     "",
     "MARKER BAT BUOC:",
@@ -277,6 +318,9 @@ function buildVideoRevisePrompt(params) {
     "GENERATED_VIDEO_PATH: <duong dan video moi>",
     "USED_PRODUCT_IMAGE: <duong dan anh san pham goc>",
     "USED_LOGO_PATHS: <danh sach logo, ngan cach boi ;>",
+    "REFERENCE_IMAGE_SHA256: <sha256 cua anh reference da dung>",
+    "VIDEO_QC_STATUS: <PASS|FAIL>",
+    "VIDEO_QC_REASON: <tom tat ket qua QC>",
     "",
     "BAT BUOC:",
     "- Tra loi 100% tieng Viet co dau.",
@@ -322,7 +366,7 @@ function extractFirstExistingPath(source, extensions) {
   return "";
 }
 
-function parseVideoResult(reply) {
+function parseVideoResult(reply, expected = {}) {
   const text = String(reply || "").trim();
   const videoPrompt = extractBlock(text, "VIDEO_PROMPT_BEGIN", "VIDEO_PROMPT_END");
   let generatedVideoPath = mediaAgent.normalizeAgentReportedPath(
@@ -345,6 +389,26 @@ function parseVideoResult(reply) {
 
   if (!generatedVideoPath) {
     throw new Error("media_video reply bi thieu duong dan video that.");
+  }
+  if (!usedProductImage) {
+    throw new Error("media_video reply bi thieu USED_PRODUCT_IMAGE.");
+  }
+
+  if (expected.productImage) {
+    const actual = normalizePathForCompare(usedProductImage);
+    const expectedImage = normalizePathForCompare(expected.productImage);
+    if (actual !== expectedImage) {
+      throw new Error(`Sai reference image. expected=${expected.productImage} actual=${usedProductImage}`);
+    }
+  }
+
+  if (expected.logoPaths?.length) {
+    const actualSet = new Set(usedLogoPaths.map(normalizePathForCompare));
+    for (const logoPath of expected.logoPaths) {
+      if (!actualSet.has(normalizePathForCompare(logoPath))) {
+        throw new Error(`Thieu logo bat buoc trong ket qua: ${logoPath}`);
+      }
+    }
   }
 
   return {

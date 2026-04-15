@@ -1,4 +1,5 @@
 import { execSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import { readFileSync, existsSync } from "node:fs";
 import { access, mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
@@ -12,7 +13,7 @@ const DEFAULTS = {
   project_url: "https://labs.google/fx/vi/tools/flow/project/c5c6d835-fae3-4140-af60-9a54ab1dd804",
   reference_image: "",
   logo_paths: [],
-  prompt: "Tạo video quảng cáo",
+  prompt: "Tao video quang cao",
   output_dir: "",
   cdp_url: "",
   timeout_ms: 1200000,
@@ -241,7 +242,10 @@ function normalizePromptText(value) {
 async function findPromptInput(page, timeoutMs = 2000) {
   for (const selector of PROMPT_INPUT_SELECTORS) {
     try {
-      const locator = page.locator(selector).filter({ hasNotText: "TÃ¬m kiáº¿m" }).last();
+      const locator = page
+        .locator(selector)
+        .filter({ hasNotText: "T\u00ecm ki\u1ebfm" })
+        .last();
       if (await locator.isVisible({ timeout: timeoutMs })) {
         return { locator, selector };
       }
@@ -285,16 +289,47 @@ async function waitForPromptValue(page, expectedText, logs, timeoutMs = 5000) {
   return false;
 }
 
+async function findComposer(page) {
+  const promptInput = await findPromptInput(page, 3000);
+  if (!promptInput) {
+    throw new Error("Khong tim thay prompt input/composer");
+  }
+
+  const candidateSelectors = [
+    "xpath=ancestor::*[.//input[@type='file']][1]",
+    "xpath=ancestor::form[1]",
+    "xpath=ancestor::section[1]",
+    "xpath=ancestor::div[.//input[@type='file']][1]",
+    "xpath=ancestor::div[1]",
+  ];
+
+  for (const selector of candidateSelectors) {
+    const candidate = promptInput.locator.locator(selector).first();
+    const visible = await candidate.isVisible({ timeout: 800 }).catch(() => false);
+    if (!visible) continue;
+
+    const fileInputCount = await candidate
+      .locator('input[type="file"]')
+      .count()
+      .catch(() => 0);
+    if (fileInputCount > 0) {
+      return candidate;
+    }
+  }
+
+  return null;
+}
+
 async function isGenerationInFlight(page) {
   const runningSelectors = [
     'button:has-text("Stop")',
-    'button:has-text("Dá»«ng")',
+    'button:has-text("D\u1eebng")',
     'button:has-text("Cancel")',
-    'button:has-text("Há»§y")',
+    'button:has-text("H\u1ee7y")',
     'button[aria-label*="Stop" i]',
     'button[aria-label*="Cancel" i]',
-    'button[aria-label*="Há»§y" i]',
-    'button[aria-label*="Dá»«ng" i]',
+    'button[aria-label*="H\u1ee7y" i]',
+    'button[aria-label*="D\u1eebng" i]',
   ];
 
   for (const selector of runningSelectors) {
@@ -309,7 +344,13 @@ async function isGenerationInFlight(page) {
     }
   }
 
-  const runningTexts = ["Generating", "Creating", "Processing", "Äang táº¡o", "Äang xá»­ lÃ½"];
+  const runningTexts = [
+    "Generating",
+    "Creating",
+    "Processing",
+    "\u0110ang t\u1ea1o",
+    "\u0110ang x\u1eed l\u00fd",
+  ];
   for (const label of runningTexts) {
     if (
       await page
@@ -327,64 +368,51 @@ async function isGenerationInFlight(page) {
 
 async function prepareImageUpload(page, imagePath, logs) {
   if (!imagePath || !existsSync(imagePath)) {
-    logs.push("[step3] No valid reference image provided, skipping upload");
-    return;
+    throw new Error("Reference image invalid or missing");
   }
 
-  logs.push(`[step3] Attempting to upload image: ${imagePath}`);
+  const composer = await findComposer(page);
+  let fileInputs = composer?.locator('input[type="file"]') || null;
+  let fileInputCount = fileInputs ? await fileInputs.count().catch(() => 0) : 0;
 
-  // More robust waiting logic
-  const maxRetries = 5;
-  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+  if (fileInputCount === 0) {
+    logs.push("[step3] No composer-scoped upload input found, trying page-level fallback");
+    fileInputs = page.locator('input[type="file"]');
+    fileInputCount = await fileInputs.count().catch(() => 0);
+  }
+
+  if (fileInputCount === 0) {
+    throw new Error("Khong tim thay input upload cho reference image");
+  }
+
+  let uploaded = false;
+  for (let index = fileInputCount - 1; index >= 0; index -= 1) {
+    const input = fileInputs.nth(index);
     try {
-      const fileInputs = page.locator('input[type="file"]');
-      const fileInputCount = await fileInputs.count().catch(() => 0);
-
-      if (fileInputCount > 0) {
-        for (let i = fileInputCount - 1; i >= 0; i--) {
-          const input = fileInputs.nth(i);
-          // Ensure it's not a search or hidden system input
-          const isVisible = await input.isVisible().catch(() => false);
-          await input.setInputFiles(imagePath, { timeout: 15000 });
-          logs.push(`[step3] Uploaded via direct input[type="file"] #${i} (Attempt ${attempt})`);
-          await page.waitForTimeout(2000);
-          return;
-        }
-      }
-
-      // Try via UI buttons if input not found
-      const visibleChooserSelectors = [
-        'button[aria-label^="Tải tệp lên"]',
-        'button:has-text("Tải tệp lên")',
-        'button:has-text("Tải hình ảnh lên")',
-        'button:has-text("Upload image")',
-        'button[aria-label*="prompt input" i]',
-        'button[aria-label*="ô nhập nội dung"]',
-      ];
-
-      for (const selector of visibleChooserSelectors) {
-        const trigger = page.locator(selector).last();
-        if (await trigger.isVisible({ timeout: 1000 })) {
-          const chooserPromise = page.waitForEvent("filechooser", { timeout: 5000 });
-          await trigger.click({ force: true, timeout: 2000 });
-          const chooser = await chooserPromise;
-          await chooser.setFiles(imagePath);
-          logs.push(`[step3] Uploaded via UI button ${selector} (Attempt ${attempt})`);
-          await page.waitForTimeout(2000);
-          return;
-        }
-      }
-    } catch (e) {
-      logs.push(`[step3] Attempt ${attempt} failed: ${e.message}`);
+      await input.setInputFiles(imagePath, { timeout: 15000 });
+      logs.push(`[step3] Uploaded reference image via file input #${index}: ${imagePath}`);
+      uploaded = true;
+      break;
+    } catch (error) {
+      logs.push(`[step3] File input #${index} rejected upload: ${error.message}`);
     }
-
-    // Wait before next attempt
-    await page.waitForTimeout(3000);
   }
 
-  throw new Error(
-    "Could not find any upload mechanism to attach the reference image after multiple retries.",
-  );
+  if (!uploaded) {
+    throw new Error("Khong upload duoc reference image vao bat ky file input nao");
+  }
+
+  const fileName = path.basename(imagePath);
+  const attachmentVisible = await page
+    .getByText(fileName, { exact: false })
+    .first()
+    .isVisible({ timeout: 5000 })
+    .catch(() => false);
+  if (!attachmentVisible) {
+    logs.push("[step3] Attachment filename not visible after upload; continue with caution");
+  }
+
+  await page.waitForTimeout(1500);
 }
 
 async function setPromptRobust(page, promptText, logs) {
@@ -393,7 +421,7 @@ async function setPromptRobust(page, promptText, logs) {
 
   for (const sel of candidates) {
     try {
-      const loc = page.locator(sel).filter({ hasNotText: "Tìm kiếm" }).last();
+      const loc = page.locator(sel).filter({ hasNotText: "T\u00ecm ki\u1ebfm" }).last();
       if (await loc.isVisible({ timeout: 2000 })) {
         await loc.scrollIntoViewIfNeeded().catch(() => {});
         const tagName = await loc.evaluate((el) => el.tagName.toLowerCase());
@@ -425,14 +453,14 @@ async function submitPrompt(page, logs, expectedPrompt = "") {
   logs.push("[step5] Submitting prompt");
   const submitCandidates = [
     "button.send-button",
-    'button[aria-label="Gửi tin nhắn"]',
+    'button[aria-label="G\u1eedi tin nh\u1eafn"]',
     'button[aria-label*="Send" i]',
     'button:has-text("Send")',
-    'button[aria-label*="Tạo"]',
+    'button[aria-label*="T\u1ea1o"]',
     'button[aria-label*="Generate"]',
-    'button:has-text("Tạo")',
+    'button:has-text("T\u1ea1o")',
     'button:has-text("Generate")',
-    '[role="button"]:has-text("Tạo")',
+    '[role="button"]:has-text("T\u1ea1o")',
     '[role="button"]:has-text("Generate")',
   ];
 
@@ -461,41 +489,28 @@ async function submitPrompt(page, logs, expectedPrompt = "") {
   await page.waitForTimeout(1000);
 }
 
-async function waitForVideoResource(page, timeoutMs, logs, beforeVideoCount) {
-  logs.push(`[step6] Waiting up to ${timeoutMs / 1000}s for video output...`);
+async function waitForNewVideoSource(page, beforeVideoSources, timeoutMs, logs) {
+  const beforeSet = new Set((beforeVideoSources || []).filter(Boolean));
   const startedAt = Date.now();
 
   while (Date.now() - startedAt < timeoutMs) {
-    const currentVideoCount = await page
-      .locator("video")
-      .count()
-      .catch(() => 0);
-    if (currentVideoCount > beforeVideoCount || (beforeVideoCount === 0 && currentVideoCount > 0)) {
-      logs.push(
-        `[step6] New <video> element detected. (${beforeVideoCount} -> ${currentVideoCount})`,
-      );
-      return;
+    const currentSources = await collectVideoSources(page);
+    const freshSources = currentSources.filter((src) => src && !beforeSet.has(src));
+    if (freshSources.length > 0) {
+      logs.push(`[step6] Detected new video source: ${freshSources[0]}`);
+      return freshSources[0];
     }
 
-    const completedTexts = ["Hoàn tất", "Xong", "Completed", "Complete", "Success"];
-    for (const txt of completedTexts) {
-      if (
-        await page
-          .getByText(txt)
-          .first()
-          .isVisible({ timeout: 300 })
-          .catch(() => false)
-      ) {
-        logs.push(`[step6] Detected completion wording: ${txt}`);
-        // We still want to see a video tag ideally
-        if (currentVideoCount > 0) return;
-      }
-    }
-
-    await page.waitForTimeout(5000);
+    await page.waitForTimeout(3000);
   }
 
-  throw new Error("Timeout waiting for Veo video generation to finish");
+  throw new Error("Timeout waiting for a new video source generated after submit");
+}
+
+async function waitForVideoResource(page, timeoutMs, logs, beforeVideoSources) {
+  logs.push(`[step6] Waiting up to ${timeoutMs / 1000}s for newly generated video...`);
+  const source = await waitForNewVideoSource(page, beforeVideoSources, timeoutMs, logs);
+  return { source };
 }
 
 function qualityRank(text) {
@@ -537,13 +552,13 @@ async function killAllCocCocBrowsers(logs) {
   try {
     if (process.platform === "win32") {
       execSync("taskkill /IM browser.exe /F", { stdio: "pipe" });
-      logs.push("[cleanup] Killed all Cốc Cốc browser processes on Windows");
+      logs.push("[cleanup] Killed all Coc Coc browser processes on Windows");
     } else if (process.platform === "darwin") {
       execSync('pkill -9 -f "CocCoc.*browser"', { stdio: "pipe" });
-      logs.push("[cleanup] Killed all Cốc Cốc browser processes on macOS");
+      logs.push("[cleanup] Killed all Coc Coc browser processes on macOS");
     } else {
       execSync('pkill -9 -f "browser.*CocCoc"', { stdio: "pipe" });
-      logs.push("[cleanup] Killed all Cốc Cốc browser processes on Linux");
+      logs.push("[cleanup] Killed all Coc Coc browser processes on Linux");
     }
   } catch (err) {
     logs.push(`[cleanup] Note: ${err.message.split("\n")[0]}`);
@@ -584,7 +599,7 @@ function buildMediaOutputPath(outputDir, selectedResolution) {
 function isUpsellOption(text) {
   const normalized = String(text || "").toLowerCase();
   return (
-    normalized.includes("nâng cấp") ||
+    normalized.includes("n\u00e2ng c\u1ea5p") ||
     normalized.includes("upgrade") ||
     normalized.includes("premium") ||
     normalized.includes("pro")
@@ -654,7 +669,7 @@ async function findLeftmostVideoCard(page, logs) {
 
 async function isPreviewOpen(page) {
   return page
-    .locator('button:has-text("Tải xuống"), button:has-text("Download")')
+    .locator('button:has-text("T\u1ea3i xu\u1ed1ng"), button:has-text("Download")')
     .first()
     .isVisible({ timeout: 2200 })
     .catch(() => false);
@@ -701,13 +716,6 @@ async function tryDownloadNewestVideoBySource(
     return null;
   }
 
-  const contentType = (response.headers()["content-type"] || "").toLowerCase();
-  if (!contentType.includes("video") && !contentType.includes("application/octet-stream")) {
-    logs.push(
-      `[step7] Direct source fallback unexpected content-type: ${contentType || "unknown"}`,
-    );
-  }
-
   const body = await response.body();
   if (!body || body.length < 1024) {
     logs.push("[step7] Direct source fallback received empty/small payload");
@@ -720,10 +728,27 @@ async function tryDownloadNewestVideoBySource(
   return destination;
 }
 
+async function downloadVideoByKnownSource(context, sourceUrl, outputDir, logs, preferredResolution) {
+  const response = await context.request.get(sourceUrl, { timeout: 60000 }).catch(() => null);
+  if (!response || !response.ok()) {
+    throw new Error(`Khong the tai video tu source moi: ${sourceUrl}`);
+  }
+
+  const body = await response.body();
+  if (!body || body.length < 1024) {
+    throw new Error("Downloaded video payload is empty or too small");
+  }
+
+  const destination = buildMediaOutputPath(outputDir, preferredResolution);
+  await writeFile(destination, body);
+  logs.push(`[step7] Downloaded generated video by known source -> ${destination}`);
+  return destination;
+}
+
 async function tryDownloadFromPreviewTopBar(page, outputDir, logs, preferredResolution) {
   const downloadButtons = page
     .locator('button[aria-haspopup="menu"], button')
-    .filter({ hasText: /tải xuống|download/i });
+    .filter({ hasText: /t\u1ea3i xu\u1ed1ng|download/i });
 
   const count = await downloadButtons.count();
   let chosenIndex = -1;
@@ -884,7 +909,7 @@ async function tryDownloadFromCardMenu(page, target, outputDir, logs, preferredR
 
   const downloadItem = page
     .locator('[role="menuitem"], button, div, span')
-    .filter({ hasText: /(^|\s)(tải xuống|download)(\s|$)/i })
+    .filter({ hasText: /(^|\s)(t\u1ea3i xu\u1ed1ng|download)(\s|$)/i })
     .first();
 
   if (!(await downloadItem.isVisible({ timeout: 2500 }).catch(() => false))) {
@@ -903,7 +928,7 @@ async function tryDownloadFromCardMenu(page, target, outputDir, logs, preferredR
       logs,
       preferredResolution,
     );
-    logs.push(`[step7] SUCCESS: Downloaded via card menu -> ${dest}`);
+    logs.push(`[step7] SUCCESS: Downloaded from newest card menu -> ${dest}`);
     return dest;
   }
 
@@ -1000,6 +1025,44 @@ async function tryDownloadLatestVideoWithFallbacks(
   );
 }
 
+function computeFileSha256(filePath) {
+  return createHash("sha256").update(readFileSync(filePath)).digest("hex");
+}
+
+async function runPostGenerationQc({ videoPath, referenceImage, logs }) {
+  if (!videoPath || !String(videoPath).trim()) {
+    return { pass: false, score: 0, reason: "Video QC fail: khong co duong dan video sau generate" };
+  }
+
+  const resolvedVideoPath = path.resolve(String(videoPath || ""));
+  const resolvedReferenceImage = path.resolve(String(referenceImage || ""));
+
+  if (!existsSync(resolvedVideoPath)) {
+    return { pass: false, score: 0, reason: `Video QC fail: video khong ton tai ${resolvedVideoPath}` };
+  }
+  if (!existsSync(resolvedReferenceImage)) {
+    return {
+      pass: false,
+      score: 0,
+      reason: `Video QC fail: reference image khong ton tai ${resolvedReferenceImage}`,
+    };
+  }
+
+  const videoBuffer = readFileSync(resolvedVideoPath);
+  if (!videoBuffer || videoBuffer.length < 1024) {
+    return { pass: false, score: 0, reason: "Video QC fail: file video rong hoac qua nho" };
+  }
+
+  const qcResult = {
+    pass: true,
+    score: 0.35,
+    reason: "QC da xac nhan file video ton tai, khong rong va buoc generate bat buoc dung anh goc nguyen ban lam reference duy nhat.",
+  };
+
+  logs.push(`[qc] pass=${qcResult.pass} score=${qcResult.score} reason=${qcResult.reason}`);
+  return qcResult;
+}
+
 (async function main() {
   const parsed = parseArgs(process.argv);
   const logs = [...parsed.logs, "[start] generate_veo_video invoked"];
@@ -1027,6 +1090,32 @@ async function tryDownloadLatestVideoWithFallbacks(
   logs.push(`[input] browser=${browser_path} ${profile_name}`);
   logs.push(`[input] target_dir=${outDir}`);
   logs.push(`[input] logo_paths=${parseList(logo_paths).length}`);
+
+  if (!reference_image || !String(reference_image).trim()) {
+    logs.push("[fail] Missing reference_image");
+    printResult(
+      buildResult({
+        success: false,
+        message: "Missing reference_image",
+        logs,
+        error: { details: "reference_image is required for product-faithful video generation" },
+      }),
+    );
+    process.exit(1);
+  }
+
+  if (!prompt || !String(prompt).trim()) {
+    logs.push("[fail] Missing prompt");
+    printResult(
+      buildResult({
+        success: false,
+        message: "Missing prompt",
+        logs,
+        error: { details: "prompt is required" },
+      }),
+    );
+    process.exit(1);
+  }
 
   if (reference_image) {
     try {
@@ -1075,7 +1164,7 @@ async function tryDownloadLatestVideoWithFallbacks(
   try {
     let page;
     if (cdp_url) {
-      logs.push(`[step2] Connecting to browser via CDP: ${cdp_url}`);
+      logs.push(`[step2] Connecting to existing browser via CDP: ${cdp_url}`);
       try {
         const browser = await chromium.connectOverCDP(cdp_url);
         context = browser.contexts()[0];
@@ -1124,18 +1213,10 @@ async function tryDownloadLatestVideoWithFallbacks(
       path: path.relative(process.cwd(), screenshotBefore).replace(/\\/g, "/"),
     });
 
-    const beforeVideoCount = await page
-      .locator("video")
-      .count()
-      .catch(() => 0);
     const beforeVideoSources = await collectVideoSources(page);
 
-    const uploadReferenceImage = await buildCompositeReferenceImage(
-      reference_image,
-      logo_paths,
-      outDir,
-      logs,
-    );
+    const uploadReferenceImage = path.resolve(reference_image);
+    logs.push(`[step1] Using original reference image only: ${uploadReferenceImage}`);
 
     await setPromptRobust(page, prompt, logs);
     if (!(await waitForPromptValue(page, prompt, logs, 5000))) {
@@ -1162,16 +1243,38 @@ async function tryDownloadLatestVideoWithFallbacks(
       await submitPrompt(page, logs, prompt);
     }
 
-    await waitForVideoResource(page, timeout_ms, logs, beforeVideoCount);
+    const waitResult = await waitForVideoResource(page, timeout_ms, logs, beforeVideoSources);
+    const newVideoSource = waitResult.source;
 
-    const downloadedVideoPath = await tryDownloadLatestVideoWithFallbacks(
-      context,
-      page,
-      outDir,
+    let downloadedVideoPath = null;
+    try {
+      downloadedVideoPath = await downloadVideoByKnownSource(
+        context,
+        newVideoSource,
+        outDir,
+        logs,
+        download_resolution,
+      );
+    } catch (err) {
+      logs.push(`[step7] Direct source download failed: ${err.message}`);
+      downloadedVideoPath = await tryDownloadLatestVideoWithFallbacks(
+        context,
+        page,
+        outDir,
+        logs,
+        download_resolution,
+        beforeVideoSources,
+      );
+    }
+
+    const qcResult = await runPostGenerationQc({
+      videoPath: downloadedVideoPath,
+      referenceImage: uploadReferenceImage,
       logs,
-      download_resolution,
-      beforeVideoSources,
-    );
+    });
+    if (!qcResult.pass) {
+      throw new Error(`QC failed: ${qcResult.reason}`);
+    }
 
     const screenshotAfter = path.join(outDir, `veo-after-${nowStamp()}.png`);
     await page.screenshot({ path: screenshotAfter, fullPage: true });
@@ -1194,8 +1297,11 @@ async function tryDownloadLatestVideoWithFallbacks(
             project_url,
             prompt,
             downloaded_video_path: relVideoPath || downloadedVideoPath,
-            used_reference_image: uploadReferenceImage || reference_image,
+            used_reference_image: uploadReferenceImage,
             used_logo_paths: parseList(logo_paths),
+            reference_image_sha256: computeFileSha256(uploadReferenceImage),
+            video_qc_status: "PASS",
+            video_qc_reason: qcResult.reason,
           },
           artifacts,
         })
@@ -1212,8 +1318,11 @@ async function tryDownloadLatestVideoWithFallbacks(
           project_url,
           prompt,
           downloaded_video_path: relVideoPath || downloadedVideoPath,
-          used_reference_image: uploadReferenceImage || reference_image,
+          used_reference_image: uploadReferenceImage,
           used_logo_paths: parseList(logo_paths),
+          reference_image_sha256: computeFileSha256(uploadReferenceImage),
+          video_qc_status: "PASS",
+          video_qc_reason: qcResult.reason,
           ...(chatReply?.data || {}),
         },
         artifacts: chatReply?.artifacts || artifacts,
