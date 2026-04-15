@@ -5,10 +5,12 @@ const path = require("path");
 const os = require("os");
 
 const {
+  buildStageHumanMessage,
   classifyContentDecision,
   classifyMediaDecision,
   extractBlock,
   extractField,
+  hasWorkflowStageNotification,
   parseContentReply,
   parseMediaReply,
   scanLatestGeneratedMedia,
@@ -37,6 +39,35 @@ test("classifyMediaDecision detects publish approval", () => {
 
 test("classifyMediaDecision detects prompt rejection keywords", () => {
   assert.equal(classifyMediaDecision("Sua prompt, prompt chua on"), "reject");
+});
+
+test("buildStageHumanMessage builds media approval checkpoint text", () => {
+  const text = buildStageHumanMessage({
+    stage: "awaiting_media_approval",
+    media: {
+      generatedImagePath: "C:\\media\\generated.png",
+      usedProductImage: "C:\\product.png",
+      usedLogoPaths: ["C:\\logo.png"],
+      mediaType: "image",
+    },
+    prompt_package: {
+      imagePrompt: "Prompt anh test",
+    },
+  });
+  assert.ok(text.includes("NV Media da tao xong media"));
+  assert.ok(text.includes('MEDIA: "C:/media/generated.png"'));
+  assert.ok(text.includes("Prompt anh test"));
+});
+
+test("hasWorkflowStageNotification detects delivered checkpoints", () => {
+  assert.equal(
+    hasWorkflowStageNotification(
+      { notifications: { awaiting_media_approval: { at: "2026-04-15T03:00:00.000Z", delivery: "auto" } } },
+      "awaiting_media_approval",
+    ),
+    true,
+  );
+  assert.equal(hasWorkflowStageNotification({}, "awaiting_media_approval"), false);
 });
 
 test("extract helpers read workflow markers", () => {
@@ -116,6 +147,28 @@ test("scanLatestGeneratedMedia can recover repo-level generated image artifacts"
   const result = scanLatestGeneratedMedia(openClawHome, startedAtIso, { repoRoot });
   assert.equal(result.imagePath, repoImagePath);
   assert.equal(result.videoPath, "");
+
+  fs.rmSync(tmpRoot, { recursive: true, force: true });
+});
+
+test("scanLatestGeneratedMedia ignores gemini after screenshots when a downloaded image exists", () => {
+  const tmpRoot = path.join(os.tmpdir(), `orchestrator-scan-priority-${Date.now()}`);
+  const openClawHome = path.join(tmpRoot, ".openclaw");
+  const workspaceImagesDir = path.join(openClawHome, "workspace_media", "artifacts", "images");
+  const startedAtIso = new Date(Date.now() - 10_000).toISOString();
+  const generatedPath = path.join(workspaceImagesDir, "Gemini_Generated_Image_real.png");
+  const screenshotPath = path.join(workspaceImagesDir, "gemini-after-2026-04-15T03-06-16-917Z.png");
+
+  fs.mkdirSync(workspaceImagesDir, { recursive: true });
+  fs.writeFileSync(generatedPath, "generated");
+  fs.writeFileSync(screenshotPath, "screenshot");
+
+  const now = new Date();
+  fs.utimesSync(generatedPath, new Date(now.getTime() - 2_000), new Date(now.getTime() - 2_000));
+  fs.utimesSync(screenshotPath, now, now);
+
+  const result = scanLatestGeneratedMedia(openClawHome, startedAtIso);
+  assert.equal(result.imagePath, generatedPath);
 
   fs.rmSync(tmpRoot, { recursive: true, force: true });
 });
@@ -443,6 +496,36 @@ DE_XUAT_BUOC_TIEP: cho duyet
   assert.deepEqual(result.usedLogoPaths, ["C:\\logos\\logo-a.png", "C:\\logos\\logo-b.png"]);
 });
 
+test("parseImageResult repairs malformed .openclaw paths from nv_media reply", () => {
+  const reply = `
+WORKFLOW_META:
+workflow_id: wf_test
+step_id: step_03_media
+
+TRANG_THAI: completed
+
+KET_QUA:
+IMAGE_PROMPT_BEGIN
+Anh quang cao may nang dien
+IMAGE_PROMPT_END
+GENERATED_IMAGE_PATH: C:\\Users\\Administrator.openclaw\\workspace_media\\artifacts\\images\\test.png
+USED_PRODUCT_IMAGE: C:\\Users\\Administrator.openclaw\\workspace_content\\artifacts\\references\\product.png
+USED_LOGO_PATHS: C:\\Users\\Administrator.openclaw\\assets\\logos\\logo.png
+`;
+  const result = mediaAgent.parseImageResult(reply);
+  assert.equal(
+    result.generatedImagePath,
+    path.resolve("C:\\Users\\Administrator\\.openclaw\\workspace_media\\artifacts\\images\\test.png"),
+  );
+  assert.equal(
+    result.usedProductImage,
+    "C:\\Users\\Administrator\\.openclaw\\workspace_content\\artifacts\\references\\product.png",
+  );
+  assert.deepEqual(result.usedLogoPaths, [
+    "C:\\Users\\Administrator\\.openclaw\\assets\\logos\\logo.png",
+  ]);
+});
+
 test("parseVideoResult parses valid reply", () => {
   const reply = `
 VIDEO_PROMPT_BEGIN
@@ -457,6 +540,29 @@ USED_LOGO_PATHS: C:\\logos\\logo-a.png
   assert.equal(result.generatedVideoPath, "D:\\output\\test.mp4");
   assert.equal(result.mediaType, "video");
   assert.equal(result.usedProductImage, "D:\\images\\product.png");
+});
+
+test("parseVideoResult repairs malformed .openclaw paths from media_video reply", () => {
+  const reply = `
+VIDEO_PROMPT_BEGIN
+Video quang cao san pham
+VIDEO_PROMPT_END
+GENERATED_VIDEO_PATH: C:\\Users\\Administrator.openclaw\\workspace_media_video\\artifacts\\videos\\test.mp4
+USED_PRODUCT_IMAGE: C:\\Users\\Administrator.openclaw\\workspace_content\\artifacts\\references\\product.png
+USED_LOGO_PATHS: C:\\Users\\Administrator.openclaw\\assets\\logos\\logo.png
+`;
+  const result = videoAgent.parseVideoResult(reply);
+  assert.equal(
+    result.generatedVideoPath,
+    path.resolve("C:\\Users\\Administrator\\.openclaw\\workspace_media_video\\artifacts\\videos\\test.mp4"),
+  );
+  assert.equal(
+    result.usedProductImage,
+    "C:\\Users\\Administrator\\.openclaw\\workspace_content\\artifacts\\references\\product.png",
+  );
+  assert.deepEqual(result.usedLogoPaths, [
+    "C:\\Users\\Administrator\\.openclaw\\assets\\logos\\logo.png",
+  ]);
 });
 
 test("buildMediaSystemPrompt includes direct execution rules", () => {
@@ -518,6 +624,8 @@ test("buildVideoGeneratePrompt uses absolute veo action path and required refere
   assert.ok(prompt.includes("D:\\images\\product.png"));
   assert.ok(prompt.includes("C:\\logos\\logo.png"));
   assert.ok(prompt.includes("Prompt video final"));
+  assert.ok(prompt.includes("8 giay"));
+  assert.ok(prompt.includes("tieng Viet"));
 });
 
 test("buildMediaRevisePrompt includes revised prompt package", () => {

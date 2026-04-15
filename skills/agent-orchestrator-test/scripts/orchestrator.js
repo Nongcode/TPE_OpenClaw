@@ -15,6 +15,7 @@
 const fs = require("fs");
 const path = require("path");
 const { randomUUID } = require("crypto");
+const { spawn } = require("child_process");
 
 const {
   normalizeText,
@@ -49,6 +50,10 @@ function parseArgs(argv) {
     timeoutMs: 900000,
     dryRun: false,
     useLLMIntent: false, // Táº¯t máº·c Ä‘á»‹nh â€” LLM intent gá»­i prompt vÃ o lane phÃ³ phÃ²ng gÃ¢y lá»™ ná»™i dung. DÃ¹ng keyword matching.
+    autoNotifyWatch: false,
+    notifySessionKey: "",
+    notifyWorkflowId: "",
+    notifyStage: "",
   };
 
   const positional = [];
@@ -87,6 +92,25 @@ function parseArgs(argv) {
     }
     if (token === "--timeout-ms") {
       options.timeoutMs = Number(argv[index + 1] || options.timeoutMs);
+      index += 1;
+      continue;
+    }
+    if (token === "--auto-notify-watch") {
+      options.autoNotifyWatch = true;
+      continue;
+    }
+    if (token === "--notify-session-key") {
+      options.notifySessionKey = argv[index + 1] || "";
+      index += 1;
+      continue;
+    }
+    if (token === "--notify-workflow-id") {
+      options.notifyWorkflowId = argv[index + 1] || "";
+      index += 1;
+      continue;
+    }
+    if (token === "--notify-stage") {
+      options.notifyStage = argv[index + 1] || "";
       index += 1;
       continue;
     }
@@ -146,6 +170,8 @@ function getMediaTimeoutMs(baseTimeoutMs) {
 function normalizeMediaPathForDirective(filePath) {
   return String(filePath || "")
     .trim()
+    .replace(/([A-Za-z]:\\Users\\Administrator)\.openclaw(?=\\|$)/gi, "$1\\.openclaw")
+    .replace(/([A-Za-z]:\/Users\/Administrator)\.openclaw(?=\/|$)/gi, "$1/.openclaw")
     .replace(/\\/g, "/");
 }
 
@@ -200,6 +226,27 @@ function saveWorkflow(paths, state) {
   const payload = { ...state, updated_at: nowIso() };
   writeJson(paths.currentFile, payload);
   return payload;
+}
+
+function hasWorkflowStageNotification(state, stage) {
+  return Boolean(state?.notifications?.[stage]);
+}
+
+function markWorkflowStageNotified(paths, workflowId, stage, delivery = "sync") {
+  const current = readJsonIfExists(paths.currentFile, null);
+  if (!current || current.workflow_id !== workflowId || current.stage !== stage) {
+    return current;
+  }
+  return saveWorkflow(paths, {
+    ...current,
+    notifications: {
+      ...(current.notifications || {}),
+      [stage]: {
+        at: nowIso(),
+        delivery,
+      },
+    },
+  });
 }
 
 /**
@@ -478,6 +525,111 @@ function buildPublishDecisionSummary(state) {
     .join("\n");
 }
 
+function buildStageHumanMessage(state) {
+  if (!state) return "";
+  if (state.stage === "awaiting_media_approval") {
+    return buildMediaApprovalSummary({
+      media: state.media || {},
+      promptPackage: state.prompt_package || {},
+      route: mediaAgent.routeMediaType(
+        state.media?.mediaType ||
+          state.generating_route ||
+          state.intent?.media_type_requested ||
+          "image",
+      ),
+    });
+  }
+  if (state.stage === "awaiting_video_approval") {
+    return buildVideoApprovalSummary({
+      media: state.media || {},
+      promptPackage: state.prompt_package || {},
+    });
+  }
+  if (state.stage === "awaiting_publish_decision") {
+    return buildPublishDecisionSummary(state);
+  }
+  return "";
+}
+
+function startWorkflowStageAutoNotifyWatcher(params) {
+  const sessionKey = String(params.sessionKey || "").trim();
+  const workflowId = String(params.workflowId || "").trim();
+  const stage = String(params.stage || "").trim();
+  if (!sessionKey || !workflowId || !stage) {
+    return;
+  }
+
+  const args = [
+    __filename,
+    "--auto-notify-watch",
+    "--openclaw-home",
+    params.openClawHome,
+    "--notify-session-key",
+    sessionKey,
+    "--notify-workflow-id",
+    workflowId,
+    "--notify-stage",
+    stage,
+    "--timeout-ms",
+    String(params.timeoutMs || 900000),
+  ];
+
+  try {
+    const child = spawn(process.execPath, args, {
+      detached: true,
+      stdio: "ignore",
+      windowsHide: true,
+    });
+    child.unref();
+  } catch (error) {
+    logger.logError("auto_notify_spawn", error);
+  }
+}
+
+async function runAutoNotifyWatcher(options) {
+  const openClawHome = resolveOpenClawHome(options.openClawHome);
+  const config = loadOpenClawConfig(openClawHome);
+  const workspaceDir = getPhoPhongWorkspace(config, openClawHome);
+  const paths = buildPaths(workspaceDir);
+  const targetWorkflowId = String(options.notifyWorkflowId || "").trim();
+  const targetStage = String(options.notifyStage || "").trim();
+  const targetSessionKey = String(options.notifySessionKey || "").trim();
+  const deadline =
+    Date.now() + Math.min(Math.max(Number(options.timeoutMs) || 900000, 30000), 1800000);
+
+  while (Date.now() <= deadline) {
+    const state = readJsonIfExists(paths.currentFile, null);
+    if (!state || state.workflow_id !== targetWorkflowId) {
+      return;
+    }
+    if (state.stage === targetStage) {
+      if (hasWorkflowStageNotification(state, targetStage)) {
+        return;
+      }
+      const humanMessage = buildStageHumanMessage(state);
+      if (!humanMessage) {
+        return;
+      }
+      await transport.callGatewayMethod({
+        openClawHome,
+        method: "chat.inject",
+        params: {
+          sessionKey: targetSessionKey,
+          message: humanMessage,
+          label: "workflow-auto-notify",
+        },
+        timeoutMs: 30000,
+      });
+      markWorkflowStageNotified(paths, targetWorkflowId, targetStage, "auto");
+      return;
+    }
+    if (["published", "scheduled", "cancelled"].includes(String(state.stage || ""))) {
+      return;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 5000));
+  }
+}
+
 function selectLatestArtifactPath(dirPath, extensions, sinceMs, excludePatterns = []) {
   try {
     if (!dirPath || !fs.existsSync(dirPath)) {
@@ -509,6 +661,16 @@ function selectLatestArtifactPath(dirPath, extensions, sinceMs, excludePatterns 
   }
 }
 
+function scoreGeneratedImageArtifact(fullPath) {
+  const fileName = path.basename(fullPath || "").toLowerCase();
+  if (!fileName) return -1;
+  if (/^gemini_generated_image_/i.test(fileName)) return 4;
+  if (/[_-]final\./i.test(fileName)) return 3;
+  if (/generated|download/i.test(fileName)) return 2;
+  if (/^gemini-(before|after)-/i.test(fileName)) return -1;
+  return 1;
+}
+
 function selectLatestArtifactAcrossDirs(dirPaths, extensions, sinceMs, excludePatterns = []) {
   const candidates = dirPaths
     .map((dirPath) => selectLatestArtifactPath(dirPath, extensions, sinceMs, excludePatterns))
@@ -534,12 +696,45 @@ function scanLatestGeneratedMedia(openClawHome, startedAtIso, overrides = {}) {
   const sinceMs = startedAtIso ? new Date(startedAtIso).getTime() : 0;
   const repoRoot = path.resolve(overrides.repoRoot || REPO_ROOT);
 
-  const imagePath = selectLatestArtifactAcrossDirs(
-    [path.join(workspaceDir, "artifacts", "images"), path.join(repoRoot, "artifacts", "images")],
-    [".png", ".jpg", ".jpeg", ".webp"],
-    sinceMs,
-    [/before/i, /screenshot/i, /test_/i],
-  );
+  const imageDirs = [
+    path.join(workspaceDir, "artifacts", "images"),
+    path.join(repoRoot, "artifacts", "images"),
+  ];
+  const imageCandidates = imageDirs
+    .flatMap((dirPath) => {
+      try {
+        if (!dirPath || !fs.existsSync(dirPath)) return [];
+        return fs
+          .readdirSync(dirPath)
+          .filter((name) => {
+            if (![".png", ".jpg", ".jpeg", ".webp"].includes(path.extname(name).toLowerCase())) {
+              return false;
+            }
+            if (
+              [/before/i, /after/i, /screenshot/i, /test_/i].some((pattern) => pattern.test(name))
+            ) {
+              return false;
+            }
+            const fullPath = path.join(dirPath, name);
+            const mtimeMs = fs.statSync(fullPath).mtimeMs;
+            return !Number.isFinite(sinceMs) || sinceMs <= 0 || mtimeMs >= sinceMs;
+          })
+          .map((name) => {
+            const fullPath = path.join(dirPath, name);
+            return {
+              fullPath,
+              mtimeMs: fs.statSync(fullPath).mtimeMs,
+              score: scoreGeneratedImageArtifact(fullPath),
+            };
+          })
+          .filter((item) => item.score >= 0);
+      } catch {
+        return [];
+      }
+    })
+    .sort((left, right) => right.score - left.score || right.mtimeMs - left.mtimeMs);
+
+  const imagePath = imageCandidates[0]?.fullPath || "";
 
   const videoDirs = [
     path.join(workspaceDir, "artifacts", "videos"),
@@ -652,6 +847,12 @@ async function startNewWorkflow(context) {
     publish: null,
     reject_history: [],
     prompt_versions: [],
+    notifications: {
+      awaiting_content_approval: {
+        at: nowIso(),
+        delivery: "sync",
+      },
+    },
   });
 
   const summary = [
@@ -1326,6 +1527,14 @@ async function generateMediaFlow(context, state) {
     prompt_versions: [...(state.prompt_versions || []), promptVersion],
   });
 
+  startWorkflowStageAutoNotifyWatcher({
+    openClawHome: context.openClawHome,
+    workflowId: state.workflow_id,
+    stage: "awaiting_media_approval",
+    sessionKey: context.registry.byId.pho_phong?.transport?.sessionKey || "agent:pho_phong:main",
+    timeoutMs: getMediaTimeoutMs(context.options.timeoutMs),
+  });
+
   logger.logHandoff(
     "NV Prompt",
     "NV Media",
@@ -1411,6 +1620,13 @@ async function generateMediaFlow(context, state) {
     generating_started_at: null,
     media,
     prompt_package: promptPackage,
+    notifications: {
+      ...(generatingState.notifications || {}),
+      awaiting_media_approval: {
+        at: nowIso(),
+        delivery: "sync",
+      },
+    },
   });
 
   const summary = buildMediaApprovalSummary({
@@ -1878,6 +2094,14 @@ async function generateVideoFlow(context, state) {
     video_offer_declined: false,
   });
 
+  startWorkflowStageAutoNotifyWatcher({
+    openClawHome: context.openClawHome,
+    workflowId: state.workflow_id,
+    stage: "awaiting_video_approval",
+    sessionKey: context.registry.byId.pho_phong?.transport?.sessionKey || "agent:pho_phong:main",
+    timeoutMs: getMediaTimeoutMs(context.options.timeoutMs),
+  });
+
   logger.logHandoff(
     "Pho phong",
     "Media_Video",
@@ -1954,6 +2178,13 @@ async function generateVideoFlow(context, state) {
     video_generating_started_at: null,
     media: mergedMedia,
     prompt_package: mergedPromptPackage,
+    notifications: {
+      ...(generatingState.notifications || {}),
+      awaiting_video_approval: {
+        at: nowIso(),
+        delivery: "sync",
+      },
+    },
   });
 
   const summary = buildVideoApprovalSummary({
@@ -2266,20 +2497,57 @@ function askPublishDecision(context, state) {
   });
 }
 
+function buildPublishFailureSummary(actionLabel, error) {
+  const errorMessage = String(error?.message || error || "Unknown publish error").trim();
+  const isPermissionError = /\(#200\)|permissions error/i.test(errorMessage);
+
+  const summaryLines = [`${actionLabel} that bai tren Facebook.`, `Loi: ${errorMessage}`];
+
+  if (isPermissionError) {
+    summaryLines.push(
+      "Goi y: Kiem tra FACEBOOK_PAGE_ACCESS_TOKEN co dung voi FACEBOOK_PAGE_ID va co quyen pages_manage_posts/pages_read_engagement.",
+    );
+  }
+
+  summaryLines.push(
+    'Thu lai: "Dang ngay" hoac "Hen gio <thoi gian>" sau khi cap nhat quyen/token.',
+  );
+  return summaryLines.join("\n");
+}
+
 /**
  * ÄÄƒng bÃ i ngay.
  */
 function publishNowAction(context, state) {
-  logger.logPhase("ÄÄ‚NG BÃ€I", "Äang Ä‘Äƒng bÃ i lÃªn Fanpage...");
+  logger.logPhase("Đăng bài", "Đang đăng bài lên Fanpage...");
 
   const mediaPaths = [];
   if (state.media?.generatedImagePath) mediaPaths.push(state.media.generatedImagePath);
   if (state.media?.generatedVideoPath) mediaPaths.push(state.media.generatedVideoPath);
 
-  const publishResult = publisher.publishNow({
-    content: state.content.approvedContent,
-    mediaPaths,
-  });
+  let publishResult;
+  try {
+    publishResult = publisher.publishNow({
+      content: state.content.approvedContent,
+      mediaPaths,
+    });
+  } catch (publishError) {
+    logger.logError("publish", publishError);
+    const failedState = saveWorkflow(context.paths, {
+      ...state,
+      stage: "awaiting_publish_decision",
+      last_error: `publish_now error: ${publishError.message || publishError}`,
+    });
+    const summary = buildPublishFailureSummary("Đăng ngay", publishError);
+    return buildResult({
+      workflowId: state.workflow_id,
+      stage: failedState.stage,
+      status: "error",
+      summary,
+      humanMessage: summary,
+      data: { next_expected_action: "publish_decision" },
+    });
+  }
 
   const postId = publisher.extractPostId(publishResult);
 
@@ -2323,11 +2591,30 @@ function schedulePostAction(context, state) {
   if (state.media?.generatedImagePath) mediaPaths.push(state.media.generatedImagePath);
   if (state.media?.generatedVideoPath) mediaPaths.push(state.media.generatedVideoPath);
 
-  const scheduleResult = publisher.schedulePost({
-    content: state.content.approvedContent,
-    mediaPaths,
-    scheduleTime,
-  });
+  let scheduleResult;
+  try {
+    scheduleResult = publisher.schedulePost({
+      content: state.content.approvedContent,
+      mediaPaths,
+      scheduleTime,
+    });
+  } catch (scheduleError) {
+    logger.logError("schedule", scheduleError);
+    const failedState = saveWorkflow(context.paths, {
+      ...state,
+      stage: "awaiting_publish_decision",
+      last_error: `schedule_post error: ${scheduleError.message || scheduleError}`,
+    });
+    const summary = buildPublishFailureSummary("Hẹn giờ đăng bài", scheduleError);
+    return buildResult({
+      workflowId: state.workflow_id,
+      stage: failedState.stage,
+      status: "error",
+      summary,
+      humanMessage: summary,
+      data: { next_expected_action: "publish_decision" },
+    });
+  }
 
   const postId = publisher.extractPostId(scheduleResult);
 
@@ -3096,6 +3383,10 @@ function buildBlockedResult(state, message) {
 
 async function runCli(argv = process.argv.slice(2)) {
   const options = parseArgs(argv);
+  if (options.autoNotifyWatch) {
+    await runAutoNotifyWatcher(options);
+    return;
+  }
   const openClawHome = resolveOpenClawHome(options.openClawHome);
   const config = loadOpenClawConfig(openClawHome);
   const workspaceDir = getPhoPhongWorkspace(config, openClawHome);
@@ -3257,10 +3548,12 @@ function parseMediaReply(reply) {
 }
 
 module.exports = {
+  buildStageHumanMessage,
   classifyContentDecision,
   classifyMediaDecision,
   extractBlock,
   extractField,
+  hasWorkflowStageNotification,
   parseContentReply,
   parseMediaReply,
   scanLatestGeneratedMedia,

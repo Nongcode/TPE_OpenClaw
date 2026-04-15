@@ -57,6 +57,7 @@ function buildVideoSystemPrompt(agentId, openClawHome) {
     "- Video khong duoc long text vao khung hinh",
     "- San pham trong video phai trung thanh voi anh goc, khong duoc bien tau thanh san pham khac",
     "- Logo cong ty phai dung thuong hieu, tach nen sach, va xuat hien o goc duoi ben phai",
+    "- Video can ngan gon khoang 8 giay va co loi thuyet minh tieng Viet gioi thieu nhanh thong so chinh cua san pham",
     "- Khong tao cac canh phi thuc te, vo ly, qua CGI hay qua vi tuong",
     "- Uu tien tinh chan that tuyet doi hon hieu ung",
     "- Khi goi generate_veo_video tren Windows/PowerShell, uu tien tao file JSON tam va goi action.js bang --input_file",
@@ -98,6 +99,7 @@ function buildVideoPromptRequestPrompt(params) {
     "- Ban chua tao video o buoc nay.",
     "- Hay tong hop 1 yeu cau ngan gon nhung cu the de gui sang nv_prompt viet VIDEO prompt.",
     "- Bat buoc neu ro: khong long text vao video, san pham trung thanh anh goc, logo tach nen dat goc duoi ben phai, canh quay chan that tuyet doi.",
+    "- Bat buoc them yeu cau video ngan khoang 8 giay va co giong doc tieng Viet gioi thieu rat gon 2-4 thong so/chuc nang chinh cua san pham.",
     "- Neu da co anh quang cao da duyet, xem do la context tham khao bo cuc chuyen nghiep nhung khong duoc bien no thanh scene phi thuc te.",
     "",
     "MARKER BAT BUOC:",
@@ -147,6 +149,7 @@ function buildVideoPromptReviseRequestPrompt(params) {
     "- Ban chua tao lai video o buoc nay.",
     "- Hay tong hop 1 yeu cau prompt moi de gui sang nv_prompt dua tren feedback cua sep.",
     "- Bat buoc giu cac rule cot loi: khong text trong video, san pham dung anh goc, logo tach nen o goc duoi ben phai, canh quay chan that tuyet doi.",
+    "- Neu sep yeu cau clip ngan, uu tien giu tong thoi luong khoang 8 giay va co giong doc tieng Viet gioi thieu rat gon thong so/chuc nang chinh.",
     "",
     "MARKER BAT BUOC:",
     "PROMPT_REQUEST_BEGIN",
@@ -203,6 +206,8 @@ function buildVideoGeneratePrompt(params) {
     `- reference_image BAT BUOC la: ${state.content?.primaryProductImage || ""}`,
     `- logo_paths BAT BUOC la: ${logoPaths.join(" ; ")}`,
     `- output_dir BAT BUOC la: ${videoOutputDir}`,
+    "- Prompt video phai ep model giu dung san pham theo anh goc, khong duoc sinh mot san pham khac.",
+    "- Prompt video phai neu ro clip ngan khoang 8 giay va co giong doc tieng Viet gioi thieu ngan gon thong so chinh cua san pham.",
     "- Khong doc lai SKILL.md ra chat. Khong dump log terminal raw vao reply.",
     "- Neu tool loi, chi tom tat loi that gon nhat.",
     "",
@@ -263,6 +268,7 @@ function buildVideoRevisePrompt(params) {
     "- Hay tao lai video theo dung prompt package da duoc giao va feedback moi.",
     `- Tren Windows/PowerShell, tao 1 file JSON tam chua prompt + reference_image + logo_paths + output_dir roi goi: node ${videoActionPath} --input_file <duong_dan_file_json>.`,
     "- Khong duoc bo qua reference product image va logo_paths.",
+    "- Tiep tuc uu tien clip ngan khoang 8 giay va giong doc tieng Viet neu prompt duoc giao co yeu cau nay.",
     "",
     "MARKER BAT BUOC:",
     "VIDEO_PROMPT_BEGIN",
@@ -294,7 +300,7 @@ function extractFirstExistingPath(source, extensions) {
   const forwardSlashMatches = source.match(/[A-Za-z]:\/[^\r\n"]+/g) || [];
   const repoMatches = source.match(/artifacts\/[^\r\n"]+/g) || [];
   const candidates = [...backslashMatches, ...forwardSlashMatches, ...repoMatches]
-    .map((item) => item.trim().replace(/[`"'.,]+$/g, ""))
+    .map((item) => mediaAgent.normalizeAgentReportedPath(item.trim().replace(/[`"'.,]+$/g, "")))
     .filter(Boolean);
   for (const candidate of candidates) {
     const ext = path.extname(candidate).toLowerCase();
@@ -319,7 +325,9 @@ function extractFirstExistingPath(source, extensions) {
 function parseVideoResult(reply) {
   const text = String(reply || "").trim();
   const videoPrompt = extractBlock(text, "VIDEO_PROMPT_BEGIN", "VIDEO_PROMPT_END");
-  let generatedVideoPath = extractField(text, "GENERATED_VIDEO_PATH");
+  let generatedVideoPath = mediaAgent.normalizeAgentReportedPath(
+    extractField(text, "GENERATED_VIDEO_PATH"),
+  );
   if (isPlaceholderGeneratedPath(generatedVideoPath)) {
     generatedVideoPath = "";
   } else if (generatedVideoPath) {
@@ -327,10 +335,12 @@ function parseVideoResult(reply) {
   } else {
     generatedVideoPath = extractFirstExistingPath(text, [".mp4", ".mov", ".m4v", ".webm", ".avi", ".mkv", ".gif"]);
   }
-  const usedProductImage = extractField(text, "USED_PRODUCT_IMAGE");
+  const usedProductImage = mediaAgent.normalizeAgentReportedPath(
+    extractField(text, "USED_PRODUCT_IMAGE"),
+  );
   const usedLogoPaths = extractField(text, "USED_LOGO_PATHS")
     .split(/\s*;\s*/g)
-    .map((item) => item.trim())
+    .map((item) => mediaAgent.normalizeAgentReportedPath(item.trim()))
     .filter(Boolean);
 
   if (!generatedVideoPath) {

@@ -27,8 +27,12 @@ function runLocalSkill(skillName, payload) {
 
   const parsed = parseJsonFromOutput(run.stdout);
   if (!parsed?.success) {
+    const hintLogs = Array.isArray(parsed?.logs)
+      ? parsed.logs.filter((entry) => String(entry || "").toLowerCase().startsWith("[hint]"))
+      : [];
+    const hintText = hintLogs.length > 0 ? ` ${hintLogs.join(" ")}` : "";
     throw new Error(
-      parsed?.error?.details || parsed?.message || run.stderr || `${skillName} failed`,
+      `${parsed?.error?.details || parsed?.message || run.stderr || `${skillName} failed`}${hintText}`,
     );
   }
 

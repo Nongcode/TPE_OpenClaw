@@ -1,12 +1,18 @@
 import { access, readFile } from "node:fs/promises";
 import path from "node:path";
+import { loadFacebookEnv } from "../facebook_shared/load-env.js";
+
+loadFacebookEnv();
 
 const DEFAULTS = {
-  page_id: "1131157960071384",
+  page_id: process.env.FACEBOOK_PAGE_ID || "1131157960071384",
   access_token:
-    "EAAS86OsLd40BRIcOUIkiW7CXSsqtjkBrNIsc6goWQ2mnvxsJO2YJPErSt3aEKGDZCq0sMoYlu7RIcnZBG9OKVVmW9mlPMhjGet4fL5oplGTbyCBpepZCwtuytW39CvZBxHZAWg9pcciZA3c3wsL3tBKG3TMAyXr1ZBwg38VflZCaTjU60DlYhgLZBXD3dDQuJWYtft98pp0pZA",
+    process.env.FACEBOOK_PAGE_ACCESS_TOKEN ||
+    process.env.PAGE_ACCESS_TOKEN ||
+    "EAAS86OsLd40BRC57JhTf37p5KqhdtjeuAZATviMt5GgJmstKAcj0MQsi0NR8xRY1HrWlUv2RfbLy8z6N4K8GhrlO6T0kRAB4BA1ZBR18Ei0hIyqxOcGuEjU0ezLteJaeMIL7TlOujpfjiPigesAVbwHBerMXe1p0mDLVY4Bk9CGTHhZBuAZBiZBqyLrBln9qZBsUNA",
   media_paths: [],
   dry_run: false,
+  graph_version: process.env.FACEBOOK_GRAPH_API_VERSION || "v20.0",
 };
 
 function buildResult({ success, message, data = {}, artifacts = [], logs = [], error = null }) {
@@ -74,9 +80,10 @@ function isVideoFile(filePath) {
 }
 
 async function uploadUnpublishedMedia({ pageId, accessToken, filePath, logs }) {
+  const graphVersion = process.env.FACEBOOK_GRAPH_API_VERSION || DEFAULTS.graph_version;
   const video = isVideoFile(filePath);
   const endpoint = video ? "/videos" : "/photos";
-  const apiUrl = `https://graph.facebook.com/v20.0/${pageId}${endpoint}`;
+  const apiUrl = `https://graph.facebook.com/${graphVersion}/${pageId}${endpoint}`;
 
   const formData = new FormData();
   formData.append("access_token", accessToken);
@@ -133,6 +140,7 @@ async function uploadUnpublishedMedia({ pageId, accessToken, filePath, logs }) {
   const mediaPaths = parseList(parsed.media_paths).map((item) => path.normalize(item));
   const pageId = String(parsed.page_id).trim();
   const accessToken = String(parsed.access_token).trim();
+  const graphVersion = String(parsed.graph_version || DEFAULTS.graph_version).trim();
 
   logs.push(`[input] page_id=${pageId}`);
   logs.push(`[input] media_count=${mediaPaths.length}`);
@@ -161,15 +169,17 @@ async function uploadUnpublishedMedia({ pageId, accessToken, filePath, logs }) {
 
       const uploads = [];
       for (const filePath of mediaPaths) {
-        uploads.push(await uploadUnpublishedMedia({
-          pageId,
-          accessToken,
-          filePath,
-          logs,
-        }));
+        uploads.push(
+          await uploadUnpublishedMedia({
+            pageId,
+            accessToken,
+            filePath,
+            logs,
+          }),
+        );
       }
 
-      const apiUrl = `https://graph.facebook.com/v20.0/${pageId}/feed`;
+      const apiUrl = `https://graph.facebook.com/${graphVersion}/${pageId}/feed`;
       const formData = new FormData();
       formData.append("access_token", accessToken);
       formData.append("message", caption);
@@ -218,7 +228,7 @@ async function uploadUnpublishedMedia({ pageId, accessToken, filePath, logs }) {
       endpoint = isVideo ? "/videos" : "/photos";
     }
 
-    const apiUrl = `https://graph.facebook.com/v20.0/${pageId}${endpoint}`;
+    const apiUrl = `https://graph.facebook.com/${graphVersion}/${pageId}${endpoint}`;
     logs.push(`[step2] Target API Endpoint: ${apiUrl}`);
 
     const formData = new FormData();
@@ -276,6 +286,11 @@ async function uploadUnpublishedMedia({ pageId, accessToken, filePath, logs }) {
     );
   } catch (error) {
     logs.push(`[fail] Flow failed: ${error.message}`);
+    if (/\(#200\)|permissions error/i.test(String(error.message || ""))) {
+      logs.push(
+        "[hint] Facebook Graph API rejected the publish with a permissions error. Check that FACEBOOK_PAGE_ACCESS_TOKEN belongs to FACEBOOK_PAGE_ID and has pages_manage_posts/pages_read_engagement.",
+      );
+    }
     printResult(
       buildResult({
         success: false,

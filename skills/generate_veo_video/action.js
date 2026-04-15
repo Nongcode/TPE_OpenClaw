@@ -223,6 +223,108 @@ async function dismissPopupsIfAny(page, logs) {
   }
 }
 
+const PROMPT_INPUT_SELECTORS = [
+  '.ql-editor[contenteditable="true"]',
+  'rich-textarea .ql-editor[contenteditable="true"]',
+  'div[role="textbox"][contenteditable="true"]',
+  "textarea",
+  '[contenteditable="true"]',
+  'input[type="text"]',
+];
+
+function normalizePromptText(value) {
+  return String(value || "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+async function findPromptInput(page, timeoutMs = 2000) {
+  for (const selector of PROMPT_INPUT_SELECTORS) {
+    try {
+      const locator = page.locator(selector).filter({ hasNotText: "TÃ¬m kiáº¿m" }).last();
+      if (await locator.isVisible({ timeout: timeoutMs })) {
+        return { locator, selector };
+      }
+    } catch (_) {}
+  }
+
+  return null;
+}
+
+async function readPromptInputText(locator) {
+  return locator.evaluate((element) => {
+    const htmlElement = /** @type {HTMLElement | HTMLInputElement | HTMLTextAreaElement} */ (element);
+    if ("value" in htmlElement && typeof htmlElement.value === "string") {
+      return htmlElement.value;
+    }
+    return htmlElement.innerText || htmlElement.textContent || "";
+  });
+}
+
+async function waitForPromptValue(page, expectedText, logs, timeoutMs = 5000) {
+  const normalizedExpected = normalizePromptText(expectedText);
+  const startedAt = Date.now();
+
+  while (Date.now() - startedAt < timeoutMs) {
+    const promptInput = await findPromptInput(page, 400);
+    if (promptInput) {
+      const currentText = normalizePromptText(await readPromptInputText(promptInput.locator));
+      if (
+        currentText === normalizedExpected ||
+        currentText.includes(normalizedExpected) ||
+        normalizedExpected.includes(currentText)
+      ) {
+        logs.push(`[step4] Prompt verified in ${promptInput.selector}`);
+        return true;
+      }
+    }
+
+    await page.waitForTimeout(250);
+  }
+
+  return false;
+}
+
+async function isGenerationInFlight(page) {
+  const runningSelectors = [
+    'button:has-text("Stop")',
+    'button:has-text("Dá»«ng")',
+    'button:has-text("Cancel")',
+    'button:has-text("Há»§y")',
+    'button[aria-label*="Stop" i]',
+    'button[aria-label*="Cancel" i]',
+    'button[aria-label*="Há»§y" i]',
+    'button[aria-label*="Dá»«ng" i]',
+  ];
+
+  for (const selector of runningSelectors) {
+    if (
+      await page
+        .locator(selector)
+        .last()
+        .isVisible({ timeout: 250 })
+        .catch(() => false)
+    ) {
+      return true;
+    }
+  }
+
+  const runningTexts = ["Generating", "Creating", "Processing", "Äang táº¡o", "Äang xá»­ lÃ½"];
+  for (const label of runningTexts) {
+    if (
+      await page
+        .getByText(label, { exact: false })
+        .first()
+        .isVisible({ timeout: 250 })
+        .catch(() => false)
+    ) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
 async function prepareImageUpload(page, imagePath, logs) {
   if (!imagePath || !existsSync(imagePath)) {
     logs.push("[step3] No valid reference image provided, skipping upload");
@@ -287,14 +389,7 @@ async function prepareImageUpload(page, imagePath, logs) {
 
 async function setPromptRobust(page, promptText, logs) {
   logs.push("[step4] Typing prompt");
-  const candidates = [
-    '.ql-editor[contenteditable="true"]',
-    'rich-textarea .ql-editor[contenteditable="true"]',
-    'div[role="textbox"][contenteditable="true"]',
-    "textarea",
-    '[contenteditable="true"]',
-    'input[type="text"]', // general fallback
-  ];
+  const candidates = PROMPT_INPUT_SELECTORS;
 
   for (const sel of candidates) {
     try {
@@ -326,7 +421,7 @@ async function setPromptRobust(page, promptText, logs) {
   throw new Error("Could not locate any input field for the prompt");
 }
 
-async function submitPrompt(page, logs) {
+async function submitPrompt(page, logs, expectedPrompt = "") {
   logs.push("[step5] Submitting prompt");
   const submitCandidates = [
     "button.send-button",
@@ -353,6 +448,14 @@ async function submitPrompt(page, logs) {
     } catch (_) {}
   }
 
+  if (expectedPrompt && !(await waitForPromptValue(page, expectedPrompt, logs, 1500))) {
+    throw new Error("Prompt text was not confirmed in the composer before fallback submit.");
+  }
+
+  const promptInput = await findPromptInput(page, 1000);
+  if (promptInput) {
+    await promptInput.locator.click({ timeout: 1000 }).catch(() => {});
+  }
   await page.keyboard.press("Enter");
   logs.push("[step5] Submitted via Enter key");
   await page.waitForTimeout(1000);
@@ -1034,9 +1137,30 @@ async function tryDownloadLatestVideoWithFallbacks(
       logs,
     );
 
-    await prepareImageUpload(page, uploadReferenceImage, logs);
     await setPromptRobust(page, prompt, logs);
-    await submitPrompt(page, logs);
+    if (!(await waitForPromptValue(page, prompt, logs, 5000))) {
+      throw new Error("Prompt text could not be verified before uploading the reference image.");
+    }
+
+    let autoSubmittedAfterUpload = false;
+    if (uploadReferenceImage) {
+      await prepareImageUpload(page, uploadReferenceImage, logs);
+      await page.waitForTimeout(1500);
+      autoSubmittedAfterUpload = await isGenerationInFlight(page);
+      if (autoSubmittedAfterUpload) {
+        logs.push("[step5] Upload triggered generation automatically after prompt was already prepared");
+      } else if (!(await waitForPromptValue(page, prompt, logs, 2000))) {
+        logs.push("[step4] Prompt was no longer present after upload, retyping before submit");
+        await setPromptRobust(page, prompt, logs);
+        if (!(await waitForPromptValue(page, prompt, logs, 5000))) {
+          throw new Error("Prompt text disappeared after upload and could not be restored.");
+        }
+      }
+    }
+
+    if (!autoSubmittedAfterUpload) {
+      await submitPrompt(page, logs, prompt);
+    }
 
     await waitForVideoResource(page, timeout_ms, logs, beforeVideoCount);
 

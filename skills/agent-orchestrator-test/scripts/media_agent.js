@@ -43,6 +43,23 @@ function isTransientGeneratedImagePath(value) {
   return /(?:^|\/)gemini-image-screenshot-[^/]+\.(png|jpg|jpeg|webp)$/.test(normalized);
 }
 
+function normalizeAgentReportedPath(value) {
+  const trimmed = String(value || "")
+    .trim()
+    .replace(/^[`'"]+|[`'"]+$/g, "");
+  if (!trimmed) return "";
+
+  return trimmed
+    .replace(/([A-Za-z]:\\Users\\Administrator)\.openclaw(?=\\|$)/gi, "$1\\.openclaw")
+    .replace(/([A-Za-z]:\/Users\/Administrator)\.openclaw(?=\/|$)/gi, "$1/.openclaw");
+}
+
+function normalizeAgentReportedPaths(values) {
+  return (values || [])
+    .map((item) => normalizeAgentReportedPath(item))
+    .filter(Boolean);
+}
+
 /**
  * Lazy-load sharp — trả null nếu chưa cài.
  */
@@ -479,7 +496,7 @@ function parseImageResult(reply) {
     const forwardSlashMatches = source.match(/[A-Za-z]:\/[^\r\n"]+/g) || [];
     const repoMatches = source.match(/artifacts\/[^\r\n"]+/g) || [];
     const candidates = [...backslashMatches, ...forwardSlashMatches, ...repoMatches]
-      .map((item) => item.trim().replace(/[`"'.,]+$/g, ""))
+      .map((item) => normalizeAgentReportedPath(item.trim().replace(/[`"'.,]+$/g, "")))
       .filter(Boolean);
     for (const candidate of candidates) {
       const ext = path.extname(candidate).toLowerCase();
@@ -505,14 +522,17 @@ function parseImageResult(reply) {
   };
 
   const imagePrompt = extractBlock(text, "IMAGE_PROMPT_BEGIN", "IMAGE_PROMPT_END");
-  const usedProductImage = extractField(text, "USED_PRODUCT_IMAGE");
-  const usedLogoPaths = extractField(text, "USED_LOGO_PATHS")
+  const usedProductImage = normalizeAgentReportedPath(extractField(text, "USED_PRODUCT_IMAGE"));
+  const usedLogoPaths = normalizeAgentReportedPaths(
+    extractField(text, "USED_LOGO_PATHS")
     .split(/\s*;\s*/g)
     .map((item) => item.trim())
-    .filter(Boolean);
+    .filter(Boolean),
+  );
 
   // Ưu tiên extractField, nếu chưa có thì scan toàn bộ reply
   let generatedImagePath = extractField(text, "GENERATED_IMAGE_PATH");
+  generatedImagePath = normalizeAgentReportedPath(generatedImagePath);
   // Normalize forward/backslash
   if (isPlaceholderGeneratedPath(generatedImagePath) || isTransientGeneratedImagePath(generatedImagePath)) {
     generatedImagePath = "";
@@ -564,14 +584,17 @@ function parseVideoResult(reply) {
 
   const videoPrompt = extractBlock(text, "VIDEO_PROMPT_BEGIN", "VIDEO_PROMPT_END");
   let generatedVideoPath = extractField(text, "GENERATED_VIDEO_PATH");
+  generatedVideoPath = normalizeAgentReportedPath(generatedVideoPath);
   if (isPlaceholderGeneratedPath(generatedVideoPath)) {
     generatedVideoPath = "";
   }
-  const usedProductImage = extractField(text, "USED_PRODUCT_IMAGE");
-  const usedLogoPaths = extractField(text, "USED_LOGO_PATHS")
+  const usedProductImage = normalizeAgentReportedPath(extractField(text, "USED_PRODUCT_IMAGE"));
+  const usedLogoPaths = normalizeAgentReportedPaths(
+    extractField(text, "USED_LOGO_PATHS")
     .split(/\s*;\s*/g)
     .map((item) => item.trim())
-    .filter(Boolean);
+    .filter(Boolean),
+  );
 
   return {
     videoPrompt: videoPrompt || "",
@@ -857,6 +880,7 @@ module.exports = {
   parseImageResult,
   parseMediaResult,
   parseVideoResult,
+  normalizeAgentReportedPath,
   resolveLogoAssetPaths,
   routeMediaType,
   trackPromptVersion,
