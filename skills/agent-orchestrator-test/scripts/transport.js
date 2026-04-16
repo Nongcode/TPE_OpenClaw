@@ -102,7 +102,7 @@ async function waitForCompletedWorkflowReply(task, initialText) {
   if (looksLikeCompletedWorkflowReply(initialText, task.workflowId, task.stepId)) {
     return initialText;
   }
-  const maxWaitMs = Math.min(Math.max(Number(task.timeoutMs) || 180000, 30000), 600000);
+  const maxWaitMs = Math.min(Math.max(Number(task.timeoutMs) || 180000, 30000), 1800000);
   const pollIntervalMs = 5000;
   const deadline = Date.now() + maxWaitMs;
   for (let attempt = 0; Date.now() <= deadline; attempt += 1) {
@@ -149,7 +149,7 @@ async function waitForAgentResponse(task) {
       pendingSettled = true;
     });
 
-  const maxWaitMs = Math.min(Math.max(Number(task.timeoutMs) || 180000, 30000), 600000);
+  const maxWaitMs = Math.min(Math.max(Number(task.timeoutMs) || 180000, 30000), 1800000);
   const pollIntervalMs = 5000;
   const deadline = Date.now() + maxWaitMs;
 
@@ -212,6 +212,7 @@ async function waitForAgentResponse(task) {
 
 module.exports = {
   ...baseTransport,
+  findLatestWorkflowReplyInHistory,
   normalizeWorkflowReplyText,
   looksLikeCompletedWorkflowReply,
   sendTaskToAgentLane,

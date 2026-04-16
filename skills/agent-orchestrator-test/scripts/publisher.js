@@ -10,6 +10,41 @@ const { spawnSync } = require("child_process");
 
 const REPO_ROOT = path.resolve(__dirname, "..", "..", "..");
 
+function normalizeMediaPaths(mediaPaths) {
+  return (Array.isArray(mediaPaths) ? mediaPaths : [mediaPaths])
+    .filter(Boolean)
+    .map((item) => String(item).trim())
+    .filter(Boolean);
+}
+
+function splitMediaPathsByType(mediaPaths) {
+  const imagePaths = [];
+  const videoPaths = [];
+
+  for (const mediaPath of normalizeMediaPaths(mediaPaths)) {
+    const ext = path.extname(mediaPath).toLowerCase();
+    if ([".mp4", ".mov", ".avi", ".webm", ".mkv"].includes(ext)) {
+      videoPaths.push(mediaPath);
+    } else {
+      imagePaths.push(mediaPath);
+    }
+  }
+
+  return { imagePaths, videoPaths };
+}
+
+function buildSplitPublishResult(mode, imageResult, videoResult) {
+  return {
+    success: true,
+    data: {
+      mode,
+      post_ids: [extractPostId(imageResult), extractPostId(videoResult)].filter(Boolean),
+      image_publish_result: imageResult,
+      video_publish_result: videoResult,
+    },
+  };
+}
+
 /**
  * Chạy một skill local (subprocess).
  */
@@ -72,10 +107,23 @@ function parseJsonFromOutput(raw) {
  */
 function publishNow(params) {
   const { content, mediaPaths } = params;
+  const { imagePaths, videoPaths } = splitMediaPathsByType(mediaPaths);
+
+  if (imagePaths.length > 0 && videoPaths.length > 0) {
+    const imageResult = runLocalSkill("facebook_publish_post", {
+      caption_long: content,
+      media_paths: imagePaths,
+    });
+    const videoResult = runLocalSkill("facebook_publish_post", {
+      caption_long: content,
+      media_paths: videoPaths,
+    });
+    return buildSplitPublishResult("split_image_video", imageResult, videoResult);
+  }
 
   return runLocalSkill("facebook_publish_post", {
     caption_long: content,
-    media_paths: Array.isArray(mediaPaths) ? mediaPaths : [mediaPaths].filter(Boolean),
+    media_paths: normalizeMediaPaths(mediaPaths),
   });
 }
 
@@ -90,10 +138,25 @@ function publishNow(params) {
  */
 function schedulePost(params) {
   const { content, mediaPaths, scheduleTime } = params;
+  const { imagePaths, videoPaths } = splitMediaPathsByType(mediaPaths);
+
+  if (imagePaths.length > 0 && videoPaths.length > 0) {
+    const imageResult = runLocalSkill("schedule_facebook_post", {
+      caption_long: content,
+      media_paths: imagePaths,
+      scheduled_publish_time: scheduleTime,
+    });
+    const videoResult = runLocalSkill("schedule_facebook_post", {
+      caption_long: content,
+      media_paths: videoPaths,
+      scheduled_publish_time: scheduleTime,
+    });
+    return buildSplitPublishResult("split_image_video", imageResult, videoResult);
+  }
 
   return runLocalSkill("schedule_facebook_post", {
     caption_long: content,
-    media_paths: Array.isArray(mediaPaths) ? mediaPaths : [mediaPaths].filter(Boolean),
+    media_paths: normalizeMediaPaths(mediaPaths),
     scheduled_publish_time: scheduleTime,
   });
 }
@@ -123,6 +186,9 @@ function editPublishedPost(params) {
  * Trích xuất Post ID từ kết quả publish.
  */
 function extractPostId(publishResult) {
+  if (Array.isArray(publishResult?.data?.post_ids) && publishResult.data.post_ids.length > 0) {
+    return String(publishResult.data.post_ids[0] || "").trim();
+  }
   return (
     publishResult?.data?.post_id ||
     publishResult?.data?.raw_fb_response?.id ||
@@ -131,11 +197,21 @@ function extractPostId(publishResult) {
   );
 }
 
+function extractPostIds(publishResult) {
+  if (Array.isArray(publishResult?.data?.post_ids)) {
+    return publishResult.data.post_ids.map((item) => String(item || "").trim()).filter(Boolean);
+  }
+  const singleId = extractPostId(publishResult);
+  return singleId ? [singleId] : [];
+}
+
 module.exports = {
   editPublishedPost,
   extractPostId,
+  extractPostIds,
   parseJsonFromOutput,
   publishNow,
   runLocalSkill,
   schedulePost,
+  splitMediaPathsByType,
 };

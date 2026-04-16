@@ -173,6 +173,33 @@ test("scanLatestGeneratedMedia ignores gemini after screenshots when a downloade
   fs.rmSync(tmpRoot, { recursive: true, force: true });
 });
 
+test("scanLatestGeneratedMedia prefers explicit workflow video dir and ignores non-veo files", () => {
+  const tmpRoot = path.join(os.tmpdir(), `orchestrator-video-scan-${Date.now()}`);
+  const openClawHome = path.join(tmpRoot, ".openclaw");
+  const workflowVideoDir = path.join(openClawHome, "workspace_media_video", "artifacts", "videos", "wf_test");
+  const sharedVideoDir = path.join(openClawHome, "workspace_media_video", "artifacts", "videos");
+  const startedAtIso = new Date(Date.now() - 10_000).toISOString();
+  const wrongVideoPath = path.join(sharedVideoDir, "other-product.mp4");
+  const rightVideoPath = path.join(workflowVideoDir, "veo-720p-test.mp4");
+
+  fs.mkdirSync(workflowVideoDir, { recursive: true });
+  fs.mkdirSync(sharedVideoDir, { recursive: true });
+  fs.writeFileSync(wrongVideoPath, Buffer.alloc(4096, 1));
+  fs.writeFileSync(rightVideoPath, Buffer.alloc(4096, 2));
+
+  const now = new Date();
+  fs.utimesSync(wrongVideoPath, now, now);
+  fs.utimesSync(rightVideoPath, now, now);
+
+  const result = scanLatestGeneratedMedia(openClawHome, startedAtIso, {
+    agentId: "media_video",
+    videoDirs: [workflowVideoDir],
+  });
+  assert.equal(result.videoPath, rightVideoPath);
+
+  fs.rmSync(tmpRoot, { recursive: true, force: true });
+});
+
 test("parseIntentByKeywords: CREATE_NEW default for normal brief", () => {
   const result = intentParser.parseIntentByKeywords("Tao bai quang cao may nang dien");
   assert.equal(result.intent, "CREATE_NEW");
@@ -212,6 +239,12 @@ test("parseIntentByKeywords: TRAIN can target nv_prompt", () => {
 
 test("parseIntentByKeywords: EDIT_CONTENT", () => {
   const result = intentParser.parseIntentByKeywords("Sua content, them thong so tai trong");
+  assert.equal(result.intent, "EDIT_CONTENT");
+  assert.equal(result.target_agent, "nv_content");
+});
+
+test("parseIntentByKeywords: EDIT_CONTENT catches shorter rewrite requests", () => {
+  const result = intentParser.parseIntentByKeywords("Sua lai bai viet cho ngan lai");
   assert.equal(result.intent, "EDIT_CONTENT");
   assert.equal(result.target_agent, "nv_content");
 });
@@ -282,6 +315,10 @@ test("classifyPendingDecision: media reject", () => {
     intentParser.classifyPendingDecision("Prompt chua dat", "awaiting_media_approval"),
     "reject",
   );
+  assert.equal(
+    intentParser.classifyPendingDecision("Xau qua lam lai di", "awaiting_media_approval"),
+    "reject",
+  );
 });
 
 test("classifyPendingDecision: publish decision", () => {
@@ -313,6 +350,10 @@ test("classifyPendingDecision: video approval stage works", () => {
   );
   assert.equal(
     intentParser.classifyPendingDecision("Sua video, can chan that hon", "awaiting_video_approval"),
+    "reject",
+  );
+  assert.equal(
+    intentParser.classifyPendingDecision("Xau qua lam lai di", "awaiting_video_approval"),
     "reject",
   );
 });
@@ -434,6 +475,41 @@ test("buildRulesPromptSection includes rules", () => {
   assert.ok(section.includes("[2] Rule B"));
 
   fs.rmSync(tmpDir, { recursive: true, force: true });
+});
+
+test("appendSuccessExample stores and retrieves approved patterns", () => {
+  const tmpDir = path.join(os.tmpdir(), `orchestrator-success-${Date.now()}`);
+  fs.mkdirSync(tmpDir, { recursive: true });
+
+  memory.appendSuccessExample("nv_prompt", tmpDir, {
+    workflow_id: "wf_1",
+    kind: "image_prompt_approved",
+    brief: "May nang 2 tru",
+    approved_result: "Prompt giu dung ket cau may nang 2 tru",
+    global_guidelines: ["Tone ban hang gon gang"],
+  });
+
+  const section = memory.buildSuccessExamplesPromptSection(
+    "nv_prompt",
+    tmpDir,
+    "Prompt may nang 2 tru",
+    2,
+  );
+  assert.ok(section.includes("SO TAY KINH NGHIEM"));
+  assert.ok(section.includes("May nang 2 tru"));
+  assert.ok(section.includes("Tone ban hang gon gang"));
+
+  fs.rmSync(tmpDir, { recursive: true, force: true });
+});
+
+test("buildWorkflowGuidelinesPromptSection renders workflow guidelines", () => {
+  const section = memory.buildWorkflowGuidelinesPromptSection([
+    "Nho dung tone hai huoc",
+    "Phai giu logo cong ty",
+  ]);
+  assert.ok(section.includes("GLOBAL GUIDELINE"));
+  assert.ok(section.includes("Nho dung tone hai huoc"));
+  assert.ok(section.includes("Phai giu logo cong ty"));
 });
 
 test("routeMediaType: image returns image", () => {
@@ -632,6 +708,7 @@ test("buildVideoGeneratePrompt uses absolute veo action path and required refere
   assert.ok(prompt.includes("Prompt video final"));
   assert.ok(prompt.includes("8 giay"));
   assert.ok(prompt.includes("tieng Viet"));
+  assert.ok(prompt.includes(path.join("/nonexistent", "workspace_media_video", "artifacts", "videos", "wf_test")));
   assert.ok(!prompt.includes("D:\\output\\approved-image.png"));
 });
 
@@ -926,6 +1003,34 @@ test("extractPostId extracts from various response shapes", () => {
   assert.equal(publisherModule.extractPostId({ data: { post_id: "123_456" } }), "123_456");
   assert.equal(publisherModule.extractPostId({ data: { raw_fb_response: { id: "789" } } }), "789");
   assert.equal(publisherModule.extractPostId({}), "");
+});
+
+test("extractPostIds supports split image/video publish result", () => {
+  assert.deepEqual(
+    publisherModule.extractPostIds({ data: { post_ids: ["111_222", "333_444"] } }),
+    ["111_222", "333_444"],
+  );
+  assert.deepEqual(
+    publisherModule.extractPostIds({ data: { post_id: "555_666" } }),
+    ["555_666"],
+  );
+});
+
+test("splitMediaPathsByType separates images and videos", () => {
+  const result = publisherModule.splitMediaPathsByType([
+    "D:/media/poster.png",
+    "D:/media/clip.mp4",
+    "D:/media/cover.jpg",
+  ]);
+  assert.deepEqual(result.imagePaths, ["D:/media/poster.png", "D:/media/cover.jpg"]);
+  assert.deepEqual(result.videoPaths, ["D:/media/clip.mp4"]);
+});
+
+test("DEFAULT_VIDEO_PROMPT_TEMPLATE keeps exact company logo phrase", () => {
+  assert.ok(
+    promptAgent.DEFAULT_VIDEO_PROMPT_TEMPLATE.includes("Tân Phát Etek - Hội Tụ Tinh Hoa Giải Pháp"),
+  );
+  assert.ok(promptAgent.DEFAULT_VIDEO_PROMPT_TEMPLATE.includes("Không có Text"));
 });
 
 test("buildHumanMessage creates natural messages", () => {

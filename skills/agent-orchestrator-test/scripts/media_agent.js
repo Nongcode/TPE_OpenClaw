@@ -141,9 +141,11 @@ function buildMediaPromptRequestPrompt(params) {
     logoPaths = resolveLogoAssetPaths(openClawHome),
   } = params;
   const systemPrompt = buildMediaSystemPrompt("nv_media", openClawHome);
+  const guidelineSection = memory.buildWorkflowGuidelinesPromptSection(state.global_guidelines || []);
 
   const lines = [
     systemPrompt,
+    guidelineSection,
     "",
     "BAN DANG XU LY WORKFLOW AGENT-ORCHESTRATOR-TEST.",
     `workflow_id: ${workflowId}`,
@@ -193,9 +195,11 @@ function buildMediaPromptReviseRequestPrompt(params) {
     logoPaths = resolveLogoAssetPaths(openClawHome),
   } = params;
   const systemPrompt = buildMediaSystemPrompt("nv_media", openClawHome);
+  const guidelineSection = memory.buildWorkflowGuidelinesPromptSection(state.global_guidelines || []);
 
   const lines = [
     systemPrompt,
+    guidelineSection,
     "",
     "BAN DANG XU LY WORKFLOW AGENT-ORCHESTRATOR-TEST.",
     `workflow_id: ${workflowId}`,
@@ -254,6 +258,7 @@ function buildMediaGeneratePrompt(params) {
   } = params;
   const agentId = "nv_media";
   const systemPrompt = buildMediaSystemPrompt(agentId, openClawHome);
+  const guidelineSection = memory.buildWorkflowGuidelinesPromptSection(state.global_guidelines || []);
   const imageActionPath = path.join(REPO_ROOT, "skills", "gemini_generate_image", "action.js").replace(/\\/g, "/");
 
   const productImagePath = state.content?.primaryProductImage || "";
@@ -332,6 +337,7 @@ function buildMediaGeneratePrompt(params) {
 
   const lines = [
     systemPrompt,
+    guidelineSection,
     "",
     "BAN DANG XU LY WORKFLOW AGENT-ORCHESTRATOR-TEST.",
     `workflow_id: ${workflowId}`,
@@ -370,6 +376,7 @@ function buildMediaRevisePrompt(params) {
   } = params;
   const agentId = "nv_media";
   const systemPrompt = buildMediaSystemPrompt(agentId, openClawHome);
+  const guidelineSection = memory.buildWorkflowGuidelinesPromptSection(state.global_guidelines || []);
 
   const productImageInfo = state.content?.primaryProductImage
     ? `Anh san pham goc bat buoc gui cho skill: ${state.content.primaryProductImage}`
@@ -432,6 +439,7 @@ function buildMediaRevisePrompt(params) {
 
   const lines = [
     systemPrompt,
+    guidelineSection,
     "",
     "BAN DANG XU LY WORKFLOW AGENT-ORCHESTRATOR-TEST.",
     `workflow_id: ${workflowId}`,

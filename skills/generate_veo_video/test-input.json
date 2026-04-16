@@ -1,0 +1,11 @@
+{
+  "project_url": "https://labs.google/fx/vi/tools/flow/project/d53d9599-c04a-4c2e-95be-d1d1a96d81f1",
+  "prompt": "Tạo video giới thiệu sản phẩm tĩnh, bám sát tuyệt đối 100% hình dáng, cấu trúc, màu sắc và tỷ lệ của sản phẩm trong ảnh tham chiếu.\n\nYÊU CẦU BẮT BUỘC VỀ HÌNH ẢNH VÀ CHUYỂN ĐỘNG:\n- Cảnh quay tĩnh: Sản phẩm đứng im, không hoạt động, không có chuyển động cơ học hay thay đổi trạng thái.\n- Camera motion: Chuyển động máy quay chỉ di chuyển xoay mượt mà (orbit/pan) xung quanh sản phẩm gốc để khoe góc cạnh.\n- Tuyệt đối tuân thủ ảnh gốc: Không tự ý biến tấu sang mẫu khác, hãng khác, kết cấu khác.\n- Không có con người: Tuyệt đối không có con người xuất hiện trong bất kỳ khung hình nào.\n- Không có Text: Tuyệt đối không lồng chữ, text, thông số hay typography vào khung hình.\n- Logo công ty: Bắt buộc sử dụng file logo công ty đính kèm (đã tách nền sạch) đặt cố định ở góc dưới cùng bên phải video. Tuyệt đối không dùng/nhầm lẫn với logo thương hiệu của bản thân sản phẩm.\n- Bối cảnh: Không gian thực tế, ánh sáng trong trẻo, sạch sẽ, tập trung 100% sự chú ý vào sản phẩm.",
+  "reference_image": "C:/Users/Administrator/.openclaw/workspace_content/artifacts/references/search_product_text/ca-u-na-ng-o-to-2-tru-hoa-t-o-ng-thuy-lu-c-co-ng-sua-t-na-ng-3.2-ta-n-model-gl-3.2-2e-1-pha/image_1920.webp",
+  "logo_paths": ["C:/Users/Administrator/.openclaw/assets/logos/logo.png"],
+  "browser_path": "C:/Program Files/CocCoc/Browser/Application/browser.exe",
+  "user_data_dir": "C:/Users/Administrator/AppData/Local/CocCoc/Browser/User Data",
+  "profile_name": "Default",
+  "timeout_ms": 1200000,
+  "auto_close_browser": false
+}

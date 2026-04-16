@@ -43,16 +43,12 @@ Workflow hien tai:
 - User luon duyet content truoc khi sang media.
 - User luon duyet anh truoc khi dang bai.
 - Neu tao them video, user luon duyet video truoc khi dang bai.
-- `pho_phong` phai chu dong gui thong bao tien do cho user o moi buoc chay lau:
-  - vua nhan brief va dang giao `nv_content`
-  - da nhan duyet content va dang giao `nv_prompt` / `nv_media`
-  - dang sua content hoac sua media theo feedback
-  - dang cho ket qua render media / dang publish / dang schedule
-- Moi thong bao tien do phai ngan, ro va noi dung dung giai doan dang chay; khong im lang trong luc workflow dang lam viec.
-- Neu tien trinh van chua xong sau lan thong bao dau, `pho_phong` phai gui them thong bao cho user biet la he thong van dang xu ly.
 - Khi `pho_phong` goi entry point orchestrator, phai cho lenh chay xong va lay ket qua cuoi cung roi moi tra loi user.
 - Khong duoc dung o trang thai `Process still running` trong luc dang cho `nv_content`; buoc nay bat buoc phai doi den khi co ban content de trinh duyet.
-- Chi duoc gui thong bao tien do tam thoi khi buoc tao media render lau da duoc xac minh la van dang chay, va khong duoc coi do la ket qua workflow cuoi cung.
+- `pho_phong` khong duoc gui thong bao kieu "da nhan brief", "dang giao viec", "dang kiem tra", "dang render" truoc khi da chay entry point orchestrator cho tin nhan hien tai va da xac minh state that.
+- Chi duoc gui thong bao tien do tam thoi khi da xac minh worker van dang chay, chua co checkpoint duyet, va da poll du lau; thong bao tam thoi khong duoc thay the ket qua workflow cuoi cung.
+- Neu `current-workflow.json` da sang `awaiting_content_approval`, `awaiting_media_approval`, `awaiting_video_approval`, hoac `awaiting_publish_decision`, `pho_phong` phai trinh ngay checkpoint do, khong duoc tiep tuc noi "dang xu ly".
+- Neu `nv_content` dang research web hoac `nv_media` / `media_video` dang render, `pho_phong` phai tiep tuc theo doi dung state that; khong duoc tu y bao loi neu chua co bang chung loi ro rang tu orchestrator hoac artifact.
 - Summary media approval phai co:
   - preview media thuc te trong chat
   - prompt da dung
@@ -69,13 +65,13 @@ Workflow hien tai:
 
 ## Progress protocol
 
-- Ngay khi bat dau mot buoc co do tre, `pho_phong` phai gui 1 thong bao ngan de user biet dang xu ly.
-- Mau thong bao duoc khuyen nghi:
-  - `Da nhan brief, toi dang giao NV Content len bai cho ban.`
-  - `Da nhan duyet content, toi dang giao NV Prompt va NV Media tao anh.`
-  - `He thong van dang render media, toi se gui anh ngay khi co ket qua.`
-  - `Toi dang day len page / dat lich dang bai, vui long doi them mot chut.`
-- Thong bao tien do chi la thong bao tam thoi; sau do `pho_phong` van phai tiep tuc doi va gui ket qua cuoi cung khi workflow xong.
+- Mac dinh, `pho_phong` chi tra lai checkpoint that cua orchestrator, khong tu viet thong bao tien do.
+- Neu process van dang chay va chua co checkpoint duyet:
+  - phai tiep tuc `process poll`;
+  - phai kiem tra `agent-orchestrator-test/current-workflow.json`;
+  - neu state da doi sang checkpoint duyet thi trinh ngay checkpoint do.
+- Chi duoc gui toi da 1 thong bao tam thoi khi da poll lau ma van chua co checkpoint; thong bao phai noi ro he thong van dang chay, khong duoc noi workflow loi, va khong duoc ket thuc turn tai do.
+- Khong duoc rerun entry point chi vi PowerShell in ra log giua chung hoac `NativeCommandError` neu state file va checkpoint cho thay workflow van dang tien trien.
 
 ## Learning
 
@@ -116,6 +112,7 @@ node D:/CodeAiTanPhat/TPE_OpenClaw/skills/agent-orchestrator-test/scripts/orches
   - nhung van phai tiep tuc poll cho toi khi co ket qua that;
   - khong duoc coi thong bao tam thoi la cau tra loi cuoi cung.
 - Neu orchestrator tra ve `stage = awaiting_content_approval`, `awaiting_media_approval`, `awaiting_video_approval`, hoac `awaiting_publish_decision`, `pho_phong` phai trinh dung checkpoint do; khong duoc tu y noi da sang buoc tiep theo.
+- Neu state file hoac ket qua recover da cho thay worker lam xong, `pho_phong` phai trinh ngay checkpoint duyet; khong duoc doi den khi user hoi lai "den dau roi".
 
 ## References
 

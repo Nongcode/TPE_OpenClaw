@@ -34,9 +34,18 @@ function isPlaceholderGeneratedPath(value) {
   return ["KHONG_CO", "NONE", "NULL", "N/A", "KHONG_CO_DO_SKILL_TRA_VE_LOI"].includes(normalized);
 }
 
-function resolveVideoOutputDir(openClawHome) {
+function resolveVideoOutputDir(openClawHome, workflowId = "") {
+  const baseDir = path.join(
+    openClawHome || "C:/Users/Administrator/.openclaw",
+    "workspace_media_video",
+    "artifacts",
+    "videos",
+  );
+  const normalizedWorkflowId = String(workflowId || "")
+    .trim()
+    .replace(/[^A-Za-z0-9._-]/g, "_");
   return path.normalize(
-    path.join(openClawHome || "C:/Users/Administrator/.openclaw", "workspace_media_video", "artifacts", "videos"),
+    normalizedWorkflowId ? path.join(baseDir, normalizedWorkflowId) : baseDir,
   );
 }
 
@@ -71,6 +80,7 @@ function buildVideoSystemPrompt(agentId, openClawHome) {
     "Ban la media_video, nhan vien chuyen tao video quang cao san pham.",
     "",
     "NHIEM VU CHINH:",
+    "- Truoc khi tao hoac sua video, bat buoc doc va ap dung tat ca quy tac da luu trong rules.json cua workspace_media_video.",
     "- Nhan content da duyet, prompt video da duoc nv_prompt viet, anh goc san pham va logo cong ty",
     "- Truoc khi tao video, co the tong hop yeu cau prompt de gui sang nv_prompt",
     "- Goi skill generate_veo_video bang DUNG video prompt duoc giao",
@@ -78,6 +88,12 @@ function buildVideoSystemPrompt(agentId, openClawHome) {
     "- Sua video khi co review tu sep, nhung khong duoc tu y viet prompt moi neu nv_prompt chua viet lai",
     "",
     "NGUYEN TAC BAT BUOC:",
+    "- BAO TOAN SAN PHAM TUYET DOI: Bat buoc dung anh goc san pham lam reference chinh. Hinh san pham trong video phai tuan thu tuyet doi thuc te anh goc. Khong duoc bien tau sang mau khac, hang khac, ket cau khac.",
+    "- RANG BUOC CHUYEN DONG: Boi canh video va chuyen dong camera chi xoay quanh anh san pham tinh. Tuyet doi khong quay canh san pham dang hoat dong hay thay doi trang thai. Khong tao canh phi thuc te, qua da, hay lam dung CGI.",
+    "- RANG BUOC CON NGUOI & VAN BAN: Tuyet doi khong co con nguoi xuat hien trong video. Tuyet doi khong long bat ky text/chữ nao vao khung hinh video.",
+    "- RANG BUOC LOGO: Bat buoc dung file logo CONG TY that, tach nen sach, va gan co dinh o goc duoi ben phai video. Day la logo cong ty, khong phai logo thuong hieu cua san pham.",
+    "- RANG BUOC QUY TRINH: Khong duoc tu y viet VIDEO prompt moi neu nv_prompt chua giao prompt moi. Moi reply workflow phai giu workflow_id va step_id.",
+    "- RANG BUOC NGON NGU & DINH DANG: Bat buoc dung 100% tieng Viet co dau. Khong viet lai content. Khong publish. Khong tu nhan la tro ly ky thuat, C-3PO, hay debug agent.",
     "- Video khong duoc long text vao khung hinh",
     "- San pham trong video phai trung thanh voi anh goc, khong duoc bien tau thanh san pham khac",
     "- DOI TUONG CHINH BAT BUOC la TOAN BO SAN PHAM trong anh goc, khong phai motor, bom, bo nguon, xi lanh, khung phu kien hay bat ky bo phan tach roi nao.",
@@ -104,9 +120,11 @@ function buildVideoPromptRequestPrompt(params) {
     logoPaths = mediaAgent.resolveLogoAssetPaths(openClawHome),
   } = params;
   assertVideoInputs(state, logoPaths);
+  const guidelineSection = memory.buildWorkflowGuidelinesPromptSection(state.global_guidelines || []);
 
   return [
     buildVideoSystemPrompt("media_video", openClawHome),
+    guidelineSection,
     "",
     "BAN DANG XU LY WORKFLOW AGENT-ORCHESTRATOR-TEST.",
     `workflow_id: ${workflowId}`,
@@ -153,9 +171,11 @@ function buildVideoPromptReviseRequestPrompt(params) {
     logoPaths = mediaAgent.resolveLogoAssetPaths(openClawHome),
   } = params;
   assertVideoInputs(state, logoPaths);
+  const guidelineSection = memory.buildWorkflowGuidelinesPromptSection(state.global_guidelines || []);
 
   return [
     buildVideoSystemPrompt("media_video", openClawHome),
+    guidelineSection,
     "",
     "BAN DANG XU LY WORKFLOW AGENT-ORCHESTRATOR-TEST.",
     `workflow_id: ${workflowId}`,
@@ -204,11 +224,13 @@ function buildVideoGeneratePrompt(params) {
     logoPaths = mediaAgent.resolveLogoAssetPaths(openClawHome),
   } = params;
   assertVideoInputs(state, logoPaths);
-  const videoOutputDir = resolveVideoOutputDir(openClawHome);
+  const guidelineSection = memory.buildWorkflowGuidelinesPromptSection(state.global_guidelines || []);
+  const videoOutputDir = resolveVideoOutputDir(openClawHome, workflowId);
   const videoActionPath = path.join(REPO_ROOT, "skills", "generate_veo_video", "action.js").replace(/\\/g, "/");
 
   return [
     buildVideoSystemPrompt("media_video", openClawHome),
+    guidelineSection,
     "",
     "BAN DANG XU LY WORKFLOW AGENT-ORCHESTRATOR-TEST.",
     `workflow_id: ${workflowId}`,
@@ -275,11 +297,13 @@ function buildVideoRevisePrompt(params) {
     logoPaths = mediaAgent.resolveLogoAssetPaths(openClawHome),
   } = params;
   assertVideoInputs(state, logoPaths);
-  const videoOutputDir = resolveVideoOutputDir(openClawHome);
+  const guidelineSection = memory.buildWorkflowGuidelinesPromptSection(state.global_guidelines || []);
+  const videoOutputDir = resolveVideoOutputDir(openClawHome, workflowId);
   const videoActionPath = path.join(REPO_ROOT, "skills", "generate_veo_video", "action.js").replace(/\\/g, "/");
 
   return [
     buildVideoSystemPrompt("media_video", openClawHome),
+    guidelineSection,
     "",
     "BAN DANG XU LY WORKFLOW AGENT-ORCHESTRATOR-TEST.",
     `workflow_id: ${workflowId}`,

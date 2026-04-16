@@ -10,7 +10,7 @@ const DEFAULTS = {
   browser_path: "C:/Program Files/CocCoc/Browser/Application/browser.exe",
   user_data_dir: "C:/Users/Administrator/AppData/Local/CocCoc/Browser/User Data",
   profile_name: "Default",
-  project_url: "https://labs.google/fx/vi/tools/flow/project/c5c6d835-fae3-4140-af60-9a54ab1dd804",
+  project_url: "https://labs.google/fx/vi/tools/flow/project/1750aeea-d591-4cc1-81b4-1579bef0985d",
   reference_image: "",
   logo_paths: [],
   prompt: "Tao video quang cao",
@@ -242,10 +242,7 @@ function normalizePromptText(value) {
 async function findPromptInput(page, timeoutMs = 2000) {
   for (const selector of PROMPT_INPUT_SELECTORS) {
     try {
-      const locator = page
-        .locator(selector)
-        .filter({ hasNotText: "T\u00ecm ki\u1ebfm" })
-        .last();
+      const locator = page.locator(selector).filter({ hasNotText: "T\u00ecm ki\u1ebfm" }).last();
       if (await locator.isVisible({ timeout: timeoutMs })) {
         return { locator, selector };
       }
@@ -257,7 +254,9 @@ async function findPromptInput(page, timeoutMs = 2000) {
 
 async function readPromptInputText(locator) {
   return locator.evaluate((element) => {
-    const htmlElement = /** @type {HTMLElement | HTMLInputElement | HTMLTextAreaElement} */ (element);
+    const htmlElement = /** @type {HTMLElement | HTMLInputElement | HTMLTextAreaElement} */ (
+      element
+    );
     if ("value" in htmlElement && typeof htmlElement.value === "string") {
       return htmlElement.value;
     }
@@ -366,53 +365,214 @@ async function isGenerationInFlight(page) {
   return false;
 }
 
-async function prepareImageUpload(page, imagePath, logs) {
-  if (!imagePath || !existsSync(imagePath)) {
-    throw new Error("Reference image invalid or missing");
+async function prepareImageUpload(page, assetPaths, logs) {
+  const normalizedAssetPaths = [
+    ...new Set(
+      parseList(assetPaths)
+        .map((item) => path.resolve(String(item || "").trim()))
+        .filter(Boolean),
+    ),
+  ];
+  if (normalizedAssetPaths.length === 0) {
+    throw new Error("Khong co file anh nao de upload");
   }
 
-  const composer = await findComposer(page);
-  let fileInputs = composer?.locator('input[type="file"]') || null;
-  let fileInputCount = fileInputs ? await fileInputs.count().catch(() => 0) : 0;
-
-  if (fileInputCount === 0) {
-    logs.push("[step3] No composer-scoped upload input found, trying page-level fallback");
-    fileInputs = page.locator('input[type="file"]');
-    fileInputCount = await fileInputs.count().catch(() => 0);
+  const missingFiles = normalizedAssetPaths.filter((filePath) => !existsSync(filePath));
+  if (missingFiles.length > 0) {
+    throw new Error(`Khong tim thay file upload: ${missingFiles.join(", ")}`);
   }
 
-  if (fileInputCount === 0) {
-    throw new Error("Khong tim thay input upload cho reference image");
-  }
+  const expectedNames = normalizedAssetPaths.map((filePath) => path.basename(filePath));
 
-  let uploaded = false;
-  for (let index = fileInputCount - 1; index >= 0; index -= 1) {
-    const input = fileInputs.nth(index);
-    try {
-      await input.setInputFiles(imagePath, { timeout: 15000 });
-      logs.push(`[step3] Uploaded reference image via file input #${index}: ${imagePath}`);
-      uploaded = true;
-      break;
-    } catch (error) {
-      logs.push(`[step3] File input #${index} rejected upload: ${error.message}`);
+  const findVisibleLocator = async (locatorFactories, timeoutMs = 2500) => {
+    for (const factory of locatorFactories) {
+      try {
+        const locator = factory();
+        const count = await locator.count().catch(() => 0);
+        for (let index = count - 1; index >= 0; index -= 1) {
+          const candidate = locator.nth(index);
+          if (await candidate.isVisible({ timeout: timeoutMs }).catch(() => false)) {
+            return candidate;
+          }
+        }
+      } catch (_) {}
     }
+    return null;
+  };
+
+  const addButton = await findVisibleLocator([
+    () => page.locator('button[aria-haspopup="dialog"]:has(i:has-text("add_2"))'),
+    () =>
+      page
+        .locator('button[aria-haspopup="dialog"]')
+        .filter({ has: page.locator('i:has-text("add_2")') }),
+    () => page.locator('button:has(i:has-text("add_2"))'),
+    () => page.getByRole("button", { name: /tạo/i }),
+  ]);
+
+  if (!addButton) {
+    throw new Error("Khong tim thay nut '+' / 'Tạo' de mo menu tai file");
   }
 
-  if (!uploaded) {
-    throw new Error("Khong upload duoc reference image vao bat ky file input nao");
+  const resolveComposerRoot = async () => {
+    const composerFromPrompt = await findComposer(page).catch(() => null);
+    if (composerFromPrompt) return composerFromPrompt;
+
+    const relativeCandidates = [
+      addButton.locator("xpath=ancestor::form[1]"),
+      addButton.locator("xpath=ancestor::section[1]"),
+      addButton.locator('xpath=ancestor::div[contains(@class, "composer")][1]'),
+      addButton.locator("xpath=ancestor::div[1]"),
+    ];
+
+    for (const candidate of relativeCandidates) {
+      if (await candidate.isVisible({ timeout: 800 }).catch(() => false)) {
+        return candidate;
+      }
+    }
+
+    return page.locator("body");
+  };
+
+  const composerRoot = await resolveComposerRoot();
+  const beforeState = await composerRoot.evaluate((root) => {
+    const isVisible = (element) => {
+      if (!(element instanceof HTMLElement)) return false;
+      const style = window.getComputedStyle(element);
+      if (
+        style.display === "none" ||
+        style.visibility === "hidden" ||
+        Number(style.opacity || "1") === 0
+      ) {
+        return false;
+      }
+      const rect = element.getBoundingClientRect();
+      return rect.width >= 24 && rect.height >= 24;
+    };
+
+    const images = Array.from(root.querySelectorAll("img")).filter((img) => isVisible(img));
+    const percentNodes = Array.from(root.querySelectorAll("*")).filter((node) => {
+      if (!(node instanceof HTMLElement) || !isVisible(node)) return false;
+      const text = (node.textContent || "").trim();
+      return /^\d{1,3}%$/.test(text);
+    });
+
+    return {
+      imageCount: images.length,
+      percentCount: percentNodes.length,
+    };
+  });
+
+  logs.push("[step3] Mo menu tai file bang nut + ...");
+  await addButton.click({ force: true, timeout: 5000 });
+
+  const uploadMenuItem = await findVisibleLocator(
+    [
+      () => page.locator('[role="menuitem"]').filter({ hasText: /^Tải hình ảnh lên$/i }),
+      () => page.locator("button").filter({ hasText: /^Tải hình ảnh lên$/i }),
+      () => page.locator("div").filter({ hasText: /^Tải hình ảnh lên$/i }),
+      () => page.locator('div:has(i:has-text("upload"))').filter({ hasText: /Tải hình ảnh lên/i }),
+      () => page.getByText("Tải hình ảnh lên", { exact: true }),
+    ],
+    4000,
+  );
+
+  if (!uploadMenuItem) {
+    throw new Error("Khong tim thay menu 'Tải hình ảnh lên'");
   }
 
-  const fileName = path.basename(imagePath);
-  const attachmentVisible = await page
-    .getByText(fileName, { exact: false })
-    .first()
-    .isVisible({ timeout: 5000 })
-    .catch(() => false);
-  if (!attachmentVisible) {
-    logs.push("[step3] Attachment filename not visible after upload; continue with caution");
+  logs.push("[step3] Đang đẩy toàn bộ file lên...");
+  const fileChooserPromise = page.waitForEvent("filechooser", { timeout: 15000 });
+  await uploadMenuItem.click({ force: true, timeout: 5000 });
+  const fileChooser = await fileChooserPromise;
+  await fileChooser.setFiles(normalizedAssetPaths);
+
+  logs.push("[step3] Đang chờ file xử lý 100%...");
+  const startedAt = Date.now();
+  let stablePasses = 0;
+  while (Date.now() - startedAt < 120000) {
+    const state = await composerRoot.evaluate(
+      (root, payload) => {
+        const { expectedNames, beforeImageCount } = payload;
+        const isVisible = (element) => {
+          if (!(element instanceof HTMLElement)) return false;
+          const style = window.getComputedStyle(element);
+          if (
+            style.display === "none" ||
+            style.visibility === "hidden" ||
+            Number(style.opacity || "1") === 0
+          ) {
+            return false;
+          }
+          const rect = element.getBoundingClientRect();
+          return rect.width >= 24 && rect.height >= 24;
+        };
+
+        const images = Array.from(root.querySelectorAll("img")).filter((img) => isVisible(img));
+        const visibleTexts = Array.from(root.querySelectorAll("*"))
+          .filter((node) => node instanceof HTMLElement && isVisible(node))
+          .map((node) => (node.textContent || "").trim())
+          .filter(Boolean);
+        const textBlob = visibleTexts.join("\n");
+
+        const labeledValues = Array.from(
+          root.querySelectorAll("[alt], [title], [aria-label], [data-testid]"),
+        )
+          .map((node) => {
+            if (!(node instanceof HTMLElement)) return "";
+            return [
+              node.getAttribute("alt") || "",
+              node.getAttribute("title") || "",
+              node.getAttribute("aria-label") || "",
+              node.getAttribute("data-testid") || "",
+            ].join(" ");
+          })
+          .join("\n");
+
+        const percentTexts = visibleTexts.filter(
+          (text) => /^\d{1,3}%$/.test(text) || /\b\d{1,3}%\b/.test(text),
+        );
+        const loadingTexts = visibleTexts.filter((text) =>
+          /uploading|processing|đang tải|đang xử lý/i.test(text),
+        );
+
+        const matchedNames = expectedNames.filter((fileName) => {
+          return textBlob.includes(fileName) || labeledValues.includes(fileName);
+        });
+
+        return {
+          imageCount: images.length,
+          newImageCount: Math.max(0, images.length - beforeImageCount),
+          matchedNames: matchedNames.length,
+          percentCount: percentTexts.length,
+          loadingCount: loadingTexts.length,
+        };
+      },
+      { expectedNames, beforeImageCount: beforeState.imageCount },
+    );
+
+    const enoughImages =
+      state.newImageCount >= normalizedAssetPaths.length ||
+      state.imageCount >= beforeState.imageCount + normalizedAssetPaths.length;
+    const enoughLabels = state.matchedNames >= expectedNames.length;
+    const noLoadingUi = state.percentCount === 0 && state.loadingCount === 0;
+
+    if ((enoughImages || enoughLabels) && noLoadingUi) {
+      stablePasses += 1;
+      if (stablePasses >= 3) {
+        logs.push(
+          `[step3] Upload hoan tat: imageCount=${state.imageCount}, newImageCount=${state.newImageCount}, matchedNames=${state.matchedNames}`,
+        );
+        return normalizedAssetPaths;
+      }
+    } else {
+      stablePasses = 0;
+    }
+
+    await page.waitForTimeout(700);
   }
 
-  await page.waitForTimeout(1500);
+  throw new Error(`Upload anh timeout, composer chua on dinh cho: ${expectedNames.join(", ")}`);
 }
 
 async function setPromptRobust(page, promptText, logs) {
@@ -438,7 +598,6 @@ async function setPromptRobust(page, promptText, logs) {
           await page.keyboard.insertText(promptText);
         }
 
-        // Minor wait to allow frontend state updates
         await page.waitForTimeout(500);
         logs.push(`[step4] Typed prompt into ${sel}`);
         return true;
@@ -728,7 +887,13 @@ async function tryDownloadNewestVideoBySource(
   return destination;
 }
 
-async function downloadVideoByKnownSource(context, sourceUrl, outputDir, logs, preferredResolution) {
+async function downloadVideoByKnownSource(
+  context,
+  sourceUrl,
+  outputDir,
+  logs,
+  preferredResolution,
+) {
   const response = await context.request.get(sourceUrl, { timeout: 60000 }).catch(() => null);
   if (!response || !response.ok()) {
     throw new Error(`Khong the tai video tu source moi: ${sourceUrl}`);
@@ -761,7 +926,6 @@ async function tryDownloadFromPreviewTopBar(page, outputDir, logs, preferredReso
 
     const box = await btn.boundingBox().catch(() => null);
     if (!box) continue;
-    // Top-bar preview download button is near top edge in the preview layout.
     if (box.y < minY) {
       minY = box.y;
       chosenIndex = i;
@@ -868,7 +1032,6 @@ async function openLatestCardPreview(page, target, logs) {
   const centerY = target.cardBox.y + target.cardBox.h / 2;
   logs.push("[step7] Opening preview of the leftmost (newest) video card...");
 
-  // Attempt 1: direct click on media element.
   if (target.media) {
     try {
       await target.media.click({ force: true, timeout: 2500 });
@@ -879,14 +1042,12 @@ async function openLatestCardPreview(page, target, logs) {
     } catch {}
   }
 
-  // Attempt 2: coordinate click at center.
   await page.mouse.click(centerX, centerY, { button: "left" });
   if (await isPreviewOpen(page)) {
     logs.push("[step7] Preview opened via center click");
     return true;
   }
 
-  // Attempt 3: double click for cards requiring enter/open behavior.
   await page.mouse.dblclick(centerX, centerY, { button: "left" });
   if (await isPreviewOpen(page)) {
     logs.push("[step7] Preview opened via double click");
@@ -941,7 +1102,6 @@ async function tryDownloadLatestVideo(page, outputDir, logs, preferredResolution
   await page.waitForTimeout(3000);
 
   try {
-    // First priority: if preview is already open, use its top-bar download path.
     if (await isPreviewOpen(page)) {
       logs.push("[step7] Preview already open, using top-bar download flow");
       const previewTopBarDownloaded = await tryDownloadFromPreviewTopBar(
@@ -955,7 +1115,6 @@ async function tryDownloadLatestVideo(page, outputDir, logs, preferredResolution
 
     const target = await findLeftmostVideoCard(page, logs);
     if (!target?.cardBox) {
-      // Last resort: UI could still be in preview but button selectors changed position.
       const previewFallback = await tryDownloadFromPreviewTopBar(
         page,
         outputDir,
@@ -1031,14 +1190,22 @@ function computeFileSha256(filePath) {
 
 async function runPostGenerationQc({ videoPath, referenceImage, logs }) {
   if (!videoPath || !String(videoPath).trim()) {
-    return { pass: false, score: 0, reason: "Video QC fail: khong co duong dan video sau generate" };
+    return {
+      pass: false,
+      score: 0,
+      reason: "Video QC fail: khong co duong dan video sau generate",
+    };
   }
 
   const resolvedVideoPath = path.resolve(String(videoPath || ""));
   const resolvedReferenceImage = path.resolve(String(referenceImage || ""));
 
   if (!existsSync(resolvedVideoPath)) {
-    return { pass: false, score: 0, reason: `Video QC fail: video khong ton tai ${resolvedVideoPath}` };
+    return {
+      pass: false,
+      score: 0,
+      reason: `Video QC fail: video khong ton tai ${resolvedVideoPath}`,
+    };
   }
   if (!existsSync(resolvedReferenceImage)) {
     return {
@@ -1056,7 +1223,8 @@ async function runPostGenerationQc({ videoPath, referenceImage, logs }) {
   const qcResult = {
     pass: true,
     score: 0.35,
-    reason: "QC da xac nhan file video ton tai, khong rong va buoc generate bat buoc dung anh goc nguyen ban lam reference duy nhat.",
+    reason:
+      "QC da xac nhan file video ton tai, khong rong va buoc generate bat buoc dung anh goc nguyen ban lam reference duy nhat.",
   };
 
   logs.push(`[qc] pass=${qcResult.pass} score=${qcResult.score} reason=${qcResult.reason}`);
@@ -1194,7 +1362,6 @@ async function runPostGenerationQc({ videoPath, referenceImage, logs }) {
       page = await context.newPage();
     }
 
-    // Attempt bringing to front if using CDP, so user can see it running
     try {
       await page.bringToFront();
     } catch (_) {}
@@ -1215,33 +1382,24 @@ async function runPostGenerationQc({ videoPath, referenceImage, logs }) {
 
     const beforeVideoSources = await collectVideoSources(page);
 
-    const uploadReferenceImage = path.resolve(reference_image);
-    logs.push(`[step1] Using original reference image only: ${uploadReferenceImage}`);
+    const normalizedAssetPaths = [
+      path.resolve(reference_image),
+      ...parseList(logo_paths).map((filePath) => path.resolve(filePath)),
+    ].filter(Boolean);
+    const uploadReferenceImage = normalizedAssetPaths[0];
+    logs.push(
+      `[step1] Using ${normalizedAssetPaths.length} image asset(s): ${normalizedAssetPaths.join(", ")}`,
+    );
 
+    await prepareImageUpload(page, normalizedAssetPaths, logs);
+
+    logs.push("[step4] Ảnh đã sẵn sàng, bắt đầu nhập prompt...");
     await setPromptRobust(page, prompt, logs);
     if (!(await waitForPromptValue(page, prompt, logs, 5000))) {
-      throw new Error("Prompt text could not be verified before uploading the reference image.");
+      throw new Error("Prompt text could not be verified after image upload completed.");
     }
 
-    let autoSubmittedAfterUpload = false;
-    if (uploadReferenceImage) {
-      await prepareImageUpload(page, uploadReferenceImage, logs);
-      await page.waitForTimeout(1500);
-      autoSubmittedAfterUpload = await isGenerationInFlight(page);
-      if (autoSubmittedAfterUpload) {
-        logs.push("[step5] Upload triggered generation automatically after prompt was already prepared");
-      } else if (!(await waitForPromptValue(page, prompt, logs, 2000))) {
-        logs.push("[step4] Prompt was no longer present after upload, retyping before submit");
-        await setPromptRobust(page, prompt, logs);
-        if (!(await waitForPromptValue(page, prompt, logs, 5000))) {
-          throw new Error("Prompt text disappeared after upload and could not be restored.");
-        }
-      }
-    }
-
-    if (!autoSubmittedAfterUpload) {
-      await submitPrompt(page, logs, prompt);
-    }
+    await submitPrompt(page, logs, prompt);
 
     const waitResult = await waitForVideoResource(page, timeout_ms, logs, beforeVideoSources);
     const newVideoSource = waitResult.source;
@@ -1344,7 +1502,6 @@ async function runPostGenerationQc({ videoPath, referenceImage, logs }) {
     process.exit(1);
   } finally {
     if (context) {
-      // If connected through CDP, do not close the user's browser.
       if (!connectedByCdp) {
         await context.close().catch(() => {});
       }

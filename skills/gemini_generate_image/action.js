@@ -8,7 +8,7 @@ const DEFAULTS = {
   browser_path: "C:/Program Files/CocCoc/Browser/Application/browser.exe",
   user_data_dir: "C:/Users/Administrator/AppData/Local/CocCoc/Browser/User Data",
   profile_name: "Default",
-  target_gemini_url: "https://gemini.google.com/app/cb9c189779c7cefb",
+  target_gemini_url: "https://gemini.google.com/app/78e0ac3ea2d33424",
   image_paths: [],
   output_dir: "",
   timeout_ms: 120000,
