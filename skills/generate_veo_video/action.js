@@ -10,7 +10,7 @@ const DEFAULTS = {
   browser_path: "C:/Program Files/CocCoc/Browser/Application/browser.exe",
   user_data_dir: "C:/Users/Administrator/AppData/Local/CocCoc/Browser/User Data",
   profile_name: "Default",
-  project_url: "https://labs.google/fx/vi/tools/flow/project/1750aeea-d591-4cc1-81b4-1579bef0985d",
+  project_url: "https://labs.google/fx/tools/flow/project/58e06a02-273b-4589-82b6-1f655355e4f8",
   reference_image: "",
   logo_paths: [],
   prompt: "Tao video quang cao",

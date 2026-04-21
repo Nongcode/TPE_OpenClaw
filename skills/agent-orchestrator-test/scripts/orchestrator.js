@@ -1,4 +1,4 @@
-﻿/**
+/**
  * orchestrator.js â€” Bá»™ Ä‘iá»u phá»‘i trung tÃ¢m v2.
  *
  * NÃ¢ng cáº¥p tá»« state-machine tuyáº¿n tÃ­nh cá»‘ Ä‘á»‹nh sang Multi-Agent tá»± trá»‹:
@@ -24,6 +24,7 @@ const {
 } = require("../../agent-orchestrator/scripts/common");
 const { discoverRegistry } = require("../../agent-orchestrator/scripts/registry");
 const transport = require("./transport");
+const beClient = require("./be-client");
 
 const intentParser = require("./intent_parser");
 const contentAgent = require("./content_agent");
@@ -283,6 +284,26 @@ function buildMediaDirective(filePath) {
   return normalized ? `MEDIA: "${normalized}"` : "";
 }
 
+function buildFrontendApprovalMessage(params) {
+  const lines = [
+    params.revised
+      ? "NV Content da sua lai bai theo nhan xet, dang cho Sep duyet lai."
+      : "NV Content da viet xong bai nhap, dang cho Sep duyet.",
+    params.productName ? `San pham: ${params.productName}` : "",
+    "",
+    "NOI DUNG CHO DUYET:",
+    params.approvedContent || "",
+    "",
+    'Sep muon duyet? Noi: "Duyet content, tao anh"',
+    'Muon sua? Ghi ro nhan xet, vi du: "Sua content, them gia"',
+    params.primaryProductImage ? "" : "",
+    params.primaryProductImage ? "Anh goc san pham de doi chieu:" : "",
+    buildMediaDirective(params.primaryProductImage),
+  ];
+
+  return lines.filter(Boolean).join("\n");
+}
+
 function buildPaths(workspaceDir) {
   const baseDir = path.join(workspaceDir, "agent-orchestrator-test");
   const historyDir = path.join(baseDir, "history");
@@ -395,17 +416,78 @@ function validateCommonReply(reply, workflowId, stepId) {
 // â”€â”€â”€ Agent Communication â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 async function runAgentStep(params) {
+  let actualSessionKey = params.sessionKey;
+  let subConv;
+
+  try {
+    // 1. Táº¡o/Reuse conversation qua BE Ä‘á»ƒ láº¥y sessionKey chuáº©n (cÃ´ láº­p tiáº¿n trÃ¬nh)
+    subConv = await beClient.createSubAgentConversation({
+      workflowId: params.workflowId,
+      agentId: params.agentId,
+      parentConversationId: params.rootConversationId || null,
+      title: `[AUTO] ${params.agentId} â€¢ ${params.stepId}`
+    });
+    if (subConv && subConv.sessionKey) {
+      actualSessionKey = subConv.sessionKey;
+    }
+  } catch (err) {
+    logger.logError("beClient", "Lá»—i táº¡o sub-agent conversation DB: " + err.message);
+  }
+
+  // 2. Gá»i cho Gateway bÃ¬nh thÆ°á» ng
   const task = transport.sendTaskToAgentLane({
     agentId: params.agentId,
     openClawHome: params.openClawHome,
-    sessionKey: params.sessionKey,
+    sessionKey: actualSessionKey,
     prompt: params.prompt,
     workflowId: params.workflowId,
     stepId: params.stepId,
     timeoutMs: params.timeoutMs,
   });
   const response = await transport.waitForAgentResponse(task);
-  return validateCommonReply(response.text, params.workflowId, params.stepId);
+  const finalReply = validateCommonReply(response.text, params.workflowId, params.stepId);
+
+  // 3. Persist messages (Prompt & Reply)
+  if (subConv) {
+    try {
+      const now = Date.now();
+      await beClient.persistMessages([
+        { id: `msg_${now}_${params.stepId}_prompt`, conversationId: subConv.id, role: "user", content: params.prompt, timestamp: now },
+        { id: `msg_${now}_${params.stepId}_reply`, conversationId: subConv.id, role: "assistant", content: finalReply, timestamp: now + 1 },
+      ]);
+    } catch (err) {
+      logger.logError("beClient", "Lá»—i lÆ°u log message DB: " + err.message);
+    }
+  }
+
+  return finalReply;
+}
+
+async function syncApprovalCheckpoint(params) {
+  const managerId = params.managerId || "pho_phong";
+  const timestamp = Date.now();
+
+  try {
+    await beClient.updateWorkflowStatus(params.workflowId, params.stage || "awaiting_content_approval");
+  } catch (err) {
+    logger.logError("beClient", "Loi dong bo workflow status: " + err.message);
+  }
+
+  try {
+    await beClient.pushAutomationEvent({
+      workflowId: params.workflowId,
+      employeeId: managerId,
+      agentId: managerId,
+      title: params.title || `[AUTO] ${managerId} • ${params.workflowId}`,
+      role: "assistant",
+      type: "approval_request",
+      content: params.content,
+      timestamp,
+      eventId: params.eventId || `approval_${params.workflowId}_${timestamp}`,
+    });
+  } catch (err) {
+    logger.logError("beClient", "Loi day approval message ve FE: " + err.message);
+  }
 }
 
 function isPromptFocusedFeedback(feedback) {
@@ -718,8 +800,22 @@ async function tryRecoverAsyncStageState(params) {
     return null;
   }
 
-  const workerSessionKey =
+  let workerSessionKey =
     registry?.byId?.[spec.agentId]?.transport?.sessionKey || `agent:${spec.agentId}:main`;
+
+  // Ưu tiên session key do BE sinh (per-workflow) thay vì fixed registry key
+  try {
+    const subConv = await beClient.createSubAgentConversation({
+      workflowId: state.workflow_id,
+      agentId: spec.agentId,
+    });
+    if (subConv?.sessionKey) {
+      workerSessionKey = subConv.sessionKey;
+    }
+  } catch {
+    // giữ fallback từ registry
+  }
+
   let recoveredMedia = null;
 
   try {
@@ -1119,6 +1215,20 @@ async function startNewWorkflow(context) {
     requested_original_media_type: requestedMediaType,
   };
 
+  try {
+    await beClient.createWorkflow({
+      id: workflowId,
+      rootConversationId: context.parentConversationId || null,
+      initiatorAgentId: context.options.from || "pho_phong",
+      initiatorEmployeeId: context.options.from || "pho_phong",
+      title: `[AUTO] Workflow (tá»« ${context.options.from})`,
+      inputPayload: JSON.stringify(context.message)
+    });
+  } catch (err) {
+    logger.logError("beClient", "Lá»—i táº¡o workflow Db: " + err.message);
+  }
+
+
   logger.logPhase("Táº O BÃ€I Má»šI", `Sáº¿p giao brief: "${context.message.slice(0, 100)}..."`);
   logger.logHandoff(
     "PhÃ³ phÃ²ng",
@@ -1205,6 +1315,19 @@ async function startNewWorkflow(context) {
     .join("\n");
 
   logger.logApprovalWait("awaiting_content_approval", content.approvedContent);
+
+  await syncApprovalCheckpoint({
+    workflowId,
+    managerId: context.options.from || "pho_phong",
+    stage: state.stage,
+    title: `[AUTO] ${context.options.from || "pho_phong"} • ${workflowId}`,
+    content: buildFrontendApprovalMessage({
+      productName: content.productName,
+      approvedContent: content.approvedContent,
+      primaryProductImage: content.primaryProductImage,
+      revised: false,
+    }),
+  });
 
   return buildResult({
     workflowId,
@@ -1317,6 +1440,19 @@ async function reviseContent(context, state) {
     .join("\n");
 
   logger.logApprovalWait("awaiting_content_approval", content.approvedContent);
+
+  await syncApprovalCheckpoint({
+    workflowId: state.workflow_id,
+    managerId: context.options.from || "pho_phong",
+    stage: nextState.stage,
+    title: `[AUTO] ${context.options.from || "pho_phong"} • ${state.workflow_id}`,
+    content: buildFrontendApprovalMessage({
+      productName: content.productName,
+      approvedContent: content.approvedContent,
+      primaryProductImage: content.primaryProductImage,
+      revised: true,
+    }),
+  });
 
   return buildResult({
     workflowId: state.workflow_id,
@@ -3953,7 +4089,25 @@ async function runCli(argv = process.argv.slice(2)) {
 
   let result;
 
-  if (currentState && shouldSupersedePendingWorkflow(message, currentState, intent)) {
+  // Xu ly lenh HUY/RESET truoc tat ca logic khac de tranh tao workflow moi nham.
+  if (isExplicitWorkflowResetMessage(message)) {
+    if (currentState) {
+      logger.log("info", `Nhan lenh huy - archive workflow ${currentState.workflow_id}.`);
+      archiveWorkflow(paths, currentState);
+      result = buildResult({
+        workflowId: currentState.workflow_id,
+        status: "reset",
+        summary: "Da huy workflow dang pending.",
+        humanMessage: "Workflow da duoc huy thanh cong. Ban co the bat dau brief moi bat cu luc nao.",
+      });
+    } else {
+      result = buildResult({
+        status: "ok",
+        summary: "Khong co workflow dang chay.",
+        humanMessage: "Hien khong co workflow nao dang pending. Ban co the gui brief moi de bat dau.",
+      });
+    }
+  } else if (currentState && shouldSupersedePendingWorkflow(message, currentState, intent)) {
     logger.log("info", `Phat hien brief moi, archive workflow cu ${currentState.workflow_id}.`);
     archiveWorkflow(paths, currentState);
     result = await startNewWorkflow({
@@ -3962,27 +4116,27 @@ async function runCli(argv = process.argv.slice(2)) {
       supersededWorkflowId: currentState.workflow_id,
     });
   } else if (currentState) {
-    // Workflow Ä‘ang pending â€” tiáº¿p tá»¥c
+    // Workflow dang pending -> tiep tuc
     result = await continueWorkflow(context, currentState);
   } else {
-    // KhÃ´ng cÃ³ workflow pending â€” dispatch theo intent
+    // Khong co workflow pending -> dispatch theo intent
     switch (intent.intent) {
       case "CREATE_NEW":
         result = await startNewWorkflow(context);
         break;
       case "EDIT_CONTENT":
-        // KhÃ´ng cÃ³ workflow pending nhÆ°ng muá»‘n sá»­a content â†’ táº¡o workflow má»›i
+        // Khong co workflow pending nhung muon sua content -> tao workflow moi
         result = await startNewWorkflow(context);
         break;
       case "EDIT_MEDIA":
-        // KhÃ´ng cÃ³ workflow nÃªn create new
+        // Khong co workflow nen create new
         result = await startNewWorkflow(context);
         break;
       case "EDIT_PUBLISHED":
         result = await editPublishedFlow(context);
         break;
       case "SCHEDULE":
-        // Schedule nhÆ°ng khÃ´ng cÃ³ workflow â€” cáº§n táº¡o content trÆ°á»›c
+        // Schedule nhung khong co workflow -> can tao content truoc
         result = await startNewWorkflow(context);
         break;
       case "TRAIN":
