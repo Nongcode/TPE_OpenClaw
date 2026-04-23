@@ -42,6 +42,15 @@ async function createWorkflow(params) {
   return callInternal("POST", "/internal/workflows", params);
 }
 
+async function resolveAutomationRootConversation(params) {
+  return callInternal("POST", "/internal/workflows/resolve-root", {
+    agentId: params.agentId,
+    employeeId: params.employeeId,
+    brief: params.brief || "",
+    sessionKey: params.sessionKey || null,
+  });
+}
+
 async function createSubAgentConversation(params) {
   return callInternal("POST", "/internal/conversations", {
     workflowId: params.workflowId,
@@ -67,12 +76,18 @@ async function pushAutomationEvent(params) {
     workflowId: params.workflowId,
     employeeId: params.employeeId,
     agentId: params.agentId,
+    conversationId: params.conversationId || null,
+    conversationRole: params.conversationRole,
+    parentConversationId: params.parentConversationId || null,
     title: params.title,
     role: params.role || "assistant",
     type: params.type || "regular",
     content: params.content,
     timestamp: params.timestamp,
+    status: params.status || null,
+    sessionKey: params.sessionKey || null,
     eventId: params.eventId,
+    injectToGateway: params.injectToGateway,
   });
 }
 
@@ -80,6 +95,7 @@ module.exports = {
   createWorkflow,
   createSubAgentConversation,
   persistMessages,
+  resolveAutomationRootConversation,
   updateWorkflowStatus,
   pushAutomationEvent,
 };

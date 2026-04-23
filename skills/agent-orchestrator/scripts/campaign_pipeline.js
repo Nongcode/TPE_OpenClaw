@@ -70,6 +70,27 @@ function toRepoRelative(filePath) {
   return path.relative(REPO_ROOT, filePath).replace(/\\/g, "/");
 }
 
+function isWindowsAbsolutePath(value) {
+  return /^[A-Za-z]:[\\/]/.test(String(value || "").trim());
+}
+
+function resolveAgentReportedPath(value) {
+  const normalized = String(value || "").trim();
+  if (!normalized) {
+    return "";
+  }
+  if (isWindowsAbsolutePath(normalized)) {
+    return normalized;
+  }
+  if (path.isAbsolute(normalized)) {
+    return normalized;
+  }
+  if (normalized.startsWith("artifacts/")) {
+    return path.join(REPO_ROOT, normalized.replace(/\//g, path.sep));
+  }
+  return path.resolve(normalized);
+}
+
 function splitLines(value) {
   return String(value || "")
     .split(/\r?\n+/)
@@ -591,7 +612,7 @@ async function generateMediaAssets(workflowState, options = {}) {
 
   const generatedImages = (step3.parsed.artifacts || [])
     .filter((item) => item?.type === "generated_image")
-    .map((item) => path.resolve(REPO_ROOT, item.path));
+    .map((item) => resolveAgentReportedPath(item.path));
   if (generatedImages.length === 0 && !config.dry_run) {
     throw new Error("Image generation completed without a saved generated_image artifact.");
   }
@@ -638,7 +659,7 @@ async function generateMediaAssets(workflowState, options = {}) {
   } else {
     generatedVideos = (step4.parsed.artifacts || [])
       .filter((item) => item?.type === "generated_video")
-      .map((item) => path.resolve(REPO_ROOT, item.path));
+      .map((item) => resolveAgentReportedPath(item.path));
     if (generatedVideos.length === 0 && !config.dry_run) {
       throw new Error("Video generation completed without a publishable generated_video artifact.");
     }
@@ -763,7 +784,9 @@ module.exports = {
   buildMediaSpecificContent,
   ensureCampaignBundle,
   generateMediaAssets,
+  isWindowsAbsolutePath,
   publishCampaignPosts,
+  resolveAgentReportedPath,
   resolveMediaConfig,
   toRepoRelative,
 };

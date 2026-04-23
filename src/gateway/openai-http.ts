@@ -102,6 +102,7 @@ function writeSse(res: ServerResponse, data: unknown) {
 
 function buildAgentCommandInput(params: {
   prompt: { message: string; extraSystemPrompt?: string; images?: ImageContent[] };
+  agentId: string;
   sessionKey: string;
   runId: string;
   messageChannel: string;
@@ -110,6 +111,7 @@ function buildAgentCommandInput(params: {
     message: params.prompt.message,
     extraSystemPrompt: params.prompt.extraSystemPrompt,
     images: params.prompt.images,
+    agentId: params.agentId,
     sessionKey: params.sessionKey,
     runId: params.runId,
     deliver: false as const,
@@ -431,7 +433,7 @@ export async function handleOpenAiHttpRequest(
   const model = typeof payload.model === "string" ? payload.model : "openclaw";
   const user = typeof payload.user === "string" ? payload.user : undefined;
 
-  const { sessionKey, messageChannel } = resolveGatewayRequestContext({
+  const { agentId, sessionKey, messageChannel } = resolveGatewayRequestContext({
     req,
     model,
     user,
@@ -473,6 +475,7 @@ export async function handleOpenAiHttpRequest(
       extraSystemPrompt: prompt.extraSystemPrompt,
       images: images.length > 0 ? images : undefined,
     },
+    agentId,
     sessionKey,
     runId,
     messageChannel,

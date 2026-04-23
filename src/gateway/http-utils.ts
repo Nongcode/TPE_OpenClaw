@@ -1,6 +1,10 @@
 import { randomUUID } from "node:crypto";
 import type { IncomingMessage } from "node:http";
-import { buildAgentMainSessionKey, normalizeAgentId } from "../routing/session-key.js";
+import {
+  buildAgentMainSessionKey,
+  normalizeAgentId,
+  toAgentStoreSessionKey,
+} from "../routing/session-key.js";
 import { normalizeMessageChannel } from "../utils/message-channel.js";
 
 export function getHeader(req: IncomingMessage, name: string): string | undefined {
@@ -71,7 +75,13 @@ export function resolveSessionKey(params: {
 }): string {
   const explicit = getHeader(params.req, "x-openclaw-session-key")?.trim();
   if (explicit) {
-    return explicit;
+    // FE/DB personal chats use request keys like chat:<agentId>:<conversationId>.
+    // Canonicalize them at ingress so runtime session routing stays agent-scoped
+    // instead of falling back to the default "main" agent.
+    return toAgentStoreSessionKey({
+      agentId: params.agentId,
+      requestKey: explicit,
+    });
   }
 
   const user = params.user?.trim();

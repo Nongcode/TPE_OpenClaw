@@ -196,6 +196,43 @@ function buildAsyncWaitingSummary(kind) {
   ].join("\n");
 }
 
+function getAsyncStageElapsedMs(startedAtIso) {
+  if (!startedAtIso) return null;
+  const startedAtMs = new Date(startedAtIso).getTime();
+  if (!Number.isFinite(startedAtMs) || startedAtMs <= 0) {
+    return null;
+  }
+  return Math.max(0, Date.now() - startedAtMs);
+}
+
+function hasAsyncStageExceededGrace(startedAtIso, timeoutMs) {
+  const elapsedMs = getAsyncStageElapsedMs(startedAtIso);
+  if (elapsedMs === null) return false;
+  return elapsedMs >= timeoutMs;
+}
+
+function buildRecoveredAsyncStageResult(state) {
+  const summary = buildStageHumanMessage(state);
+  const nextExpectedAction =
+    state.stage === "awaiting_video_approval"
+      ? "video_approval"
+      : state.stage === "awaiting_media_approval"
+        ? "media_approval"
+        : null;
+
+  return buildResult({
+    workflowId: state.workflow_id,
+    stage: state.stage,
+    summary,
+    humanMessage: summary,
+    data: {
+      media: state.media || {},
+      prompt_package: state.prompt_package || {},
+      ...(nextExpectedAction ? { next_expected_action: nextExpectedAction } : {}),
+    },
+  });
+}
+
 function extractWorkflowGuidelines(message) {
   const raw = String(message || "").trim();
   if (!raw) return [];
@@ -284,16 +321,24 @@ function buildMediaDirective(filePath) {
   return normalized ? `MEDIA: "${normalized}"` : "";
 }
 
+function normalizePublishedSummaryText(message) {
+  return String(message || "")
+    .replaceAll(
+      "Ã°Å¸â€œÂ¤ BÃƒÂ i viÃ¡ÂºÂ¿t Ã„â€˜ÃƒÂ£ Ã„â€˜Ã†Â°Ã¡Â»Â£c Ã„â€˜Ã„Æ’ng thÃƒÂ nh cÃƒÂ´ng lÃƒÂªn Fanpage!",
+      "📤 Bài viết đã được đăng thành công lên Fanpage!",
+    )
+    .replaceAll("khÃƒÂ´ng cÃƒÂ³", "không có");
+}
+
 function buildFrontendApprovalMessage(params) {
   const lines = [
     params.revised
       ? "NV Content da sua lai bai theo nhan xet, dang cho Sep duyet lai."
       : "NV Content da viet xong bai nhap, dang cho Sep duyet.",
     params.productName ? `San pham: ${params.productName}` : "",
-    "",
-    "NOI DUNG CHO DUYET:",
+    "----- NOI DUNG CHO DUYET -----",
     params.approvedContent || "",
-    "",
+    "------------------------------",
     'Sep muon duyet? Noi: "Duyet content, tao anh"',
     'Muon sua? Ghi ro nhan xet, vi du: "Sua content, them gia"',
     params.primaryProductImage ? "" : "",
@@ -393,6 +438,22 @@ function migrateState(state) {
   if (!Array.isArray(state.global_guidelines)) {
     state.global_guidelines = [];
   }
+  if (state.media?.generatedVideoPath) {
+    const sanitizedVideoPath = sanitizeVideoMediaPath(state.media.generatedVideoPath);
+    if (!sanitizedVideoPath) {
+      state.media = {
+        ...(state.media || {}),
+        generatedVideoPath: "",
+      };
+      if (state.stage === "awaiting_video_approval") {
+        state.stage = "awaiting_publish_decision";
+        if (state.notifications?.awaiting_video_approval) {
+          state.notifications = { ...(state.notifications || {}) };
+          delete state.notifications.awaiting_video_approval;
+        }
+      }
+    }
+  }
   return state;
 }
 
@@ -413,10 +474,283 @@ function validateCommonReply(reply, workflowId, stepId) {
   return text;
 }
 
+function waitMs(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function buildWorkflowScopedSessionKey(agentId, workflowId, stepId = "lane") {
+  const safeAgentId = String(agentId || "").trim() || "unknown";
+  const safeWorkflowId = String(workflowId || "").trim() || `wf_runtime_${Date.now()}`;
+  const safeStepId = String(stepId || "").trim() || "lane";
+  return `agent:${safeAgentId}:automation:${safeWorkflowId}:${safeStepId}`;
+}
+
+async function resolveRootWorkflowBinding(context) {
+  const managerId = String(context?.options?.from || "pho_phong").trim() || "pho_phong";
+  const brief = normalizeText(context?.message || "");
+  const fallbackWorkflowId = `wf_test_${randomUUID()}`;
+
+  try {
+    const resolved = await beClient.resolveAutomationRootConversation({
+      agentId: managerId,
+      employeeId: managerId,
+      brief,
+      sessionKey: context?.registry?.byId?.pho_phong?.transport?.sessionKey || null,
+    });
+
+    const workflowId =
+      String(resolved?.workflowId || resolved?.rootConversation?.workflowId || "").trim()
+      || fallbackWorkflowId;
+    const rootConversationId =
+      String(resolved?.rootConversationId || resolved?.rootConversation?.id || "").trim() || null;
+    const rootSessionKey =
+      String(resolved?.sessionKey || resolved?.rootConversation?.sessionKey || "").trim() || null;
+
+    if (rootConversationId) {
+      logger.log(
+        "info",
+        `[workflow-binding] adopted root=${rootConversationId} workflow=${workflowId} for ${managerId}`,
+      );
+      return {
+        workflowId,
+        rootConversationId,
+        rootSessionKey,
+        adoptedExistingRoot: true,
+      };
+    }
+  } catch (err) {
+    logger.logError(
+      "beClient",
+      `Khong resolve duoc automation root conversation: ${err.message || err}`,
+    );
+  }
+
+  logger.log(
+    "info",
+    `[workflow-binding] fallback workflow=${fallbackWorkflowId} for ${managerId} (khong tim thay root automation tu backend)`,
+  );
+  return {
+    workflowId: fallbackWorkflowId,
+    rootConversationId: null,
+    rootSessionKey: null,
+    adoptedExistingRoot: false,
+  };
+}
+
+async function resolveWorkflowSessionContext(params) {
+  let actualSessionKey =
+    String(params.sessionKey || "").trim()
+    || buildWorkflowScopedSessionKey(params.agentId, params.workflowId, params.stepId);
+  let subConv = null;
+
+  try {
+    subConv = await beClient.createSubAgentConversation({
+      workflowId: params.workflowId,
+      agentId: params.agentId,
+      employeeId: params.employeeId || params.agentId,
+      parentConversationId: params.rootConversationId || null,
+      title: `[AUTO] ${params.agentId} • ${params.stepId}`,
+    });
+    if (subConv?.sessionKey) {
+      actualSessionKey = subConv.sessionKey;
+    }
+  } catch (err) {
+    logger.logError(
+      "beClient",
+      `Loi tao sub-agent conversation DB, fallback session workflow-scoped: ${err.message}`,
+    );
+  }
+
+  return {
+    sessionKey: actualSessionKey,
+    subConv,
+  };
+}
+
+function buildContentApprovalCheckpointMessage(params) {
+  // Root/manager conversation should show the review-ready approval summary.
+  // Keep the raw child checkpoint only for explicit debug/tracing flows.
+  if (!params?.includeRawCheckpoint) {
+    return buildFrontendApprovalMessage(params);
+  }
+
+  const intro = params.revised
+    ? "NV Content da sua lai bai theo nhan xet. Dang cho pho_phong duyet lai."
+    : "NV Content da hoan tat content. Dang cho pho_phong duyet.";
+  const rawReply = String(params.rawReply || "").trim();
+  if (!rawReply) {
+    return buildFrontendApprovalMessage(params);
+  }
+  return [
+    intro,
+    "",
+    "CHECKPOINT_GOC_TU_NV_CONTENT:",
+    rawReply,
+  ].join("\n");
+}
+
+function validateContentCheckpointReply(params) {
+  const rawReply = String(params.reply || "").trim();
+  if (!rawReply) {
+    return { ok: false, reason: "empty reply", content: null, reply: "", warnings: [] };
+  }
+
+  const correlation = transport.correlateByWorkflowIdAndStepId({
+    workflowId: params.workflowId,
+    stepId: params.stepId,
+    text: rawReply,
+  });
+  if (!correlation.ok) {
+    return {
+      ok: false,
+      reason: correlation.reason || "workflow_id mismatch",
+      content: null,
+      reply: correlation.matchedText || rawReply,
+      warnings: [],
+    };
+  }
+
+  const warnings = [];
+  if (correlation.reason === "preamble_before_workflow_meta") {
+    warnings.push("content reply co preamble truoc WORKFLOW_META");
+  }
+
+  let parsed;
+  try {
+    parsed = contentAgent.parseContentResult(correlation.matchedText || rawReply);
+  } catch (error) {
+    const message = String(error?.message || error || "");
+    return {
+      ok: false,
+      reason: message.includes("APPROVED_CONTENT")
+        ? "missing APPROVED_CONTENT_BEGIN/END"
+        : message || "content checkpoint parse failed",
+      content: null,
+      reply: correlation.matchedText || rawReply,
+      warnings,
+    };
+  }
+
+  if (!parsed.productName) {
+    return { ok: false, reason: "missing PRODUCT_NAME", content: null, reply: correlation.matchedText || rawReply, warnings };
+  }
+  if (!parsed.productUrl) {
+    return { ok: false, reason: "missing PRODUCT_URL", content: null, reply: correlation.matchedText || rawReply, warnings };
+  }
+  if (!parsed.primaryProductImage) {
+    return { ok: false, reason: "missing PRIMARY_PRODUCT_IMAGE", content: null, reply: correlation.matchedText || rawReply, warnings };
+  }
+  if (!parsed.approvedContent) {
+    return { ok: false, reason: "missing APPROVED_CONTENT_BEGIN/END", content: null, reply: correlation.matchedText || rawReply, warnings };
+  }
+
+  return {
+    ok: true,
+    reason: null,
+    content: parsed,
+    reply: correlation.matchedText || rawReply,
+    warnings,
+  };
+}
+
+function logCheckpointValidation(agentId, workflowId, stepId, validation, sessionKey) {
+  if (validation.ok) {
+    for (const warning of validation.warnings || []) {
+      logger.log(
+        "warn",
+        `[checkpoint-warning] agent=${agentId} workflow=${workflowId} step=${stepId} session=${sessionKey} ${warning}`,
+      );
+    }
+    return;
+  }
+
+  logger.log(
+    "warn",
+    `[checkpoint-reject] agent=${agentId} workflow=${workflowId} step=${stepId} session=${sessionKey} reason=${validation.reason}`,
+  );
+}
+
+async function waitForValidContentCheckpoint(params) {
+  let validation = validateContentCheckpointReply({
+    reply: params.initialReply,
+    workflowId: params.workflowId,
+    stepId: params.stepId,
+  });
+  logCheckpointValidation(params.agentId, params.workflowId, params.stepId, validation, params.sessionKey);
+  if (validation.ok) {
+    return validation;
+  }
+
+  const graceMs = Math.min(Math.max(Number(params.graceMs) || 20000, 3000), 60000);
+  const deadline = Date.now() + graceMs;
+  while (Date.now() < deadline) {
+    await waitMs(3000);
+    const historyReply = await transport.findLatestWorkflowReplyInHistory({
+      openClawHome: params.openClawHome,
+      sessionKey: params.sessionKey,
+      workflowId: params.workflowId,
+      stepId: params.stepId,
+      timeoutMs: 20000,
+      limit: 60,
+    });
+    if (!historyReply) {
+      continue;
+    }
+    validation = validateContentCheckpointReply({
+      reply: historyReply,
+      workflowId: params.workflowId,
+      stepId: params.stepId,
+    });
+    logCheckpointValidation(params.agentId, params.workflowId, params.stepId, validation, params.sessionKey);
+    if (validation.ok) {
+      return validation;
+    }
+  }
+
+  throw new Error(
+    `${params.agentId} chua tra ve checkpoint duyet content hop le. Ly do cuoi: ${validation.reason || "unknown"}.`,
+  );
+}
+
 // â”€â”€â”€ Agent Communication â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
+async function runAgentStepDetailed(params) {
+  const { sessionKey: actualSessionKey, subConv } = await resolveWorkflowSessionContext(params);
+  const task = transport.sendTaskToAgentLane({
+    agentId: params.agentId,
+    openClawHome: params.openClawHome,
+    sessionKey: actualSessionKey,
+    prompt: params.prompt,
+    workflowId: params.workflowId,
+    stepId: params.stepId,
+    timeoutMs: params.timeoutMs,
+  });
+  const response = await transport.waitForAgentResponse(task);
+  const finalReply = validateCommonReply(response.text, params.workflowId, params.stepId);
+
+  if (subConv) {
+    try {
+      const now = Date.now();
+      await beClient.persistMessages([
+        { id: `msg_${now}_${params.stepId}_prompt`, conversationId: subConv.id, role: "user", content: params.prompt, timestamp: now },
+        { id: `msg_${now}_${params.stepId}_reply`, conversationId: subConv.id, role: "assistant", content: finalReply, timestamp: now + 1 },
+      ]);
+    } catch (err) {
+      logger.logError("beClient", "LÃ¡Â»â€”i lÃ†Â°u log message DB: " + err.message);
+    }
+  }
+
+  return {
+    reply: finalReply,
+    sessionKey: actualSessionKey,
+    subConv,
+  };
+}
+
 async function runAgentStep(params) {
-  let actualSessionKey = params.sessionKey;
+  let actualSessionKey =
+    String(params.sessionKey || "").trim()
+    || buildWorkflowScopedSessionKey(params.agentId, params.workflowId, params.stepId);
   let subConv;
 
   try {
@@ -463,9 +797,32 @@ async function runAgentStep(params) {
   return finalReply;
 }
 
+async function runContentCheckpointStep(params) {
+  const result = await runAgentStepDetailed(params);
+  const validation = await waitForValidContentCheckpoint({
+    agentId: params.agentId,
+    openClawHome: params.openClawHome,
+    workflowId: params.workflowId,
+    stepId: params.stepId,
+    sessionKey: result.sessionKey,
+    initialReply: result.reply,
+    graceMs: params.graceMs,
+  });
+
+  return {
+    reply: validation.reply,
+    content: {
+      ...validation.content,
+      reply: validation.reply,
+    },
+    sessionKey: result.sessionKey,
+  };
+}
+
 async function syncApprovalCheckpoint(params) {
   const managerId = params.managerId || "pho_phong";
   const timestamp = Date.now();
+  let delivered = false;
 
   try {
     await beClient.updateWorkflowStatus(params.workflowId, params.stage || "awaiting_content_approval");
@@ -478,16 +835,150 @@ async function syncApprovalCheckpoint(params) {
       workflowId: params.workflowId,
       employeeId: managerId,
       agentId: managerId,
+      conversationId: params.rootConversationId || null,
       title: params.title || `[AUTO] ${managerId} • ${params.workflowId}`,
       role: "assistant",
       type: "approval_request",
       content: params.content,
       timestamp,
-      eventId: params.eventId || `approval_${params.workflowId}_${timestamp}`,
+      status: params.stage || "awaiting_content_approval",
+      conversationRole: "root",
+      injectToGateway: false,
+      eventId: params.eventId || `${params.workflowId}:${params.stage || "awaiting_content_approval"}:approval`,
     });
+    delivered = true;
   } catch (err) {
     logger.logError("beClient", "Loi day approval message ve FE: " + err.message);
   }
+
+  return delivered;
+}
+
+async function syncRootConversationMessage(params) {
+  const managerId = params.managerId || "pho_phong";
+  const workflowId = String(params.workflowId || "").trim();
+  const content = String(params.content || "").trim();
+  if (!workflowId || !content) {
+    return false;
+  }
+
+  const timestamp = Date.now();
+  let delivered = false;
+
+  try {
+    await beClient.updateWorkflowStatus(params.workflowId, params.stage || "active");
+  } catch (err) {
+    logger.logError("beClient", "Loi dong bo workflow status: " + err.message);
+  }
+
+  try {
+    await beClient.pushAutomationEvent({
+      workflowId,
+      employeeId: managerId,
+      agentId: managerId,
+      conversationId: params.rootConversationId || null,
+      title: params.title || `[AUTO] ${managerId} • ${workflowId}`,
+      role: "assistant",
+      type: params.type || "regular",
+      content,
+      timestamp,
+      status: params.stage || "active",
+      conversationRole: "root",
+      injectToGateway: false,
+      eventId: params.eventId || `${workflowId}:${params.stage || "active"}:${params.type || "regular"}`,
+    });
+    delivered = true;
+  } catch (err) {
+    logger.logError("beClient", "Loi day root message ve FE: " + err.message);
+  }
+
+  return delivered;
+}
+
+function readWorkflowStateForSync(paths, workflowId) {
+  const current = readJsonIfExists(paths?.currentFile, null);
+  if (current?.workflow_id === workflowId) {
+    return current;
+  }
+  if (!workflowId || !paths?.historyDir) {
+    return null;
+  }
+  return readJsonIfExists(path.join(paths.historyDir, `${workflowId}.json`), null);
+}
+
+function buildRootSyncPayloadFromResult(context, result) {
+  const workflowId = String(result?.workflow_id || result?.workflowId || "").trim();
+  const stage = String(result?.stage || "").trim();
+  const status = String(result?.status || "ok").trim().toLowerCase();
+  if (!workflowId || !stage) {
+    return null;
+  }
+
+  // Do not persist transient blocked/running placeholders as real manager checkpoints.
+  if (stage.startsWith("awaiting_") && status !== "ok") {
+    return null;
+  }
+
+  const stageSpecs = {
+    awaiting_media_approval: {
+      type: "approval_request",
+      eventId: `${workflowId}:awaiting_media_approval:checkpoint`,
+    },
+    awaiting_video_approval: {
+      type: "approval_request",
+      eventId: `${workflowId}:awaiting_video_approval:checkpoint`,
+    },
+    awaiting_publish_decision: {
+      type: "approval_request",
+      eventId: `${workflowId}:awaiting_publish_decision:checkpoint`,
+    },
+    published: {
+      type: "regular",
+      eventId: `${workflowId}:published:result`,
+    },
+    scheduled: {
+      type: "regular",
+      eventId: `${workflowId}:scheduled:result`,
+    },
+  };
+
+  const stageSpec = stageSpecs[stage];
+  if (!stageSpec) {
+    return null;
+  }
+
+  const workflowState = readWorkflowStateForSync(context.paths, workflowId);
+  const content = String(
+    result?.human_message ||
+      result?.summary ||
+      buildStageHumanMessage(workflowState) ||
+      "",
+  ).trim();
+  if (!content) {
+    return null;
+  }
+
+  return {
+    workflowId,
+    stage,
+    type: stageSpec.type,
+    eventId: stageSpec.eventId,
+    content,
+    rootConversationId:
+      workflowState?.rootConversationId || context.parentConversationId || null,
+  };
+}
+
+async function syncRootMessageFromResult(context, result) {
+  const payload = buildRootSyncPayloadFromResult(context, result);
+  if (!payload) {
+    return false;
+  }
+  return syncRootConversationMessage({
+    ...payload,
+    managerId: context.options?.from || "pho_phong",
+    title: `[AUTO] ${context.options?.from || "pho_phong"} • ${payload.workflowId}`,
+  });
 }
 
 function isPromptFocusedFeedback(feedback) {
@@ -600,6 +1091,12 @@ function mergeUniquePaths(values) {
   return [...new Set((values || []).map((item) => String(item || "").trim()).filter(Boolean))];
 }
 
+function sanitizeVideoMediaPath(value) {
+  const normalized = String(value || "").trim();
+  if (!normalized) return "";
+  return videoAgent.isPlaceholderGeneratedPath(normalized) ? "" : normalized;
+}
+
 function mergeMediaData(existingMedia, incomingMedia, content = {}) {
   const merged = {
     ...(existingMedia || {}),
@@ -609,7 +1106,9 @@ function mergeMediaData(existingMedia, incomingMedia, content = {}) {
   merged.generatedImagePath =
     incomingMedia?.generatedImagePath || existingMedia?.generatedImagePath || "";
   merged.generatedVideoPath =
-    incomingMedia?.generatedVideoPath || existingMedia?.generatedVideoPath || "";
+    sanitizeVideoMediaPath(incomingMedia?.generatedVideoPath) ||
+    sanitizeVideoMediaPath(existingMedia?.generatedVideoPath) ||
+    "";
   merged.imagePrompt = incomingMedia?.imagePrompt || existingMedia?.imagePrompt || "";
   merged.videoPrompt = incomingMedia?.videoPrompt || existingMedia?.videoPrompt || "";
   merged.usedProductImage =
@@ -721,6 +1220,15 @@ function buildPublishDecisionSummary(state) {
 
 function buildStageHumanMessage(state) {
   if (!state) return "";
+  if (state.stage === "awaiting_content_approval") {
+    return buildContentApprovalCheckpointMessage({
+      productName: state.content?.productName || "",
+      approvedContent: state.content?.approvedContent || "",
+      primaryProductImage: state.content?.primaryProductImage || "",
+      rawReply: state.content?.reply || "",
+      revised: Array.isArray(state.reject_history) && state.reject_history.length > 0,
+    });
+  }
   if (state.stage === "awaiting_media_approval") {
     return buildMediaApprovalSummary({
       media: state.media || {},
@@ -741,6 +1249,15 @@ function buildStageHumanMessage(state) {
   }
   if (state.stage === "awaiting_publish_decision") {
     return buildPublishDecisionSummary(state);
+  }
+  if (state.stage === "awaiting_edit_approval") {
+    return buildContentApprovalCheckpointMessage({
+      productName: state.content?.productName || "",
+      approvedContent: state.content?.approvedContent || "",
+      primaryProductImage: state.content?.primaryProductImage || "",
+      rawReply: state.content?.reply || "",
+      revised: true,
+    });
   }
   return "";
 }
@@ -801,7 +1318,8 @@ async function tryRecoverAsyncStageState(params) {
   }
 
   let workerSessionKey =
-    registry?.byId?.[spec.agentId]?.transport?.sessionKey || `agent:${spec.agentId}:main`;
+    registry?.byId?.[spec.agentId]?.transport?.sessionKey
+    || buildWorkflowScopedSessionKey(spec.agentId, state.workflow_id, spec.stepId);
 
   // Ưu tiên session key do BE sinh (per-workflow) thay vì fixed registry key
   try {
@@ -1205,7 +1723,8 @@ function isDuplicateContent(historyDir, newContent) {
  * Táº¡o workflow má»›i â€” giao nv_content viáº¿t bÃ i.
  */
 async function startNewWorkflow(context) {
-  const workflowId = `wf_test_${randomUUID()}`;
+  const rootBinding = await resolveRootWorkflowBinding(context);
+  const workflowId = rootBinding.workflowId;
   const stepId = "step_01_content";
   const requestedMediaType = context.intent?.media_type_requested || "image";
   const intent = {
@@ -1218,7 +1737,7 @@ async function startNewWorkflow(context) {
   try {
     await beClient.createWorkflow({
       id: workflowId,
-      rootConversationId: context.parentConversationId || null,
+      rootConversationId: rootBinding.rootConversationId || context.parentConversationId || null,
       initiatorAgentId: context.options.from || "pho_phong",
       initiatorEmployeeId: context.options.from || "pho_phong",
       title: `[AUTO] Workflow (tá»« ${context.options.from})`,
@@ -1249,17 +1768,17 @@ async function startNewWorkflow(context) {
     workflowGuidelines: mergeWorkflowGuidelines([], context.message),
   });
 
-  const contentReply = await runAgentStep({
+  const contentCheckpoint = await runContentCheckpointStep({
     agentId: "nv_content",
     sessionKey: context.registry.byId.nv_content.transport.sessionKey,
     openClawHome: context.openClawHome,
+    rootConversationId: rootBinding.rootConversationId || null,
     workflowId,
     stepId,
     timeoutMs: context.options.timeoutMs,
     prompt,
   });
-
-  const content = contentAgent.parseContentResult(contentReply);
+  const content = contentCheckpoint.content;
 
   // Content dedup check
   if (isDuplicateContent(context.paths.historyDir, content.approvedContent)) {
@@ -1271,6 +1790,8 @@ async function startNewWorkflow(context) {
 
   const state = saveWorkflow(context.paths, {
     workflow_id: workflowId,
+    rootConversationId: rootBinding.rootConversationId || null,
+    managerId: context.options.from || "pho_phong",
     created_at: nowIso(),
     status: "pending",
     stage: "awaiting_content_approval",
@@ -1283,12 +1804,7 @@ async function startNewWorkflow(context) {
     reject_history: [],
     prompt_versions: [],
     global_guidelines: mergeWorkflowGuidelines([], context.message),
-    notifications: {
-      awaiting_content_approval: {
-        at: nowIso(),
-        delivery: "sync",
-      },
-    },
+    notifications: {},
   });
 
   const summary = [
@@ -1318,15 +1834,18 @@ async function startNewWorkflow(context) {
 
   await syncApprovalCheckpoint({
     workflowId,
+    rootConversationId: rootBinding.rootConversationId || null,
     managerId: context.options.from || "pho_phong",
     stage: state.stage,
     title: `[AUTO] ${context.options.from || "pho_phong"} • ${workflowId}`,
-    content: buildFrontendApprovalMessage({
+    content: buildContentApprovalCheckpointMessage({
       productName: content.productName,
       approvedContent: content.approvedContent,
       primaryProductImage: content.primaryProductImage,
+      rawReply: content.reply,
       revised: false,
     }),
+    eventId: `${workflowId}:awaiting_content_approval:content`,
   });
 
   return buildResult({
@@ -1403,7 +1922,7 @@ async function reviseContent(context, state) {
     workflowGuidelines: state.global_guidelines || [],
   });
 
-  const reply = await runAgentStep({
+  const contentCheckpoint = await runContentCheckpointStep({
     agentId: "nv_content",
     sessionKey: context.registry.byId.nv_content.transport.sessionKey,
     openClawHome: context.openClawHome,
@@ -1412,8 +1931,7 @@ async function reviseContent(context, state) {
     timeoutMs: context.options.timeoutMs,
     prompt,
   });
-
-  const content = contentAgent.parseContentResult(reply);
+  const content = contentCheckpoint.content;
   const nextState = saveWorkflow(context.paths, {
     ...state,
     stage: "awaiting_content_approval",
@@ -1446,12 +1964,14 @@ async function reviseContent(context, state) {
     managerId: context.options.from || "pho_phong",
     stage: nextState.stage,
     title: `[AUTO] ${context.options.from || "pho_phong"} • ${state.workflow_id}`,
-    content: buildFrontendApprovalMessage({
+    content: buildContentApprovalCheckpointMessage({
       productName: content.productName,
       approvedContent: content.approvedContent,
       primaryProductImage: content.primaryProductImage,
+      rawReply: content.reply,
       revised: true,
     }),
+    eventId: `${state.workflow_id}:awaiting_content_approval:content_revise`,
   });
 
   return buildResult({
@@ -2028,7 +2548,9 @@ async function generateMediaFlow(context, state) {
           openClawHome: context.openClawHome,
           workflowId: state.workflow_id,
           stage: "awaiting_media_approval",
-          sessionKey: context.registry.byId.pho_phong?.transport?.sessionKey || "agent:pho_phong:main",
+          sessionKey:
+            context.registry.byId.pho_phong?.transport?.sessionKey
+            || buildWorkflowScopedSessionKey("pho_phong", state.workflow_id, "root"),
           timeoutMs: getMediaTimeoutMs(context.options.timeoutMs),
         });
         const waitingState = saveWorkflow(context.paths, {
@@ -2357,7 +2879,9 @@ async function reviseMediaFlow(context, state) {
           openClawHome: context.openClawHome,
           workflowId: state.workflow_id,
           stage: "awaiting_media_approval",
-          sessionKey: context.registry.byId.pho_phong?.transport?.sessionKey || "agent:pho_phong:main",
+          sessionKey:
+            context.registry.byId.pho_phong?.transport?.sessionKey
+            || buildWorkflowScopedSessionKey("pho_phong", state.workflow_id, "root"),
           timeoutMs: getMediaTimeoutMs(context.options.timeoutMs),
         });
         const waitingState = saveWorkflow(context.paths, {
@@ -2628,7 +3152,9 @@ async function generateVideoFlow(context, state) {
         openClawHome: context.openClawHome,
         workflowId: state.workflow_id,
         stage: "awaiting_video_approval",
-        sessionKey: context.registry.byId.pho_phong?.transport?.sessionKey || "agent:pho_phong:main",
+        sessionKey:
+          context.registry.byId.pho_phong?.transport?.sessionKey
+          || buildWorkflowScopedSessionKey("pho_phong", state.workflow_id, "root"),
         timeoutMs: getMediaTimeoutMs(context.options.timeoutMs),
       });
       const waitingState = saveWorkflow(context.paths, {
@@ -2935,7 +3461,9 @@ async function reviseVideoFlow(context, state) {
         openClawHome: context.openClawHome,
         workflowId: state.workflow_id,
         stage: "awaiting_video_approval",
-        sessionKey: context.registry.byId.pho_phong?.transport?.sessionKey || "agent:pho_phong:main",
+        sessionKey:
+          context.registry.byId.pho_phong?.transport?.sessionKey
+          || buildWorkflowScopedSessionKey("pho_phong", state.workflow_id, "root"),
         timeoutMs: getMediaTimeoutMs(context.options.timeoutMs),
       });
       const waitingState = saveWorkflow(context.paths, {
@@ -3124,12 +3652,13 @@ function publishNowAction(context, state) {
   ]
     .filter(Boolean)
     .join("\n");
+  const normalizedSummary = normalizePublishedSummaryText(summary);
 
   return buildResult({
     workflowId: state.workflow_id,
     stage: "published",
-    summary,
-    humanMessage: summary,
+    summary: normalizedSummary,
+    humanMessage: normalizedSummary,
     data: { post_id: postId, post_ids: postIds, media_paths: mediaPaths, publish_result: publishResult },
   });
 }
@@ -3234,7 +3763,7 @@ async function editPublishedFlow(context) {
     openClawHome: context.openClawHome,
   });
 
-  const reply = await runAgentStep({
+  const contentCheckpoint = await runContentCheckpointStep({
     agentId: "nv_content",
     sessionKey: context.registry.byId.nv_content.transport.sessionKey,
     openClawHome: context.openClawHome,
@@ -3243,8 +3772,7 @@ async function editPublishedFlow(context) {
     timeoutMs: context.options.timeoutMs,
     prompt,
   });
-
-  const content = contentAgent.parseContentResult(reply);
+  const content = contentCheckpoint.content;
 
   // LÆ°u state chá» duyá»‡t ná»™i dung má»›i trÆ°á»›c khi update lÃªn FB
   const state = saveWorkflow(context.paths, {
@@ -3402,51 +3930,31 @@ async function continueWorkflow(context, state) {
   }
 
   if (state.stage === "revising_video") {
-    const recoveredArtifacts = scanLatestGeneratedMedia(
-      context.openClawHome,
-      state.video_revising_started_at,
-      {
-        agentId: "media_video",
-        videoDirs: state.video_output_dir ? [state.video_output_dir] : [],
-      },
-    );
-    const recoveredMedia = mergeMediaData(
-      state.media,
-      {
-        generatedVideoPath: recoveredArtifacts.videoPath || "",
-        videoPrompt: state.prompt_package?.videoPrompt || state.media?.videoPrompt || "",
-        usedProductImage: state.content?.primaryProductImage || state.media?.usedProductImage || "",
-        usedLogoPaths: state.video_revising_logo_paths || state.media?.usedLogoPaths || [],
-      },
-      state.content,
-    );
-
-    if (recoveredMedia.generatedVideoPath) {
-      const nextState = saveWorkflow(context.paths, {
-        ...state,
-        stage: "awaiting_video_approval",
-        media: recoveredMedia,
-      });
+    const recoveredState = await tryRecoverAsyncStageState({
+      openClawHome: context.openClawHome,
+      state,
+      paths: context.paths,
+      registry: context.registry,
+    });
+    if (recoveredState?.stage === "awaiting_video_approval") {
       markWorkflowStageNotified(
         context.paths,
         state.workflow_id,
-        nextState.stage,
+        recoveredState.stage,
         "recovered",
       );
-      const summary = buildVideoApprovalSummary({
-        media: recoveredMedia,
-        promptPackage: state.prompt_package || {},
-      });
+      return buildRecoveredAsyncStageResult(recoveredState);
+    }
+
+    if (!hasAsyncStageExceededGrace(state.video_revising_started_at, getMediaTimeoutMs(context.options.timeoutMs))) {
+      const summary = buildAsyncWaitingSummary("video");
       return buildResult({
         workflowId: state.workflow_id,
-        stage: nextState.stage,
+        stage: state.stage,
+        status: "running",
         summary,
         humanMessage: summary,
-        data: {
-          media: recoveredMedia,
-          prompt_package: state.prompt_package || {},
-          next_expected_action: "video_approval",
-        },
+        data: { next_expected_action: "wait_video" },
       });
     }
 
@@ -3464,51 +3972,31 @@ async function continueWorkflow(context, state) {
   }
 
   if (state.stage === "generating_video") {
-    const recoveredArtifacts = scanLatestGeneratedMedia(
-      context.openClawHome,
-      state.video_generating_started_at,
-      {
-        agentId: "media_video",
-        videoDirs: state.video_output_dir ? [state.video_output_dir] : [],
-      },
-    );
-    const recoveredMedia = mergeMediaData(
-      state.media,
-      {
-        generatedVideoPath: recoveredArtifacts.videoPath || "",
-        videoPrompt: state.prompt_package?.videoPrompt || "",
-        usedProductImage: state.content?.primaryProductImage || "",
-        usedLogoPaths: state.video_generating_logo_paths || [],
-      },
-      state.content,
-    );
-
-    if (recoveredMedia.generatedVideoPath) {
-      const nextState = saveWorkflow(context.paths, {
-        ...state,
-        stage: "awaiting_video_approval",
-        media: recoveredMedia,
-      });
+    const recoveredState = await tryRecoverAsyncStageState({
+      openClawHome: context.openClawHome,
+      state,
+      paths: context.paths,
+      registry: context.registry,
+    });
+    if (recoveredState?.stage === "awaiting_video_approval") {
       markWorkflowStageNotified(
         context.paths,
         state.workflow_id,
-        nextState.stage,
+        recoveredState.stage,
         "recovered",
       );
-      const summary = buildVideoApprovalSummary({
-        media: recoveredMedia,
-        promptPackage: state.prompt_package || {},
-      });
+      return buildRecoveredAsyncStageResult(recoveredState);
+    }
+
+    if (!hasAsyncStageExceededGrace(state.video_generating_started_at, getMediaTimeoutMs(context.options.timeoutMs))) {
+      const summary = buildAsyncWaitingSummary("video");
       return buildResult({
         workflowId: state.workflow_id,
-        stage: nextState.stage,
+        stage: state.stage,
+        status: "running",
         summary,
         humanMessage: summary,
-        data: {
-          media: recoveredMedia,
-          prompt_package: state.prompt_package || {},
-          next_expected_action: "video_approval",
-        },
+        data: { next_expected_action: "wait_video" },
       });
     }
 
@@ -3526,52 +4014,31 @@ async function continueWorkflow(context, state) {
   }
 
   if (state.stage === "revising_media") {
-    const recoveredArtifacts = scanLatestGeneratedMedia(
-      context.openClawHome,
-      state.revising_started_at,
-    );
-    const recoveredMedia = {
-      ...(state.media || {}),
-      generatedImagePath: recoveredArtifacts.imagePath || state.media?.generatedImagePath || "",
-      generatedVideoPath: recoveredArtifacts.videoPath || state.media?.generatedVideoPath || "",
-      mediaType:
-        state.revising_route ||
-        state.media?.mediaType ||
-        state.intent?.media_type_requested ||
-        "image",
-      imagePrompt: state.prompt_package?.imagePrompt || state.media?.imagePrompt || "",
-      videoPrompt: state.prompt_package?.videoPrompt || state.media?.videoPrompt || "",
-      usedProductImage: state.content?.primaryProductImage || state.media?.usedProductImage || "",
-      usedLogoPaths: state.revising_logo_paths || state.media?.usedLogoPaths || [],
-    };
-
-    if (collectMediaPaths(recoveredMedia).length > 0) {
-      const nextState = saveWorkflow(context.paths, {
-        ...state,
-        stage: "awaiting_media_approval",
-        media: recoveredMedia,
-      });
+    const recoveredState = await tryRecoverAsyncStageState({
+      openClawHome: context.openClawHome,
+      state,
+      paths: context.paths,
+      registry: context.registry,
+    });
+    if (recoveredState?.stage === "awaiting_media_approval") {
       markWorkflowStageNotified(
         context.paths,
         state.workflow_id,
-        nextState.stage,
+        recoveredState.stage,
         "recovered",
       );
-      const summary = buildMediaApprovalSummary({
-        media: recoveredMedia,
-        promptPackage: state.prompt_package || {},
-        route: mediaAgent.routeMediaType(recoveredMedia.mediaType),
-      });
+      return buildRecoveredAsyncStageResult(recoveredState);
+    }
+
+    if (!hasAsyncStageExceededGrace(state.revising_started_at, getMediaTimeoutMs(context.options.timeoutMs))) {
+      const summary = buildAsyncWaitingSummary("media");
       return buildResult({
         workflowId: state.workflow_id,
-        stage: nextState.stage,
+        stage: state.stage,
+        status: "running",
         summary,
         humanMessage: summary,
-        data: {
-          media: recoveredMedia,
-          prompt_package: state.prompt_package || {},
-          next_expected_action: "media_approval",
-        },
+        data: { next_expected_action: "wait_media" },
       });
     }
 
@@ -3591,47 +4058,31 @@ async function continueWorkflow(context, state) {
   }
 
   if (state.stage === "generating_media") {
-    const recoveredArtifacts = scanLatestGeneratedMedia(
-      context.openClawHome,
-      state.generating_started_at,
-    );
-    const recoveredMedia = {
-      generatedImagePath: recoveredArtifacts.imagePath || "",
-      generatedVideoPath: recoveredArtifacts.videoPath || "",
-      mediaType: state.generating_route || state.intent?.media_type_requested || "image",
-      imagePrompt: state.prompt_package?.imagePrompt || "",
-      videoPrompt: state.prompt_package?.videoPrompt || "",
-      usedProductImage: state.content?.primaryProductImage || "",
-      usedLogoPaths: state.generating_logo_paths || [],
-    };
-
-    if (collectMediaPaths(recoveredMedia).length > 0) {
-      const nextState = saveWorkflow(context.paths, {
-        ...state,
-        stage: "awaiting_media_approval",
-        media: recoveredMedia,
-      });
+    const recoveredState = await tryRecoverAsyncStageState({
+      openClawHome: context.openClawHome,
+      state,
+      paths: context.paths,
+      registry: context.registry,
+    });
+    if (recoveredState?.stage === "awaiting_media_approval") {
       markWorkflowStageNotified(
         context.paths,
         state.workflow_id,
-        nextState.stage,
+        recoveredState.stage,
         "recovered",
       );
-      const summary = buildMediaApprovalSummary({
-        media: recoveredMedia,
-        promptPackage: state.prompt_package || {},
-        route: mediaAgent.routeMediaType(recoveredMedia.mediaType),
-      });
+      return buildRecoveredAsyncStageResult(recoveredState);
+    }
+
+    if (!hasAsyncStageExceededGrace(state.generating_started_at, getMediaTimeoutMs(context.options.timeoutMs))) {
+      const summary = buildAsyncWaitingSummary("media");
       return buildResult({
         workflowId: state.workflow_id,
-        stage: nextState.stage,
+        stage: state.stage,
+        status: "running",
         summary,
         humanMessage: summary,
-        data: {
-          media: recoveredMedia,
-          prompt_package: state.prompt_package || {},
-          next_expected_action: "media_approval",
-        },
+        data: { next_expected_action: "wait_media" },
       });
     }
 
@@ -4147,6 +4598,7 @@ async function runCli(argv = process.argv.slice(2)) {
     }
   }
 
+  await syncRootMessageFromResult(context, result);
   printResult(result, options.json);
 }
 
@@ -4201,14 +4653,24 @@ function parseMediaReply(reply) {
 }
 
 module.exports = {
+  buildContentApprovalCheckpointMessage,
+  continueWorkflow,
   buildStageHumanMessage,
+  buildWorkflowScopedSessionKey,
   classifyContentDecision,
   classifyMediaDecision,
   extractBlock,
   extractField,
   hasWorkflowStageNotification,
+  hasAsyncStageExceededGrace,
   parseContentReply,
   parseMediaReply,
+  buildRootSyncPayloadFromResult,
+  resolveRootWorkflowBinding,
   scanLatestGeneratedMedia,
+  syncRootMessageFromResult,
   shouldSupersedePendingWorkflow,
+  validateContentCheckpointReply,
+  waitForValidContentCheckpoint,
+  migrateState,
 };

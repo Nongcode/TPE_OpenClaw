@@ -29,9 +29,31 @@ function extractField(source, label) {
 }
 
 function isPlaceholderGeneratedPath(value) {
-  const normalized = String(value || "").trim().toUpperCase();
-  if (!normalized) return false;
-  return ["KHONG_CO", "NONE", "NULL", "N/A", "KHONG_CO_DO_SKILL_TRA_VE_LOI"].includes(normalized);
+  const placeholderValues = [
+    "KHONG_CO",
+    "NONE",
+    "NULL",
+    "N_A",
+    "KHONG_CO_DO_SKILL_TRA_VE_LOI",
+    "CHUA_TAO_DUOC_VIDEO",
+    "CHUA_CO_VIDEO",
+    "VIDEO_CHUA_SAN_SANG",
+  ];
+  const normalizeCandidate = (candidate) =>
+    String(candidate || "")
+      .trim()
+      .replace(/[đĐ]/g, "d")
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .replace(/[^A-Za-z0-9]+/g, "_")
+      .replace(/^_+|_+$/g, "")
+      .toUpperCase();
+
+  const rawValue = String(value || "").trim();
+  if (!rawValue) return false;
+  return [rawValue, path.basename(rawValue)]
+    .map(normalizeCandidate)
+    .some((normalized) => normalized && placeholderValues.includes(normalized));
 }
 
 function resolveVideoOutputDir(openClawHome, workflowId = "") {
@@ -399,7 +421,12 @@ function parseVideoResult(reply, expected = {}) {
   if (isPlaceholderGeneratedPath(generatedVideoPath)) {
     generatedVideoPath = "";
   } else if (generatedVideoPath) {
-    generatedVideoPath = path.resolve(generatedVideoPath);
+    const resolvedPath = path.resolve(generatedVideoPath);
+    const hasKnownVideoExtension = /\.(mp4|mov|m4v|webm|avi|mkv|gif)$/i.test(resolvedPath);
+    generatedVideoPath =
+      hasKnownVideoExtension && fs.existsSync(resolvedPath)
+        ? resolvedPath
+        : extractFirstExistingPath(text, [".mp4", ".mov", ".m4v", ".webm", ".avi", ".mkv", ".gif"]);
   } else {
     generatedVideoPath = extractFirstExistingPath(text, [".mp4", ".mov", ".m4v", ".webm", ".avi", ".mkv", ".gif"]);
   }
@@ -451,6 +478,7 @@ module.exports = {
   buildVideoPromptReviseRequestPrompt,
   buildVideoRevisePrompt,
   buildVideoSystemPrompt,
+  isPlaceholderGeneratedPath,
   parseVideoPromptRequest,
   parseVideoResult,
   resolveVideoOutputDir,

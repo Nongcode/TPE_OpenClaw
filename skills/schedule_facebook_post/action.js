@@ -5,16 +5,22 @@ import { loadFacebookEnv } from "../facebook_shared/load-env.js";
 loadFacebookEnv();
 
 const DEFAULTS = {
-  page_id: process.env.FACEBOOK_PAGE_ID || "1131157960071384",
-  access_token:
-    process.env.FACEBOOK_PAGE_ACCESS_TOKEN ||
-    process.env.PAGE_ACCESS_TOKEN ||
-    "EAAS86OsLd40BRC57JhTf37p5KqhdtjeuAZATviMt5GgJmstKAcj0MQsi0NR8xRY1HrWlUv2RfbLy8z6N4K8GhrlO6T0kRAB4BA1ZBR18Ei0hIyqxOcGuEjU0ezLteJaeMIL7TlOujpfjiPigesAVbwHBerMXe1p0mDLVY4Bk9CGTHhZBuAZBiZBqyLrBln9qZBsUNA",
   media_paths: [],
   scheduled_publish_time: "", // Bắt buộc: Thời gian muốn đăng (ISO 8601 hoặc Unix Timestamp)
   dry_run: false,
   graph_version: process.env.FACEBOOK_GRAPH_API_VERSION || "v20.0",
 };
+
+const TARGET_PAGES = [
+  {
+    page_id: "1021996431004626",
+    access_token: "EAAUnu2nAp08BRXf1OSuTB7Bxxe7oYA4Js2behf3JMBbrA2TaquIjfLogbxl6zYe8C2lDn91j8vZCZBJPoZAn1jZCEY98ZAVH8IyjibcLNv0BtD3RegfqPTl14ukMzZApZCLchxI4TeisFm8nwi8TOqcJHsLSRn3AADHMZCgc1uhrDR0ZBbWunSN1C910ZAi2XwAxOl0DMdrZAdxsRu9XZC4OJN1O"
+  },
+  {
+    page_id: "1129362243584971",
+    access_token: "EAAUnu2nAp08BRUpLU9JM1S7ZAYUQoG8vtjjuOYU4uqP8r4Pu5H9v5KrlbaSIE1jgFBptyExWPfyQWzc54PDHDaJXZCqEz7CcTzdJFz0LCdJXYvslbnJZAPNndbktC1SGIqyZCJtt4Ivn6HXoHzmZC39OyiEHs6HwgElgq9qopfi2aWMNUUuV56MnSSNHqSHCX8CA3xO8mngdZAQw11qe54"
+  }
+];
 
 function buildResult({ success, message, data = {}, artifacts = [], logs = [], error = null }) {
   return { success, message, data, artifacts, logs, error };
@@ -64,9 +70,6 @@ function validateInput(params) {
     (typeof params.caption_short === "string" && params.caption_short.trim() !== "");
 
   if (!hasCaption) missing.push("caption_long_or_caption_short");
-  if (!params.page_id || String(params.page_id).trim() === "") missing.push("page_id");
-  if (!params.access_token || String(params.access_token).trim() === "")
-    missing.push("access_token");
   if (!params.scheduled_publish_time) missing.push("scheduled_publish_time");
 
   return missing;
@@ -189,8 +192,6 @@ async function uploadUnpublishedMedia({ pageId, accessToken, filePath, logs }) {
       ? parsed.caption_long.trim()
       : parsed.caption_short.trim();
   const mediaPaths = parseList(parsed.media_paths).map((item) => path.normalize(item));
-  const pageId = String(parsed.page_id).trim();
-  const accessToken = String(parsed.access_token).trim();
   const graphVersion = String(parsed.graph_version || DEFAULTS.graph_version).trim();
 
   if (parsed.dry_run) {
@@ -199,139 +200,165 @@ async function uploadUnpublishedMedia({ pageId, accessToken, filePath, logs }) {
       buildResult({
         success: true,
         message: "Dry run completed.",
-        data: { caption, scheduled_time: scheduledUnixTime },
+        data: {
+          caption,
+          scheduled_time: scheduledUnixTime,
+          pages: TARGET_PAGES.map((p) => p.page_id),
+        },
         logs,
       }),
     );
     return;
   }
 
-  try {
-    if (mediaPaths.length > 0) {
+  if (mediaPaths.length > 0) {
+    try {
       await ensureReadableFiles(mediaPaths);
+    } catch (e) {
+      printResult(
+        buildResult({
+          success: false,
+          message: "Media file not found or inaccessible",
+          logs,
+          error: { code: "FILE_ERROR", details: e.message },
+        }),
+      );
+      process.exit(1);
     }
+  }
 
-    if (mediaPaths.length > 1) {
-      logs.push("[step] Multiple media detected, using attached_media schedule flow");
+  const results = [];
+  let hasError = false;
 
-      const uploads = [];
-      for (const filePath of mediaPaths) {
-        uploads.push(
-          await uploadUnpublishedMedia({
-            pageId,
-            accessToken,
-            filePath,
-            logs,
-          }),
+  for (const page of TARGET_PAGES) {
+    const pageId = String(page.page_id).trim();
+    const accessToken = String(page.access_token).trim();
+    logs.push(`\n--- Processing page: ${pageId} ---`);
+
+    try {
+      if (mediaPaths.length > 1) {
+        logs.push(
+          `[step-${pageId}] Multiple media detected, using attached_media schedule flow`,
         );
+
+        const uploads = [];
+        for (const filePath of mediaPaths) {
+          uploads.push(
+            await uploadUnpublishedMedia({
+              pageId,
+              accessToken,
+              filePath,
+              logs,
+            }),
+          );
+        }
+
+        const apiUrl = `https://graph.facebook.com/${graphVersion}/${pageId}/feed`;
+        const formData = new FormData();
+        formData.append("access_token", accessToken);
+        formData.append("published", "false");
+        formData.append("scheduled_publish_time", scheduledUnixTime.toString());
+        formData.append("message", caption);
+        uploads.forEach((upload, index) => {
+          formData.append(`attached_media[${index}]`, JSON.stringify({ media_fbid: upload.mediaId }));
+        });
+
+        logs.push(`[step-${pageId}] Sending scheduled attached_media feed request...`);
+        const response = await fetch(apiUrl, { method: "POST", body: formData });
+        const result = await response.json();
+        if (!response.ok || result.error) {
+          throw new Error(result.error ? result.error.message : JSON.stringify(result));
+        }
+
+        const finalPostId = result.post_id || result.id || result.video_id;
+        results.push({
+          page_id: pageId,
+          success: true,
+          post_id: finalPostId,
+          attached_media_count: uploads.length,
+          scheduled_time_unix: scheduledUnixTime,
+          scheduled_time_local: new Date(scheduledUnixTime * 1000).toLocaleString(),
+          raw_fb_response: result,
+        });
+        continue;
       }
 
-      const apiUrl = `https://graph.facebook.com/${graphVersion}/${pageId}/feed`;
+      const file = mediaPaths.length > 0 ? mediaPaths[0] : null;
+      const ext = file ? path.extname(file).toLowerCase() : "";
+      const isVideo = [".mp4", ".mov", ".avi", ".webm", ".mkv"].includes(ext);
+
+      let endpoint = "/feed";
+      if (file) endpoint = isVideo ? "/videos" : "/photos";
+
+      const apiUrl = `https://graph.facebook.com/${graphVersion}/${pageId}${endpoint}`;
+
       const formData = new FormData();
       formData.append("access_token", accessToken);
+
+      // --- HAI THAM SỐ QUAN TRỌNG ĐỂ ĐẶT LỊCH ---
       formData.append("published", "false");
       formData.append("scheduled_publish_time", scheduledUnixTime.toString());
-      formData.append("message", caption);
-      uploads.forEach((upload, index) => {
-        formData.append(`attached_media[${index}]`, JSON.stringify({ media_fbid: upload.mediaId }));
-      });
 
-      logs.push("[step] Sending scheduled attached_media feed request...");
+      if (endpoint === "/feed" || endpoint === "/photos") {
+        formData.append("message", caption);
+      } else if (endpoint === "/videos") {
+        formData.append("description", caption);
+      }
+
+      if (file) {
+        const fileBuffer = await readFile(file);
+        const mimeType = isVideo ? "video/mp4" : "image/jpeg";
+        const blob = new Blob([fileBuffer], { type: mimeType });
+        formData.append("source", blob, path.basename(file));
+      }
+
+      logs.push(
+        `[step-${pageId}] Sending HTTP POST request to Facebook Graph API for Scheduling...`,
+      );
+
       const response = await fetch(apiUrl, { method: "POST", body: formData });
       const result = await response.json();
+
       if (!response.ok || result.error) {
         throw new Error(result.error ? result.error.message : JSON.stringify(result));
       }
 
       const finalPostId = result.post_id || result.id || result.video_id;
-      printResult(
-        buildResult({
-          success: true,
-          message: "Facebook post scheduled successfully!",
-          data: {
-            page_id: pageId,
-            post_id: finalPostId,
-            attached_media_count: uploads.length,
-            attached_media_ids: uploads.map((item) => item.mediaId),
-            scheduled_time_unix: scheduledUnixTime,
-            scheduled_time_local: new Date(scheduledUnixTime * 1000).toLocaleString(),
-            raw_fb_response: result,
-          },
-          logs,
-        }),
-      );
-      return;
-    }
 
-    const file = mediaPaths.length > 0 ? mediaPaths[0] : null;
-    const ext = file ? path.extname(file).toLowerCase() : "";
-    const isVideo = [".mp4", ".mov", ".avi", ".webm", ".mkv"].includes(ext);
-
-    let endpoint = "/feed";
-    if (file) endpoint = isVideo ? "/videos" : "/photos";
-
-    const apiUrl = `https://graph.facebook.com/${graphVersion}/${pageId}${endpoint}`;
-
-    const formData = new FormData();
-    formData.append("access_token", accessToken);
-
-    // --- HAI THAM SỐ QUAN TRỌNG ĐỂ ĐẶT LỊCH ---
-    formData.append("published", "false");
-    formData.append("scheduled_publish_time", scheduledUnixTime.toString());
-
-    if (endpoint === "/feed" || endpoint === "/photos") {
-      formData.append("message", caption);
-    } else if (endpoint === "/videos") {
-      formData.append("description", caption);
-    }
-
-    if (file) {
-      const fileBuffer = await readFile(file);
-      const mimeType = isVideo ? "video/mp4" : "image/jpeg";
-      const blob = new Blob([fileBuffer], { type: mimeType });
-      formData.append("source", blob, path.basename(file));
-    }
-
-    logs.push("[step] Sending HTTP POST request to Facebook Graph API for Scheduling...");
-
-    const response = await fetch(apiUrl, { method: "POST", body: formData });
-    const result = await response.json();
-
-    if (!response.ok || result.error) {
-      throw new Error(result.error ? result.error.message : JSON.stringify(result));
-    }
-
-    const finalPostId = result.post_id || result.id || result.video_id;
-
-    printResult(
-      buildResult({
+      results.push({
+        page_id: pageId,
         success: true,
-        message: "Facebook post scheduled successfully!",
-        data: {
-          page_id: pageId,
-          post_id: finalPostId, // Vẫn trả về ID bài viết để có thể sửa đổi sau này
-          scheduled_time_unix: scheduledUnixTime,
-          scheduled_time_local: new Date(scheduledUnixTime * 1000).toLocaleString(),
-          raw_fb_response: result,
-        },
-        logs,
-      }),
-    );
-  } catch (error) {
-    logs.push(`[fail] Flow failed: ${error.message}`);
-    if (/\(#200\)|permissions error/i.test(String(error.message || ""))) {
-      logs.push(
-        "[hint] Facebook Graph API rejected the schedule request with a permissions error. Check that FACEBOOK_PAGE_ACCESS_TOKEN belongs to FACEBOOK_PAGE_ID and has pages_manage_posts/pages_read_engagement.",
-      );
-    }
-    printResult(
-      buildResult({
+        post_id: finalPostId,
+        scheduled_time_unix: scheduledUnixTime,
+        scheduled_time_local: new Date(scheduledUnixTime * 1000).toLocaleString(),
+        raw_fb_response: result,
+      });
+    } catch (error) {
+      logs.push(`[fail-${pageId}] Flow failed: ${error.message}`);
+      if (/\(#200\)|permissions error/i.test(String(error.message || ""))) {
+        logs.push(
+          `[hint-${pageId}] Permissions error for page ${pageId}. Check that access token has pages_manage_posts/pages_read_engagement.`,
+        );
+      }
+      results.push({
+        page_id: pageId,
         success: false,
-        message: "Failed to schedule post",
-        logs,
-        error: { code: "API_ERROR", details: error.message },
-      }),
-    );
-    process.exit(1);
+        error: error.message,
+      });
+      hasError = true;
+    }
   }
+
+  printResult(
+    buildResult({
+      success: !hasError,
+      message: hasError
+        ? "Some or all posts failed to schedule"
+        : "All Facebook posts scheduled successfully!",
+      data: {
+        results,
+      },
+      logs,
+    }),
+  );
 })();

@@ -1,8 +1,8 @@
 /**
- * logger.js — Human-readable logging cho workflow orchestrator.
+ * logger.js - Human-readable logging cho workflow orchestrator.
  *
- * Mọi output terminal đều bằng tiếng Việt tự nhiên, không in raw JSON.
- * Mỗi payload giữa các agent đều kèm trường human_message.
+ * Moi output terminal deu bang tieng Viet tu nhien, khong in raw JSON.
+ * Moi payload giua cac agent deu kem truong human_message.
  */
 
 const ICONS = {
@@ -31,17 +31,11 @@ function separator() {
   return "─".repeat(60);
 }
 
-/**
- * In một dòng log chung với icon + timestamp.
- */
 function log(icon, message) {
   const prefix = ICONS[icon] || "•";
-  process.stderr.write(`${prefix} [${timestamp()}] ${message}\n`);
+  process.stderr.write(`${prefix} [${timestamp()}] ${String(message || "")}\n`);
 }
 
-/**
- * Log bắt đầu một phase mới trong workflow.
- */
 function logPhase(phase, humanMessage) {
   process.stderr.write(`\n${separator()}\n`);
   log("start", `PHASE: ${phase}`);
@@ -51,44 +45,33 @@ function logPhase(phase, humanMessage) {
   process.stderr.write(`${separator()}\n`);
 }
 
-/**
- * Log khi Phó phòng giao việc cho nhân viên.
- */
 function logHandoff(from, to, humanMessage) {
   log("handoff", `${from} → ${to}`);
   process.stderr.write(`   "${humanMessage}"\n`);
 }
 
-/**
- * Log khi hệ thống dừng chờ User duyệt.
- */
 function logApprovalWait(stage, preview) {
-  process.stderr.write(`\n`);
-  log("wait", `ĐANG CHỜ DUYỆT — Giai đoạn: ${stage}`);
-  if (preview) {
-    process.stderr.write(`\n${separator()}\n`);
-    process.stderr.write(`NỘI DUNG CHỜ DUYỆT:\n\n`);
-    const previewText = String(preview).trim();
-    // Giới hạn preview ~ 2000 ký tự cho terminal
-    if (previewText.length > 2000) {
-      process.stderr.write(`${previewText.slice(0, 2000)}\n...[rút gọn]\n`);
-    } else {
-      process.stderr.write(`${previewText}\n`);
-    }
-    process.stderr.write(`${separator()}\n`);
+  process.stderr.write("\n");
+  log("wait", `ĐANG CHỜ DUYỆT - Giai đoạn: ${stage}`);
+  if (!preview) return;
+
+  process.stderr.write(`\n${separator()}\n`);
+  process.stderr.write("NỘI DUNG CHỜ DUYỆT:\n\n");
+
+  const previewText = String(preview).trim();
+  if (previewText.length > 2000) {
+    process.stderr.write(`${previewText.slice(0, 2000)}\n...[rút gọn]\n`);
+  } else {
+    process.stderr.write(`${previewText}\n`);
   }
+
+  process.stderr.write(`${separator()}\n`);
 }
 
-/**
- * Log khi User phê duyệt.
- */
 function logApproved(stage) {
   log("approve", `User đã DUYỆT giai đoạn: ${stage}`);
 }
 
-/**
- * Log khi User từ chối.
- */
 function logRejected(stage, feedback) {
   log("reject", `User ĐÃ TỪ CHỐI giai đoạn: ${stage}`);
   if (feedback) {
@@ -96,55 +79,37 @@ function logRejected(stage, feedback) {
   }
 }
 
-/**
- * Log khi hệ thống học từ feedback (ghi vào memory).
- */
 function logLearning(agentId, rule) {
   log("learn", `${agentId} tự học quy tắc mới`);
   process.stderr.write(`   Quy tắc: "${rule}"\n`);
 }
 
-/**
- * Log lỗi.
- */
 function logError(stage, error) {
   const message = error instanceof Error ? error.message : String(error);
   log("error", `LỖI tại ${stage}: ${message}`);
 }
 
-/**
- * Log publish thành công.
- */
 function logPublished(postId) {
-  log("publish", `Bài viết đã được đăng thành công!`);
+  log("publish", "Bài viết đã được đăng thành công!");
   if (postId) {
     process.stderr.write(`   Post ID: ${postId}\n`);
   }
 }
 
-/**
- * Log schedule thành công.
- */
 function logScheduled(scheduleTime) {
-  log("schedule", `Bài viết đã được hẹn giờ đăng!`);
+  log("schedule", "Bài viết đã được hẹn giờ đăng!");
   if (scheduleTime) {
     process.stderr.write(`   Thời gian: ${scheduleTime}\n`);
   }
 }
 
-/**
- * Log edit bài đã đăng.
- */
 function logEdited(postId) {
-  log("edit", `Bài viết đã được cập nhật!`);
+  log("edit", "Bài viết đã được cập nhật!");
   if (postId) {
     process.stderr.write(`   Post ID: ${postId}\n`);
   }
 }
 
-/**
- * Log intent đã parse được.
- */
 function logIntent(intent) {
   log("info", `Ý định nhận diện: ${intent.intent}`);
   if (intent.media_type_requested && intent.media_type_requested !== "image") {
@@ -155,9 +120,6 @@ function logIntent(intent) {
   }
 }
 
-/**
- * Build trường human_message cho payload giao tiếp giữa agent.
- */
 function buildHumanMessage(from, to, action, detail) {
   if (action === "prompt_draft") {
     return `Content da duyet, NV Prompt viet prompt ${detail || "media"} theo bo quy tac hien tai.`;
@@ -189,16 +151,18 @@ function buildHumanMessage(from, to, action, detail) {
   if (action === "prompt_back_to_video") {
     return `NV Prompt da viet xong prompt ${detail || "video"}, chuyen lai cho Media_Video thuc thi.`;
   }
+
   const messages = {
     content_draft: `Sếp vừa giao bài mới, anh em Content nhận brief và làm nhé: ${detail}`,
     content_revise: `Content cần sửa lại theo nhận xét: ${detail}`,
-    media_generate: `Content đã được duyệt, anh em Media vào tạo ảnh nhé!`,
+    media_generate: "Content đã được duyệt, anh em Media vào tạo ảnh nhé!",
     media_revise: `Ảnh cần sửa lại theo nhận xét: ${detail}`,
-    publish: `Tất cả đã được duyệt, đăng bài lên Fanpage luôn!`,
-    schedule: `Tất cả đã được duyệt, hẹn giờ đăng bài theo lịch!`,
-    edit_post: `Sếp muốn sửa bài đã đăng, anh em Content cập nhật lại nhé!`,
-    learn_rule: `Rút kinh nghiệm từ lần sửa này, ghi lại quy tắc mới.`,
+    publish: "Tất cả đã được duyệt, đăng bài lên Fanpage luôn!",
+    schedule: "Tất cả đã được duyệt, hẹn giờ đăng bài theo lịch!",
+    edit_post: "Sếp muốn sửa bài đã đăng, anh em Content cập nhật lại nhé!",
+    learn_rule: "Rút kinh nghiệm từ lần sửa này, ghi lại quy tắc mới.",
   };
+
   return messages[action] || `${from} giao việc cho ${to}: ${detail || action}`;
 }
 

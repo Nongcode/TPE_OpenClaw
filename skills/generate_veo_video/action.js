@@ -9,8 +9,8 @@ import { buildChatVideoReplyPayload } from "../shared/chat-video-result.js";
 const DEFAULTS = {
   browser_path: "C:/Program Files/CocCoc/Browser/Application/browser.exe",
   user_data_dir: "C:/Users/Administrator/AppData/Local/CocCoc/Browser/User Data",
-  profile_name: "Default",
-  project_url: "https://labs.google/fx/tools/flow/project/58e06a02-273b-4589-82b6-1f655355e4f8",
+  profile_name: "Profile 2",
+  project_url: "https://labs.google/fx/vi/tools/flow/project/2129dba8-28ff-4699-8ed8-7397e399d986",
   reference_image: "",
   logo_paths: [],
   prompt: "Tao video quang cao",
