@@ -1,3 +1,8 @@
+const HARDCODED_PAGES = {
+  "1021996431004626": "EAANUeplbZCAwBRV5cJoU08nIySrQfhoyln4Hf7JOhcUXxRHxMDjN6XaZAckdmV4EiiC7B4HVqZAagIMSlR6L3ZBKrZABpfM4F6AuHVZCyzDp880CEACQAtUi0bo5ZAF7hPyxHdfgzQx5kvkqTBav47ocjmhH00hSzZAWsp1VwlKhfCeWGAGx0mbJiybkZBjUQ78i12cZAuZA8AWNmd2iP3PKlp8GwZDZD",
+  "1129362243584971": "EAANUeplbZCAwBRcIpRwhl4ZBm0snseVLldRUE4C4MCSZCv6fZCQkR2A90rx2ZCiZAsQF4BjYguJcfpaq9hfzpocMSSS8RYCROPQCOho8vCMm0n8xOV7lV7Wm2EKjZArnhTqWOPHjFIZBHzw5om62jZAW70tYiNzV4h2t2v9FZBZB0Wc3zF3zNcZAQgzLIXZBy4d2F1CTfbtwJLDuE1lUkcRS0qub1ZBgZDZD",
+};
+
 const DEFAULTS = {
   page_id: process.env.FACEBOOK_PAGE_ID || "643048852218433",
   access_token: process.env.FACEBOOK_PAGE_ACCESS_TOKEN || "",
@@ -86,8 +91,10 @@ function parseArgs(argv) {
 function validateInput(params) {
   const missing = [];
   const dryRun = parseBoolean(params.dry_run, false);
-  if (!String(params.page_id || "").trim()) missing.push("page_id");
-  if (!dryRun && !String(params.access_token || "").trim()) {
+  const pageId = String(params.page_id || "").trim();
+  if (!pageId) missing.push("page_id");
+  const hardcodedToken = HARDCODED_PAGES[pageId];
+  if (!dryRun && !String(params.access_token || "").trim() && !hardcodedToken) {
     missing.push("access_token or FACEBOOK_PAGE_ACCESS_TOKEN");
   }
   if (!String(params.recipient_id || "").trim()) missing.push("recipient_id");
@@ -142,7 +149,7 @@ async function postGraphMessage({ endpoint, body, accessToken, logs }) {
   }
 
   const pageId = String(parsed.page_id).trim();
-  const accessToken = String(parsed.access_token).trim();
+  const accessToken = String(parsed.access_token).trim() || HARDCODED_PAGES[pageId] || "";
   const recipientId = String(parsed.recipient_id).trim();
   const replyText = String(parsed.reply_text).trim();
   const dryRun = parseBoolean(parsed.dry_run, false);
