@@ -171,7 +171,9 @@ function getMediaTimeoutMs(baseTimeoutMs) {
 }
 
 function isAsyncStepStillRunningError(error) {
-  const message = String(error?.message || error || "").trim().toLowerCase();
+  const message = String(error?.message || error || "")
+    .trim()
+    .toLowerCase();
   if (!message) return false;
   return (
     message.includes("timed out waiting") ||
@@ -237,13 +239,9 @@ function extractWorkflowGuidelines(message) {
   const raw = String(message || "").trim();
   if (!raw) return [];
   const normalized = normalizeText(raw);
-  const isStatusQuery = [
-    "den dau roi",
-    "toi dau roi",
-    "xong chua",
-    "tien do",
-    "bao gio xong",
-  ].some((token) => normalized.includes(token));
+  const isStatusQuery = ["den dau roi", "toi dau roi", "xong chua", "tien do", "bao gio xong"].some(
+    (token) => normalized.includes(token),
+  );
   if (isStatusQuery) {
     return [];
   }
@@ -269,10 +267,12 @@ function extractWorkflowGuidelines(message) {
 }
 
 function mergeWorkflowGuidelines(existingGuidelines, message) {
-  return [...new Set([
-    ...(existingGuidelines || []).map((item) => String(item || "").trim()).filter(Boolean),
-    ...extractWorkflowGuidelines(message),
-  ])];
+  return [
+    ...new Set([
+      ...(existingGuidelines || []).map((item) => String(item || "").trim()).filter(Boolean),
+      ...extractWorkflowGuidelines(message),
+    ]),
+  ];
 }
 
 function rememberApprovedContent(state, openClawHome) {
@@ -323,11 +323,15 @@ function buildMediaDirective(filePath) {
 
 function normalizePublishedSummaryText(message) {
   return String(message || "")
-    .replaceAll(
-      "Ã°Å¸â€œÂ¤ BÃƒÂ i viÃ¡ÂºÂ¿t Ã„â€˜ÃƒÂ£ Ã„â€˜Ã†Â°Ã¡Â»Â£c Ã„â€˜Ã„Æ’ng thÃƒÂ nh cÃƒÂ´ng lÃƒÂªn Fanpage!",
-      "📤 Bài viết đã được đăng thành công lên Fanpage!",
-    )
-    .replaceAll("khÃƒÂ´ng cÃƒÂ³", "không có");
+    .replaceAll("📤 Bài viết đã được đăng thành công lên Fanpage!")
+    .replaceAll("không có", "không có");
+}
+
+function normalizePublishedSummaryText(message) {
+  return String(message || "")
+    .replaceAll("📤 Bài viết đã được đăng thành công lên Fanpage!")
+    .replaceAll("không có", "không có")
+    .replaceAll("không có", "không có");
 }
 
 function buildFrontendApprovalMessage(params) {
@@ -468,7 +472,7 @@ function validateCommonReply(reply, workflowId, stepId) {
   const requiredTokens = ["WORKFLOW_META", "TRANG_THAI", "KET_QUA"];
   for (const token of requiredTokens) {
     if (!text.includes(token)) {
-      logger.log("warn", `âš ï¸ Agent reply thiáº¿u token "${token}" â€” tiáº¿p tá»¥c xá»­ lÃ½.`);
+      logger.log("warn", ` Agent reply thiếu token "${token}" ấn” tiếp tục xử lý.`);
     }
   }
   return text;
@@ -499,8 +503,8 @@ async function resolveRootWorkflowBinding(context) {
     });
 
     const workflowId =
-      String(resolved?.workflowId || resolved?.rootConversation?.workflowId || "").trim()
-      || fallbackWorkflowId;
+      String(resolved?.workflowId || resolved?.rootConversation?.workflowId || "").trim() ||
+      fallbackWorkflowId;
     const rootConversationId =
       String(resolved?.rootConversationId || resolved?.rootConversation?.id || "").trim() || null;
     const rootSessionKey =
@@ -539,8 +543,8 @@ async function resolveRootWorkflowBinding(context) {
 
 async function resolveWorkflowSessionContext(params) {
   let actualSessionKey =
-    String(params.sessionKey || "").trim()
-    || buildWorkflowScopedSessionKey(params.agentId, params.workflowId, params.stepId);
+    String(params.sessionKey || "").trim() ||
+    buildWorkflowScopedSessionKey(params.agentId, params.workflowId, params.stepId);
   let subConv = null;
 
   try {
@@ -581,12 +585,7 @@ function buildContentApprovalCheckpointMessage(params) {
   if (!rawReply) {
     return buildFrontendApprovalMessage(params);
   }
-  return [
-    intro,
-    "",
-    "CHECKPOINT_GOC_TU_NV_CONTENT:",
-    rawReply,
-  ].join("\n");
+  return [intro, "", "CHECKPOINT_GOC_TU_NV_CONTENT:", rawReply].join("\n");
 }
 
 function validateContentCheckpointReply(params) {
@@ -632,16 +631,40 @@ function validateContentCheckpointReply(params) {
   }
 
   if (!parsed.productName) {
-    return { ok: false, reason: "missing PRODUCT_NAME", content: null, reply: correlation.matchedText || rawReply, warnings };
+    return {
+      ok: false,
+      reason: "missing PRODUCT_NAME",
+      content: null,
+      reply: correlation.matchedText || rawReply,
+      warnings,
+    };
   }
   if (!parsed.productUrl) {
-    return { ok: false, reason: "missing PRODUCT_URL", content: null, reply: correlation.matchedText || rawReply, warnings };
+    return {
+      ok: false,
+      reason: "missing PRODUCT_URL",
+      content: null,
+      reply: correlation.matchedText || rawReply,
+      warnings,
+    };
   }
   if (!parsed.primaryProductImage) {
-    return { ok: false, reason: "missing PRIMARY_PRODUCT_IMAGE", content: null, reply: correlation.matchedText || rawReply, warnings };
+    return {
+      ok: false,
+      reason: "missing PRIMARY_PRODUCT_IMAGE",
+      content: null,
+      reply: correlation.matchedText || rawReply,
+      warnings,
+    };
   }
   if (!parsed.approvedContent) {
-    return { ok: false, reason: "missing APPROVED_CONTENT_BEGIN/END", content: null, reply: correlation.matchedText || rawReply, warnings };
+    return {
+      ok: false,
+      reason: "missing APPROVED_CONTENT_BEGIN/END",
+      content: null,
+      reply: correlation.matchedText || rawReply,
+      warnings,
+    };
   }
 
   return {
@@ -676,7 +699,13 @@ async function waitForValidContentCheckpoint(params) {
     workflowId: params.workflowId,
     stepId: params.stepId,
   });
-  logCheckpointValidation(params.agentId, params.workflowId, params.stepId, validation, params.sessionKey);
+  logCheckpointValidation(
+    params.agentId,
+    params.workflowId,
+    params.stepId,
+    validation,
+    params.sessionKey,
+  );
   if (validation.ok) {
     return validation;
   }
@@ -701,7 +730,13 @@ async function waitForValidContentCheckpoint(params) {
       workflowId: params.workflowId,
       stepId: params.stepId,
     });
-    logCheckpointValidation(params.agentId, params.workflowId, params.stepId, validation, params.sessionKey);
+    logCheckpointValidation(
+      params.agentId,
+      params.workflowId,
+      params.stepId,
+      validation,
+      params.sessionKey,
+    );
     if (validation.ok) {
       return validation;
     }
@@ -732,11 +767,23 @@ async function runAgentStepDetailed(params) {
     try {
       const now = Date.now();
       await beClient.persistMessages([
-        { id: `msg_${now}_${params.stepId}_prompt`, conversationId: subConv.id, role: "user", content: params.prompt, timestamp: now },
-        { id: `msg_${now}_${params.stepId}_reply`, conversationId: subConv.id, role: "assistant", content: finalReply, timestamp: now + 1 },
+        {
+          id: `msg_${now}_${params.stepId}_prompt`,
+          conversationId: subConv.id,
+          role: "user",
+          content: params.prompt,
+          timestamp: now,
+        },
+        {
+          id: `msg_${now}_${params.stepId}_reply`,
+          conversationId: subConv.id,
+          role: "assistant",
+          content: finalReply,
+          timestamp: now + 1,
+        },
       ]);
     } catch (err) {
-      logger.logError("beClient", "LÃ¡Â»â€”i lÃ†Â°u log message DB: " + err.message);
+      logger.logError("beClient", "Lỗi lưu log message DB: " + err.message);
     }
   }
 
@@ -749,8 +796,8 @@ async function runAgentStepDetailed(params) {
 
 async function runAgentStep(params) {
   let actualSessionKey =
-    String(params.sessionKey || "").trim()
-    || buildWorkflowScopedSessionKey(params.agentId, params.workflowId, params.stepId);
+    String(params.sessionKey || "").trim() ||
+    buildWorkflowScopedSessionKey(params.agentId, params.workflowId, params.stepId);
   let subConv;
 
   try {
@@ -759,13 +806,13 @@ async function runAgentStep(params) {
       workflowId: params.workflowId,
       agentId: params.agentId,
       parentConversationId: params.rootConversationId || null,
-      title: `[AUTO] ${params.agentId} â€¢ ${params.stepId}`
+      title: `[AUTO] ${params.agentId} â€¢ ${params.stepId}`,
     });
     if (subConv && subConv.sessionKey) {
       actualSessionKey = subConv.sessionKey;
     }
   } catch (err) {
-    logger.logError("beClient", "Lá»—i táº¡o sub-agent conversation DB: " + err.message);
+    logger.logError("beClient", "Lỗi tạo sub-agent conversation DB: " + err.message);
   }
 
   // 2. Gá»i cho Gateway bÃ¬nh thÆ°á» ng
@@ -786,11 +833,23 @@ async function runAgentStep(params) {
     try {
       const now = Date.now();
       await beClient.persistMessages([
-        { id: `msg_${now}_${params.stepId}_prompt`, conversationId: subConv.id, role: "user", content: params.prompt, timestamp: now },
-        { id: `msg_${now}_${params.stepId}_reply`, conversationId: subConv.id, role: "assistant", content: finalReply, timestamp: now + 1 },
+        {
+          id: `msg_${now}_${params.stepId}_prompt`,
+          conversationId: subConv.id,
+          role: "user",
+          content: params.prompt,
+          timestamp: now,
+        },
+        {
+          id: `msg_${now}_${params.stepId}_reply`,
+          conversationId: subConv.id,
+          role: "assistant",
+          content: finalReply,
+          timestamp: now + 1,
+        },
       ]);
     } catch (err) {
-      logger.logError("beClient", "Lá»—i lÆ°u log message DB: " + err.message);
+      logger.logError("beClient", "Lỗi lưu log message DB: " + err.message);
     }
   }
 
@@ -825,7 +884,10 @@ async function syncApprovalCheckpoint(params) {
   let delivered = false;
 
   try {
-    await beClient.updateWorkflowStatus(params.workflowId, params.stage || "awaiting_content_approval");
+    await beClient.updateWorkflowStatus(
+      params.workflowId,
+      params.stage || "awaiting_content_approval",
+    );
   } catch (err) {
     logger.logError("beClient", "Loi dong bo workflow status: " + err.message);
   }
@@ -844,7 +906,9 @@ async function syncApprovalCheckpoint(params) {
       status: params.stage || "awaiting_content_approval",
       conversationRole: "root",
       injectToGateway: false,
-      eventId: params.eventId || `${params.workflowId}:${params.stage || "awaiting_content_approval"}:approval`,
+      eventId:
+        params.eventId ||
+        `${params.workflowId}:${params.stage || "awaiting_content_approval"}:approval`,
     });
     delivered = true;
   } catch (err) {
@@ -885,7 +949,8 @@ async function syncRootConversationMessage(params) {
       status: params.stage || "active",
       conversationRole: "root",
       injectToGateway: false,
-      eventId: params.eventId || `${workflowId}:${params.stage || "active"}:${params.type || "regular"}`,
+      eventId:
+        params.eventId || `${workflowId}:${params.stage || "active"}:${params.type || "regular"}`,
     });
     delivered = true;
   } catch (err) {
@@ -909,7 +974,9 @@ function readWorkflowStateForSync(paths, workflowId) {
 function buildRootSyncPayloadFromResult(context, result) {
   const workflowId = String(result?.workflow_id || result?.workflowId || "").trim();
   const stage = String(result?.stage || "").trim();
-  const status = String(result?.status || "ok").trim().toLowerCase();
+  const status = String(result?.status || "ok")
+    .trim()
+    .toLowerCase();
   if (!workflowId || !stage) {
     return null;
   }
@@ -949,10 +1016,7 @@ function buildRootSyncPayloadFromResult(context, result) {
 
   const workflowState = readWorkflowStateForSync(context.paths, workflowId);
   const content = String(
-    result?.human_message ||
-      result?.summary ||
-      buildStageHumanMessage(workflowState) ||
-      "",
+    result?.human_message || result?.summary || buildStageHumanMessage(workflowState) || "",
   ).trim();
   if (!content) {
     return null;
@@ -964,8 +1028,7 @@ function buildRootSyncPayloadFromResult(context, result) {
     type: stageSpec.type,
     eventId: stageSpec.eventId,
     content,
-    rootConversationId:
-      workflowState?.rootConversationId || context.parentConversationId || null,
+    rootConversationId: workflowState?.rootConversationId || context.parentConversationId || null,
   };
 }
 
@@ -1068,7 +1131,9 @@ function collectMediaPaths(media) {
 
 function buildPromptPreview(promptPackage) {
   const shortenPrompt = (value, maxLength = 420) => {
-    const normalized = String(value || "").replace(/\s+/g, " ").trim();
+    const normalized = String(value || "")
+      .replace(/\s+/g, " ")
+      .trim();
     if (!normalized) return "";
     if (normalized.length <= maxLength) return normalized;
     return `${normalized.slice(0, maxLength).trimEnd()}...`;
@@ -1318,8 +1383,8 @@ async function tryRecoverAsyncStageState(params) {
   }
 
   let workerSessionKey =
-    registry?.byId?.[spec.agentId]?.transport?.sessionKey
-    || buildWorkflowScopedSessionKey(spec.agentId, state.workflow_id, spec.stepId);
+    registry?.byId?.[spec.agentId]?.transport?.sessionKey ||
+    buildWorkflowScopedSessionKey(spec.agentId, state.workflow_id, spec.stepId);
 
   // Ưu tiên session key do BE sinh (per-workflow) thay vì fixed registry key
   try {
@@ -1376,7 +1441,8 @@ async function tryRecoverAsyncStageState(params) {
         {
           generatedVideoPath: recoveredArtifacts.videoPath,
           videoPrompt: state.prompt_package?.videoPrompt || state.media?.videoPrompt || "",
-          usedProductImage: state.content?.primaryProductImage || state.media?.usedProductImage || "",
+          usedProductImage:
+            state.content?.primaryProductImage || state.media?.usedProductImage || "",
           usedLogoPaths:
             state.video_generating_logo_paths ||
             state.video_revising_logo_paths ||
@@ -1395,7 +1461,8 @@ async function tryRecoverAsyncStageState(params) {
           mediaType: spec.route,
           imagePrompt: state.prompt_package?.imagePrompt || state.media?.imagePrompt || "",
           videoPrompt: state.prompt_package?.videoPrompt || state.media?.videoPrompt || "",
-          usedProductImage: state.content?.primaryProductImage || state.media?.usedProductImage || "",
+          usedProductImage:
+            state.content?.primaryProductImage || state.media?.usedProductImage || "",
           usedLogoPaths:
             state.generating_logo_paths ||
             state.revising_logo_paths ||
@@ -1740,17 +1807,16 @@ async function startNewWorkflow(context) {
       rootConversationId: rootBinding.rootConversationId || context.parentConversationId || null,
       initiatorAgentId: context.options.from || "pho_phong",
       initiatorEmployeeId: context.options.from || "pho_phong",
-      title: `[AUTO] Workflow (tá»« ${context.options.from})`,
-      inputPayload: JSON.stringify(context.message)
+      title: `[AUTO] Workflow (từ ${context.options.from})`,
+      inputPayload: JSON.stringify(context.message),
     });
   } catch (err) {
-    logger.logError("beClient", "Lá»—i táº¡o workflow Db: " + err.message);
+    logger.logError("beClient", "Lỗi tạo workflow Db: " + err.message);
   }
 
-
-  logger.logPhase("Táº O BÃ€I Má»šI", `Sáº¿p giao brief: "${context.message.slice(0, 100)}..."`);
+  logger.logPhase("TẠO BÀI MỚI", `Sếp giao brief: "${context.message.slice(0, 100)}..."`);
   logger.logHandoff(
-    "PhÃ³ phÃ²ng",
+    "Phó phòng",
     "NV Content",
     logger.buildHumanMessage(
       "pho_phong",
@@ -1782,10 +1848,7 @@ async function startNewWorkflow(context) {
 
   // Content dedup check
   if (isDuplicateContent(context.paths.historyDir, content.approvedContent)) {
-    logger.log(
-      "info",
-      "âš ï¸ Ná»™i dung nÃ y cÃ³ thá»ƒ trÃ¹ng vá»›i bÃ i Ä‘Ã£ Ä‘Äƒng gáº§n Ä‘Ã¢y.",
-    );
+    logger.log("info", "Lỗi¸  Nội dung này có thể trùng với bài đã đăng gần đây.");
   }
 
   const state = saveWorkflow(context.paths, {
@@ -1809,15 +1872,15 @@ async function startNewWorkflow(context) {
 
   const summary = [
     context.supersededWorkflowId ? `Da archive workflow cu: ${context.supersededWorkflowId}` : "",
-    "ðŸ“ NV Content Ä‘Ã£ viáº¿t xong bÃ i nhÃ¡p, Ä‘ang chá» Sáº¿p duyá»‡t.",
-    content.productName ? `Sáº£n pháº©m: ${content.productName}` : "",
+    " NV Content đã viết xong bài nháp, đang chờ Sếp duyệt.",
+    content.productName ? `Sản phẩm: ${content.productName}` : "",
     "",
-    "â”â”â” Ná»˜I DUNG CHá»œ DUYá»†T â”â”â”",
+    "â” â” â”  NỘI DUNG CHỜ DUYỆT â” â” â” ",
     content.approvedContent,
-    "â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”",
+    "â” â” â” â” â” â” â” â” â” â” â” â” â” â” â” â” â” â” â” â” â” â” â” â” â” â” ",
     "",
-    'ðŸ‘‰ Sáº¿p muá»‘n duyá»‡t? NÃ³i: "Duyá»‡t content, táº¡o áº£nh"',
-    'ðŸ‘‰ Muá»‘n sá»­a? Ghi rÃµ nháº­n xÃ©t, vÃ­ dá»¥: "Sá»­a content, thÃªm giÃ¡"',
+    'Sếp muốn duyệt? Nói: "Duyệt content, tạo ảnh"',
+    'Muốn sửa? Ghi rõ nhận xét, ví dụ: "Sửa content, thêm giá"',
   ]
     .filter(Boolean)
     .join("\n");
@@ -1890,13 +1953,13 @@ async function reviseContent(context, state) {
   if (contentRejects > MAX_REJECT_PER_STAGE) {
     logger.logError(
       "content",
-      `NV Content Ä‘Ã£ bá»‹ tá»« chá»‘i ${contentRejects} láº§n. Cáº§n xem láº¡i brief.`,
+      `NV Content đã bị từ chối ${contentRejects} lần. Cần xem lại brief.`,
     );
     return buildResult({
       workflowId: state.workflow_id,
       stage: "blocked",
       status: "blocked",
-      summary: `âš ï¸ NV Content Ä‘Ã£ bá»‹ tá»« chá»‘i ${contentRejects} láº§n liÃªn tiáº¿p. CÃ³ thá»ƒ brief cáº§n bá»• sung hoáº·c nhÃ¢n viÃªn cáº§n training thÃªm.`,
+      summary: `NV Content đã bị từ chối ${contentRejects} lần liên tiếp. Có thể brief cần bổ sung hoặc nhân viên cần training thêm.`,
       data: { reject_count: contentRejects },
     });
   }
@@ -1939,14 +2002,14 @@ async function reviseContent(context, state) {
   });
 
   const summary = [
-    "ðŸ“ NV Content Ä‘Ã£ sá»­a láº¡i bÃ i theo nháº­n xÃ©t, Ä‘ang chá» Sáº¿p duyá»‡t láº¡i.",
+    " NV Content đã sửa lại bài theo nhận xét, đang chờ Sếp duyệt lại.",
     "",
-    "â”â”â” Ná»˜I DUNG ÄÃƒ Sá»¬A â”â”â”",
+    "â” â” â”  NỘI DUNG ĐÃ SỬA â” â” â” ",
     content.approvedContent,
-    "â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”",
+    "â” â” â” â” â” â” â” â” â” â” â” â” â” â” â” â” â” â” â” â” â” â” â” â” â” ",
     "",
-    'ðŸ‘‰ Duyá»‡t: "Duyá»‡t content, táº¡o áº£nh"',
-    "ðŸ‘‰ Sá»­a tiáº¿p: ghi rÃµ nháº­n xÃ©t",
+    'Duyệt: "Duyệt content, tạo ảnh"',
+    "Sửa tiếp: ghi rõ nhận xét",
   ].join("\n");
   const summaryWithPreview = [
     summary,
@@ -1996,9 +2059,9 @@ async function generateMedia(context, state) {
     logger.log("video", route.fallbackMessage);
   }
 
-  logger.logPhase("Táº O MEDIA", `Loáº¡i: ${route.effectiveType}`);
+  logger.logPhase("TẠO MEDIA", `Loại: ${route.effectiveType}`);
   logger.logHandoff(
-    "PhÃ³ phÃ²ng",
+    "Phó phòng",
     "NV Media",
     logger.buildHumanMessage("pho_phong", "nv_media", "media_generate", ""),
   );
@@ -2047,15 +2110,15 @@ async function generateMedia(context, state) {
           stage: "awaiting_content_approval",
           status: "error",
           summary: [
-            "âŒ Táº¡o áº£nh khÃ´ng thÃ nh cÃ´ng sau 2 láº§n thá»­.",
-            `Lá»—i: ${transportErr.message || "Káº¿t ná»‘i tá»›i NV Media bá»‹ ngáº¯t."}`,
+            "Tạo ảnh không thành công sau 2 lần thử.",
+            `Lỗi: ${transportErr.message || "Kết nối tới NV Media bị ngắt."}`,
             "",
-            'ðŸ‘‰ Thá»­ láº¡i: "Duyá»‡t content, táº¡o áº£nh"',
+            'Thử lại: "Duyệt content, tạo ảnh"',
           ].join("\n"),
           data: { error: transportErr.message },
         });
       }
-      logger.log("info", `ðŸ”ƒ Thá»­ láº¡i láº§n ${attempt + 1}...`);
+      logger.log("info", `Thử lại lần ${attempt + 1}...`);
     }
   }
 
@@ -2075,10 +2138,10 @@ async function generateMedia(context, state) {
       stage: "awaiting_content_approval",
       status: "error",
       summary: [
-        "âŒ NV Media Ä‘Ã£ táº¡o áº£nh nhÆ°ng há»‡ thá»‘ng khÃ´ng Ä‘á»c Ä‘Æ°á»£c káº¿t quáº£.",
-        `Lá»—i: ${parseErr.message}`,
+        "NV Media đã tạo ảnh nhưng hệ thống không đọc được kết quả.",
+        `Lỗi: ${parseErr.message}`,
         "",
-        'ðŸ‘‰ Thá»­ láº¡i: "Duyá»‡t content, táº¡o áº£nh"',
+        'Thử lại: "Duyệt content, tạo ảnh"',
       ].join("\n"),
       data: { error: parseErr.message },
     });
@@ -2102,7 +2165,7 @@ async function generateMedia(context, state) {
     state.content?.primaryProductImage
   ) {
     try {
-      logger.log("media", "ðŸ”§ Äang ghÃ©p 3 lá»›p: Ná»n AI + Sáº£n pháº©m tháº­t + Logo...");
+      logger.log("media", "Đang ghép 3 lớp: Nền AI + Sản phẩm thật + Logo...");
       const compositePath = await mediaAgent.compositeImage3Layers({
         backgroundPath: media.generatedImagePath,
         productImagePath: state.content.primaryProductImage,
@@ -2111,11 +2174,11 @@ async function generateMedia(context, state) {
       media.generatedImagePath = compositePath;
       media.composited = true;
       finalMediaPath = compositePath;
-      logger.log("media", `âœ… GhÃ©p áº£nh 3 lá»›p thÃ nh cÃ´ng: ${compositePath}`);
+      logger.log("media", `Ghép ảnh 3 lớp thành công: ${compositePath}`);
     } catch (compErr) {
       process.stderr.write(`[COMPOSITE_ERROR] ${compErr.stack || compErr.message || compErr}\n`);
       logger.logError("composite", compErr);
-      logger.log("info", "âš ï¸ Sá»­ dá»¥ng áº£nh ná»n AI gá»‘c (chÆ°a ghÃ©p sáº£n pháº©m).");
+      logger.log("info", "Sử dụng ảnh nền AI gốc (chưa ghép sản phẩm).");
       media.composited = false;
     }
   }
@@ -2138,15 +2201,15 @@ async function generateMedia(context, state) {
   const fileLink = finalMediaPath ? `file:///${finalMediaPath.replace(/\\/g, "/")}` : "";
 
   const summary = [
-    `ðŸŽ¨ NV Media Ä‘Ã£ táº¡o ${route.effectiveType === "video" ? "video" : "áº£nh"} xong, Ä‘ang chá» Sáº¿p duyá»‡t.`,
-    media.composited ? "âœ… ÄÃ£ ghÃ©p: Ná»n AI + Sáº£n pháº©m tháº­t + Logo" : "",
-    route.fallbackMessage ? `â„¹ï¸ ${route.fallbackMessage}` : "",
+    `NV Media đã tạo ${route.effectiveType === "video" ? "video" : "ảnh"} xong, đang chờ Sếp duyệt.`,
+    media.composited ? "Đã ghép: Nền AI + Sản phẩm thật + Logo" : "",
+    route.fallbackMessage ? `${route.fallbackMessage}` : "",
     "",
-    finalMediaPath ? `ðŸ–¼ï¸ Xem áº£nh: ${fileLink}` : "",
+    finalMediaPath ? `Xem ảnh: ${fileLink}` : "",
     `File: ${finalMediaPath}`,
     "",
-    'ðŸ‘‰ Duyá»‡t vÃ  Ä‘Äƒng bÃ i: "Duyá»‡t áº£nh vÃ  Ä‘Äƒng bÃ i"',
-    'ðŸ‘‰ Sá»­a áº£nh: ghi rÃµ nháº­n xÃ©t, vÃ­ dá»¥: "Sá»­a áº£nh, ná»n chÆ°a Ä‘áº¹p"',
+    'Duyệt và đăng bài: "Duyệt ảnh và đăng bài"',
+    'Sửa ảnh: ghi rõ nhận xét, ví dụ: "Sửa ảnh, nền chưa đẹp"',
   ]
     .filter(Boolean)
     .join("\n");
@@ -2207,18 +2270,18 @@ async function reviseMedia(context, state) {
 
   const mediaRejects = state.reject_history.filter((r) => r.stage === "media").length;
   if (mediaRejects > MAX_REJECT_PER_STAGE) {
-    logger.logError("media", `NV Media Ä‘Ã£ bá»‹ tá»« chá»‘i ${mediaRejects} láº§n.`);
+    logger.logError("media", `NV Media đã bị từ chối ${mediaRejects} lần.`);
     return buildResult({
       workflowId: state.workflow_id,
       stage: "blocked",
       status: "blocked",
-      summary: `âš ï¸ NV Media Ä‘Ã£ bá»‹ tá»« chá»‘i ${mediaRejects} láº§n liÃªn tiáº¿p. Prompt cÃ³ thá»ƒ cáº§n Ä‘Æ°á»£c thiáº¿t káº¿ láº¡i.`,
+      summary: `NV Media đã bị từ chối ${mediaRejects} lần liên tiếp. Prompt có thể cần được thiết kế lại.`,
       data: { reject_count: mediaRejects },
     });
   }
 
   logger.logHandoff(
-    "PhÃ³ phÃ²ng",
+    "Phó phòng",
     "NV Media",
     logger.buildHumanMessage("pho_phong", "nv_media", "media_revise", context.message.slice(0, 80)),
   );
@@ -2268,15 +2331,15 @@ async function reviseMedia(context, state) {
           stage: "awaiting_media_approval",
           status: "error",
           summary: [
-            "âŒ Sá»­a áº£nh khÃ´ng thÃ nh cÃ´ng.",
-            `Lá»—i: ${transportErr.message || "Káº¿t ná»‘i bá»‹ ngáº¯t."}`,
+            "Sửa ảnh không thành công.",
+            `Lỗi: ${transportErr.message || "Kết nối bị ngắt."}`,
             "",
-            "ðŸ‘‰ Thá»­ láº¡i: nháº¯n láº¡i nháº­n xÃ©t sá»­a áº£nh",
+            "Thử lại: nhắn lại nhận xét sửa ảnh",
           ].join("\n"),
           data: { error: transportErr.message },
         });
       }
-      logger.log("info", `ðŸ”ƒ Thá»­ láº¡i láº§n ${attempt + 1}...`);
+      logger.log("info", `Thử lại lần ${attempt + 1}...`);
     }
   }
 
@@ -2296,10 +2359,10 @@ async function reviseMedia(context, state) {
       stage: "awaiting_media_approval",
       status: "error",
       summary: [
-        "âŒ NV Media Ä‘Ã£ táº¡o áº£nh má»›i nhÆ°ng há»‡ thá»‘ng khÃ´ng Ä‘á»c Ä‘Æ°á»£c káº¿t quáº£.",
-        `Lá»—i: ${parseErr.message}`,
+        "NV Media đã tạo ảnh mới nhưng hệ thống không đọc được kết quả.",
+        `Lỗi: ${parseErr.message}`,
         "",
-        "ðŸ‘‰ Thá»­ láº¡i: nháº¯n láº¡i nháº­n xÃ©t sá»­a áº£nh",
+        "Thử lại: nhắn lại nhận xét sửa ảnh",
       ].join("\n"),
       data: { error: parseErr.message },
     });
@@ -2309,7 +2372,7 @@ async function reviseMedia(context, state) {
   let finalMediaPath = media.generatedImagePath || media.generatedVideoPath || "";
   if (mediaType === "image" && media.generatedImagePath && state.content?.primaryProductImage) {
     try {
-      logger.log("media", "ðŸ”§ Äang ghÃ©p láº¡i 3 lá»›p vá»›i ná»n má»›i...");
+      logger.log("media", "Đang ghép lại 3 lớp với nền mới...");
       const compositePath = await mediaAgent.compositeImage3Layers({
         backgroundPath: media.generatedImagePath,
         productImagePath: state.content.primaryProductImage,
@@ -2318,10 +2381,10 @@ async function reviseMedia(context, state) {
       media.generatedImagePath = compositePath;
       media.composited = true;
       finalMediaPath = compositePath;
-      logger.log("media", `âœ… GhÃ©p áº£nh 3 lá»›p thÃ nh cÃ´ng: ${compositePath}`);
+      logger.log("media", `Ghép ảnh 3 lớp thành công: ${compositePath}`);
     } catch (compErr) {
       logger.logError("composite", compErr);
-      logger.log("info", "âš ï¸ Sá»­ dá»¥ng áº£nh ná»n AI gá»‘c (chÆ°a ghÃ©p sáº£n pháº©m).");
+      logger.log("info", "Sử dụng ảnh nền AI gốc (chưa ghép sản phẩm).");
       media.composited = false;
     }
   }
@@ -2346,14 +2409,14 @@ async function reviseMedia(context, state) {
   const fileLink = finalMediaPath ? `file:///${finalMediaPath.replace(/\\/g, "/")}` : "";
 
   const summary = [
-    "ðŸŽ¨ NV Media Ä‘Ã£ sá»­a láº¡i theo nháº­n xÃ©t, Ä‘ang chá» Sáº¿p duyá»‡t.",
-    media.composited ? "âœ… ÄÃ£ ghÃ©p láº¡i: Ná»n AI má»›i + Sáº£n pháº©m tháº­t + Logo" : "",
+    "NV Media đã sửa lại theo nhận xét, đang chờ Sếp duyệt.",
+    media.composited ? "Đã ghép lại: Nền AI mới + Sản phẩm thật + Logo" : "",
     "",
-    finalMediaPath ? `ðŸ–¼ï¸ Xem áº£nh: ${fileLink}` : "",
-    `File má»›i: ${finalMediaPath}`,
+    finalMediaPath ? `Xem ảnh: ${fileLink}` : "",
+    `File mới: ${finalMediaPath}`,
     "",
-    'ðŸ‘‰ Duyá»‡t: "Duyá»‡t áº£nh vÃ  Ä‘Äƒng bÃ i"',
-    "ðŸ‘‰ Sá»­a tiáº¿p: ghi rÃµ nháº­n xÃ©t",
+    'Duyệt và đăng bài: "Duyệt ảnh và đăng bài"',
+    "Sửa ảnh: ghi rõ nhận xét",
   ]
     .filter(Boolean)
     .join("\n");
@@ -2549,8 +2612,8 @@ async function generateMediaFlow(context, state) {
           workflowId: state.workflow_id,
           stage: "awaiting_media_approval",
           sessionKey:
-            context.registry.byId.pho_phong?.transport?.sessionKey
-            || buildWorkflowScopedSessionKey("pho_phong", state.workflow_id, "root"),
+            context.registry.byId.pho_phong?.transport?.sessionKey ||
+            buildWorkflowScopedSessionKey("pho_phong", state.workflow_id, "root"),
           timeoutMs: getMediaTimeoutMs(context.options.timeoutMs),
         });
         const waitingState = saveWorkflow(context.paths, {
@@ -2880,8 +2943,8 @@ async function reviseMediaFlow(context, state) {
           workflowId: state.workflow_id,
           stage: "awaiting_media_approval",
           sessionKey:
-            context.registry.byId.pho_phong?.transport?.sessionKey
-            || buildWorkflowScopedSessionKey("pho_phong", state.workflow_id, "root"),
+            context.registry.byId.pho_phong?.transport?.sessionKey ||
+            buildWorkflowScopedSessionKey("pho_phong", state.workflow_id, "root"),
           timeoutMs: getMediaTimeoutMs(context.options.timeoutMs),
         });
         const waitingState = saveWorkflow(context.paths, {
@@ -3153,8 +3216,8 @@ async function generateVideoFlow(context, state) {
         workflowId: state.workflow_id,
         stage: "awaiting_video_approval",
         sessionKey:
-          context.registry.byId.pho_phong?.transport?.sessionKey
-          || buildWorkflowScopedSessionKey("pho_phong", state.workflow_id, "root"),
+          context.registry.byId.pho_phong?.transport?.sessionKey ||
+          buildWorkflowScopedSessionKey("pho_phong", state.workflow_id, "root"),
         timeoutMs: getMediaTimeoutMs(context.options.timeoutMs),
       });
       const waitingState = saveWorkflow(context.paths, {
@@ -3462,8 +3525,8 @@ async function reviseVideoFlow(context, state) {
         workflowId: state.workflow_id,
         stage: "awaiting_video_approval",
         sessionKey:
-          context.registry.byId.pho_phong?.transport?.sessionKey
-          || buildWorkflowScopedSessionKey("pho_phong", state.workflow_id, "root"),
+          context.registry.byId.pho_phong?.transport?.sessionKey ||
+          buildWorkflowScopedSessionKey("pho_phong", state.workflow_id, "root"),
         timeoutMs: getMediaTimeoutMs(context.options.timeoutMs),
       });
       const waitingState = saveWorkflow(context.paths, {
@@ -3646,30 +3709,42 @@ function publishNowAction(context, state) {
   logger.logPublished(postId);
 
   const summary = [
-    "ðŸ“¤ BÃ i viáº¿t Ä‘Ã£ Ä‘Æ°á»£c Ä‘Äƒng thÃ nh cÃ´ng lÃªn Fanpage!",
+    "Bài viết đã được đăng thành công lên Fanpage",
     postIds.length > 1 ? `Post IDs: ${postIds.join(", ")}` : postId ? `Post ID: ${postId}` : "",
-    `Media: ${mediaPaths.join(", ") || "khÃ´ng cÃ³"}`,
+    `Media: ${mediaPaths.join(", ") || "không có"}`,
   ]
     .filter(Boolean)
     .join("\n");
   const normalizedSummary = normalizePublishedSummaryText(summary);
+  const publishedSummary = [
+    "Bài viết đã được đăng thành công lên Fanpage",
+    postIds.length > 1 ? `Post IDs: ${postIds.join(", ")}` : postId ? `Post ID: ${postId}` : "",
+    `Media: ${mediaPaths.join(", ") || "không có"}`,
+  ]
+    .filter(Boolean)
+    .join("\n");
 
   return buildResult({
     workflowId: state.workflow_id,
     stage: "published",
-    summary: normalizedSummary,
-    humanMessage: normalizedSummary,
-    data: { post_id: postId, post_ids: postIds, media_paths: mediaPaths, publish_result: publishResult },
+    summary: normalizedSummary || publishedSummary,
+    humanMessage: normalizedSummary || publishedSummary,
+    data: {
+      post_id: postId,
+      post_ids: postIds,
+      media_paths: mediaPaths,
+      publish_result: publishResult,
+    },
   });
 }
 
 /**
- * Háº¹n giá» Ä‘Äƒng bÃ i.
+ * Háº¹n giá»  Ä‘Äƒng bÃ i.
  */
 function schedulePostAction(context, state) {
   const scheduleTime = state.intent?.schedule_time || context.scheduleTime || context.message;
 
-  logger.logPhase("Háº¸N GIá»œ", `Äang háº¹n giá» Ä‘Äƒng bÃ i: ${scheduleTime}`);
+  logger.logPhase("HẸN GIỜ", `Đang hẹn giờ đăng bài: ${scheduleTime}`);
 
   const mediaPaths = [];
   if (state.media?.generatedImagePath) mediaPaths.push(state.media.generatedImagePath);
@@ -3715,8 +3790,8 @@ function schedulePostAction(context, state) {
   logger.logScheduled(scheduleTime);
 
   const summary = [
-    "ðŸ“… BÃ i viáº¿t Ä‘Ã£ Ä‘Æ°á»£c háº¹n giá» Ä‘Äƒng thÃ nh cÃ´ng!",
-    `Thá»i gian: ${scheduleTime}`,
+    "Bài viết đã được hẹn giờ đăng thành công!",
+    `Thời gian: ${scheduleTime}`,
     postIds.length > 1 ? `Post IDs: ${postIds.join(", ")}` : postId ? `Post ID: ${postId}` : "",
   ]
     .filter(Boolean)
@@ -3727,7 +3802,12 @@ function schedulePostAction(context, state) {
     stage: "scheduled",
     summary,
     humanMessage: summary,
-    data: { post_id: postId, post_ids: postIds, schedule_time: scheduleTime, schedule_result: scheduleResult },
+    data: {
+      post_id: postId,
+      post_ids: postIds,
+      schedule_time: scheduleTime,
+      schedule_result: scheduleResult,
+    },
   });
 }
 
@@ -3743,13 +3823,13 @@ async function editPublishedFlow(context) {
     return buildResult({
       status: "blocked",
       summary:
-        'âš ï¸ Cáº§n cung cáº¥p Post ID cá»§a bÃ i viáº¿t muá»‘n sá»­a. VÃ­ dá»¥: "Sá»­a bÃ i Ä‘Ã£ Ä‘Äƒng, post ID: 643048852218433_123456"',
+        'Cần cung cấp Post ID của bài viết muốn sửa. Ví dụ: "Sửa bài đã đăng, post ID: 643048852218433_123456"',
     });
   }
 
-  logger.logPhase("Sá»¬A BÃ€I ÄÃƒ ÄÄ‚NG", `Post ID: ${postId}`);
+  logger.logPhase("SỬA BÀI ĐÃ ĐĂNG", `Post ID: ${postId}`);
   logger.logHandoff(
-    "PhÃ³ phÃ²ng",
+    "Phó phòng",
     "NV Content",
     logger.buildHumanMessage("pho_phong", "nv_content", "edit_post", context.message.slice(0, 80)),
   );
@@ -3759,7 +3839,7 @@ async function editPublishedFlow(context) {
     stepId,
     originalBrief: context.message,
     feedback: context.message,
-    oldContent: "(BÃ i cÅ© trÃªn Facebook â€” viáº¿t má»›i theo yÃªu cáº§u sáº¿p)",
+    oldContent: "(Bài cũ trên Facebook — viết mới theo yêu cầu sếp)",
     openClawHome: context.openClawHome,
   });
 
@@ -3789,15 +3869,15 @@ async function editPublishedFlow(context) {
   });
 
   const summary = [
-    "âœï¸ NV Content Ä‘Ã£ viáº¿t ná»™i dung má»›i cho bÃ i Ä‘Ã£ Ä‘Äƒng, Ä‘ang chá» Sáº¿p duyá»‡t.",
-    `Post ID sáº½ cáº­p nháº­t: ${postId}`,
+    "NV Content đã viết nội dung mới cho bài đã đăng, đang chờ Sếp duyệt.",
+    `Post ID sẽ cập nhật: ${postId}`,
     "",
-    "â”â”â” Ná»˜I DUNG Má»šI â”â”â”",
+    "â” â” â”  NỘI DUNG MỚI â” â” â” ",
     content.approvedContent,
-    "â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”",
+    "â” â” â” â” â” â” â” â” â” â” â” â” â” â” â” â” â” â” â” â” â” ",
     "",
-    'ðŸ‘‰ Duyá»‡t: "Duyá»‡t content" â€” ná»™i dung sáº½ Ä‘Æ°á»£c cáº­p nháº­t lÃªn Facebook',
-    "ðŸ‘‰ Sá»­a: ghi rÃµ nháº­n xÃ©t",
+    'Duyệt: "Duyệt content" â€” nội dung sẽ được cập nhật lên Facebook',
+    "Sửa: ghi rõ nhận xét",
   ].join("\n");
 
   logger.logApprovalWait("awaiting_edit_approval", content.approvedContent);
@@ -3812,12 +3892,12 @@ async function editPublishedFlow(context) {
 }
 
 /**
- * Xá»­ lÃ½ approve cho bÃ i edit â†’ gá»i facebook_edit_post.
+ * Xá»­ lÃ½ approve cho bÃ i edit â†’ gá» i facebook_edit_post.
  */
 function applyEditToPublished(context, state) {
   const postId = state.post_id;
 
-  logger.logPhase("Cáº¬P NHáº¬T BÃ€I ÄÃƒ ÄÄ‚NG", `Äang cáº­p nháº­t post ${postId}...`);
+  logger.logPhase("Cập nhật bài đã đăng", `Đang cập nhật post ${postId}...`);
 
   const editResult = publisher.editPublishedPost({
     postId,
@@ -3836,7 +3916,7 @@ function applyEditToPublished(context, state) {
   logger.logEdited(postId);
 
   const summary = [
-    "âœï¸ BÃ i viáº¿t trÃªn Facebook Ä‘Ã£ Ä‘Æ°á»£c cáº­p nháº­t thÃ nh cÃ´ng!",
+    "Bài viết trên Facebook đã được cập nhật thành công!",
     `Post ID: ${postId}`,
   ].join("\n");
 
@@ -3856,11 +3936,11 @@ function handleTrainIntent(context) {
   const feedback = context.intent?.feedback_or_brief || context.message;
   const targetAgent = context.intent?.target_agent;
 
-  logger.logPhase("TRAINING", `Sáº¿p dáº¡y quy táº¯c má»›i`);
+  logger.logPhase("TRAINING", `Sếp dạy quy tắc mới`);
 
   const results = [];
 
-  // Ghi rule cho agent Ä‘Æ°á»£c chá»‰ Ä‘á»‹nh, hoáº·c cáº£ hai náº¿u "self"
+  // Ghi rule cho agent được chỉ định, hoặc cả hai nếu "self"
   const agents =
     targetAgent === "nv_content"
       ? ["nv_content"]
@@ -3879,11 +3959,11 @@ function handleTrainIntent(context) {
   }
 
   const summary = [
-    "ðŸ§  ÄÃ£ ghi nhá»› quy táº¯c má»›i!",
-    `Ãp dá»¥ng cho: ${results.join(", ")}`,
-    `Ná»™i dung: "${feedback.slice(0, 200)}"`,
+    "Đã ghi nhớ quy tắc mới!",
+    `Áp dụng cho: ${results.join(", ")}`,
+    `Nội dung: "${feedback.slice(0, 200)}"`,
     "",
-    "Quy táº¯c nÃ y sáº½ tá»± Ä‘á»™ng Ä‘Æ°á»£c nhÃºng vÃ o prompt má»—i khi nhÃ¢n viÃªn lÃ m viá»‡c.",
+    "Quy tắc này sẽ tự động được nhúng vào prompt mỗi khi nhân viên làm việc.",
   ].join("\n");
 
   return buildResult({
@@ -3946,7 +4026,12 @@ async function continueWorkflow(context, state) {
       return buildRecoveredAsyncStageResult(recoveredState);
     }
 
-    if (!hasAsyncStageExceededGrace(state.video_revising_started_at, getMediaTimeoutMs(context.options.timeoutMs))) {
+    if (
+      !hasAsyncStageExceededGrace(
+        state.video_revising_started_at,
+        getMediaTimeoutMs(context.options.timeoutMs),
+      )
+    ) {
       const summary = buildAsyncWaitingSummary("video");
       return buildResult({
         workflowId: state.workflow_id,
@@ -3988,7 +4073,12 @@ async function continueWorkflow(context, state) {
       return buildRecoveredAsyncStageResult(recoveredState);
     }
 
-    if (!hasAsyncStageExceededGrace(state.video_generating_started_at, getMediaTimeoutMs(context.options.timeoutMs))) {
+    if (
+      !hasAsyncStageExceededGrace(
+        state.video_generating_started_at,
+        getMediaTimeoutMs(context.options.timeoutMs),
+      )
+    ) {
       const summary = buildAsyncWaitingSummary("video");
       return buildResult({
         workflowId: state.workflow_id,
@@ -4030,7 +4120,12 @@ async function continueWorkflow(context, state) {
       return buildRecoveredAsyncStageResult(recoveredState);
     }
 
-    if (!hasAsyncStageExceededGrace(state.revising_started_at, getMediaTimeoutMs(context.options.timeoutMs))) {
+    if (
+      !hasAsyncStageExceededGrace(
+        state.revising_started_at,
+        getMediaTimeoutMs(context.options.timeoutMs),
+      )
+    ) {
       const summary = buildAsyncWaitingSummary("media");
       return buildResult({
         workflowId: state.workflow_id,
@@ -4074,7 +4169,12 @@ async function continueWorkflow(context, state) {
       return buildRecoveredAsyncStageResult(recoveredState);
     }
 
-    if (!hasAsyncStageExceededGrace(state.generating_started_at, getMediaTimeoutMs(context.options.timeoutMs))) {
+    if (
+      !hasAsyncStageExceededGrace(
+        state.generating_started_at,
+        getMediaTimeoutMs(context.options.timeoutMs),
+      )
+    ) {
       const summary = buildAsyncWaitingSummary("media");
       return buildResult({
         workflowId: state.workflow_id,
@@ -4131,7 +4231,7 @@ async function continueWorkflow(context, state) {
     }
 
     if (latestImage) {
-      logger.log("media", `âœ… Phá»¥c há»“i áº£nh sá»­a tá»« lÆ°á»£t trÆ°á»›c: ${latestImage}`);
+      logger.log("media", `Phục hồi ảnh sửa từ lượt trước: ${latestImage}`);
       let finalPath = latestImage;
       if (state.content?.primaryProductImage) {
         try {
@@ -4158,16 +4258,14 @@ async function continueWorkflow(context, state) {
       });
       const finalLink = `file:///${finalPath.replace(/\\/g, "/")}`;
       const summary = [
-        "ðŸŽ¨ ÄÃ£ phá»¥c há»“i áº£nh sá»­a tá»« lÆ°á»£t trÆ°á»›c, Ä‘ang chá» Sáº¿p duyá»‡t.",
-        recoveredMedia.composited
-          ? "âœ… ÄÃ£ ghÃ©p: Ná»n AI má»›i + Sáº£n pháº©m tháº­t + Logo"
-          : "",
+        "Đã phục hồi ảnh sửa từ lượt trước, đang chờ Sếp duyệt.",
+        recoveredMedia.composited ? "Đã ghép: Nền AI mới + Sản phẩm thật + Logo" : "",
         "",
-        `ðŸ–¼ï¸ Xem áº£nh: ${finalLink}`,
+        `Xem ảnh: ${finalLink}`,
         `File: ${finalPath}`,
         "",
-        'ðŸ‘‰ Duyá»‡t vÃ  Ä‘Äƒng bÃ i: "Duyá»‡t áº£nh vÃ  Ä‘Äƒng bÃ i"',
-        "ðŸ‘‰ Sá»­a tiáº¿p: ghi rÃµ nháº­n xÃ©t",
+        'Duyệt và đăng bài: "Duyệt ảnh và đăng bài"',
+        "Sửa tiếp: ghi rõ nhận xét",
       ]
         .filter(Boolean)
         .join("\n");
@@ -4180,12 +4278,12 @@ async function continueWorkflow(context, state) {
       });
     }
 
-    // KhÃ´ng cÃ³ áº£nh má»›i â€” quay láº¡i awaiting_media_approval vá»›i áº£nh cÅ©
+    // Không có ảnh mới â€” quay lại awaiting_media_approval với ảnh cũ
     saveWorkflow(context.paths, { ...state, stage: "awaiting_media_approval" });
     const summary = [
-      "âŒ BÆ°á»›c sá»­a áº£nh bá»‹ ngáº¯t giá»¯a chá»«ng, chÆ°a cÃ³ áº£nh má»›i.",
+      "Bước sửa ảnh bị ngắt giữa chừng, chưa có ảnh mới.",
       "",
-      "ðŸ‘‰ Nháº¯n láº¡i nháº­n xÃ©t Ä‘á»ƒ thá»­ sá»­a áº£nh láº§n ná»¯a",
+      "Nhấn lại nhận xét để thử sửa ảnh lần nữa",
     ].join("\n");
     return buildResult({
       workflowId: state.workflow_id,
@@ -4208,9 +4306,9 @@ async function continueWorkflow(context, state) {
     let bgImagePath = "";
     if (savedBg && fs.existsSync(savedBg)) {
       bgImagePath = savedBg;
-      logger.log("media", `âœ… DÃ¹ng path ná»n Ä‘Ã£ lÆ°u trong state: ${bgImagePath}`);
+      logger.log("media", `Dùng path nền đã lưu trong state: ${bgImagePath}`);
     } else {
-      // Fallback: scan thÆ° má»¥c, chá»‰ láº¥y áº£nh Ä‘Æ°á»£c táº¡o sau khi báº¯t Ä‘áº§u workflow
+      // Fallback: scan thư mục, chỉ lấy ảnh được tạo sau khi bắt đầu workflow
       const imagesDir = path.join(context.openClawHome, "workspace_media", "artifacts", "images");
       const startedAt = state.generating_started_at
         ? new Date(state.generating_started_at).getTime()
@@ -4237,7 +4335,7 @@ async function continueWorkflow(context, state) {
     }
 
     if (bgImagePath) {
-      logger.log("media", `âœ… Phá»¥c há»“i: cháº¡y láº¡i composite vá»›i ná»n: ${bgImagePath}`);
+      logger.log("media", `Phục hồi: chạy lại composite với nền: ${bgImagePath}`);
       let finalPath = bgImagePath;
       if (savedProduct && fs.existsSync(savedProduct)) {
         try {
@@ -4247,11 +4345,11 @@ async function continueWorkflow(context, state) {
             outputPath: bgImagePath.replace(/(\.[a-z]+)$/i, "_final$1"),
           });
           finalPath = compositePath;
-          logger.log("media", `âœ… GhÃ©p 3 lá»›p thÃ nh cÃ´ng: ${compositePath}`);
+          logger.log("media", `Ghép 3 lớp thành công: ${compositePath}`);
         } catch (compErr) {
           process.stderr.write(`[COMPOSITE_RECOVERY_ERROR] ${compErr.stack || compErr.message}\n`);
           logger.logError("composite", compErr);
-          logger.log("info", "âš ï¸ DÃ¹ng áº£nh ná»n gá»‘c (composite tháº¥t báº¡i).");
+          logger.log("info", "Dùng ảnh nền gốc (composite thất bại).");
         }
       }
 
@@ -4270,15 +4368,15 @@ async function continueWorkflow(context, state) {
 
       const finalLink = `file:///${finalPath.replace(/\\/g, "/")}`;
       const summary = [
-        "ðŸŽ¨ ÄÃ£ ghÃ©p xong áº£nh, Ä‘ang chá» Sáº¿p duyá»‡t.",
+        "Đã ghép xong ảnh, đang chờ Sếp duyệt.",
         recoveredMedia.composited
-          ? "âœ… ÄÃ£ ghÃ©p: Ná»n AI + Sáº£n pháº©m tháº­t + Logo"
-          : "âš ï¸ Chá»‰ cÃ³ áº£nh ná»n AI (chÆ°a ghÃ©p sáº£n pháº©m).",
+          ? "Đã ghép: Nền AI + Sản phẩm thật + Logo"
+          : "Chỉ có ảnh nền AI (chưa ghép sản phẩm).",
         "",
-        `ðŸ–¼ï¸ Xem áº£nh: ${finalLink}`,
+        `Xem ảnh: ${finalLink}`,
         `File: ${finalPath}`,
         "",
-        'ðŸ‘‰ Duyá»‡t vÃ  Ä‘Äƒng bÃ i: "Duyá»‡t áº£nh vÃ  Ä‘Äƒng bÃ i"',
+        'Duyệt và đăng bài: "Duyệt ảnh và đăng bài"',
         "ðŸ‘‰ Sá»­a áº£nh: ghi rÃµ nháº­n xÃ©t",
       ]
         .filter(Boolean)
@@ -4299,9 +4397,9 @@ async function continueWorkflow(context, state) {
       stage: "awaiting_content_approval",
     });
     const noImgSummary = [
-      "âŒ BÆ°á»›c táº¡o áº£nh bá»‹ ngáº¯t giá»¯a chá»«ng, chÆ°a cÃ³ file áº£nh nÃ o.",
+      "Bước tạo ảnh bị ngắt giữa chừng, chưa có file ảnh nào.",
       "",
-      'ðŸ‘‰ Thá»­ láº¡i: "Duyá»‡t content, táº¡o áº£nh"',
+      'Thử lại: "Duyệt content, tạo ảnh"',
     ].join("\n");
     return buildResult({
       workflowId: state.workflow_id,
@@ -4431,35 +4529,35 @@ async function continueWorkflow(context, state) {
 
 function buildBlockedResult(state, message) {
   const stageLabels = {
-    awaiting_content_approval: "Ä‘ang chá» duyá»‡t content",
-    awaiting_media_approval: "Ä‘ang chá» duyá»‡t media",
-    awaiting_video_approval: "Ä‘ang chá» duyá»‡t video",
-    awaiting_publish_decision: "Ä‘ang chá» quyáº¿t Ä‘á»‹nh Ä‘Äƒng bÃ i",
-    awaiting_edit_approval: "Ä‘ang chá» duyá»‡t ná»™i dung sá»­a",
-    generating_media: "Ä‘ang táº¡o áº£nh (vui lÃ²ng Ä‘á»£i)",
-    generating_video: "Ä‘ang táº¡o video (vui lÃ²ng Ä‘á»£i)",
-    revising_video: "Ä‘ang sua video (vui lÃ²ng Ä‘á»£i)",
+    awaiting_content_approval: "Đang chờ duyệt content",
+    awaiting_media_approval: "Đang chờ duyệt media",
+    awaiting_video_approval: "Đang chờ duyệt video",
+    awaiting_publish_decision: "Đang chờ quyết định đăng bài",
+    awaiting_edit_approval: "Đang chờ duyệt nội dung sửa",
+    generating_media: "Đang tạo ảnh (vui lòng đợi)",
+    generating_video: "Đang tạo video (vui lòng đợi)",
+    revising_video: "Đang sửa video (vui lòng đợi)",
   };
-  const stageLabel = stageLabels[state?.stage] || "Ä‘ang chá» xá»­ lÃ½";
+  const stageLabel = stageLabels[state?.stage] || "Đang chờ xử lý";
 
   return buildResult({
     workflowId: state?.workflow_id || null,
     stage: state?.stage || null,
     status: "blocked",
     summary: [
-      `â³ Äang cÃ³ workflow pending: ${stageLabel}.`,
-      `Tin nháº¯n "${message.slice(0, 100)}" chÆ°a Ä‘Æ°á»£c nháº­n diá»‡n rÃµ.`,
+      `Đang có workflow pending: ${stageLabel}.`,
+      `Tin nhắn "${message.slice(0, 100)}" chưa được nhận diện rõ.`,
       "",
-      "Gá»£i Ã½ lá»‡nh phÃ¹ há»£p:",
+      "Gợi ý lệnh phù hợp:",
       state?.stage === "awaiting_content_approval"
-        ? '  â€¢ "Duyá»‡t content" / "Sá»­a content, <nháº­n xÃ©t>"'
+        ? '  â€¢ "Duyệt content" / "Sửa content, <nhận xét>"'
         : state?.stage === "awaiting_media_approval"
-          ? '  â€¢ "Duyá»‡t áº£nh" / "Sá»­a áº£nh, <nháº­n xÃ©t>" / "Sá»­a prompt, <nháº­n xÃ©t>"'
+          ? '  â€¢ "Duyệt ảnh" / "Sửa ảnh, <nhận xét>" / "Sửa prompt, <nhận xét>"'
           : state?.stage === "awaiting_video_approval"
-            ? '  â€¢ "Duyá»‡t video" / "Sá»­a video, <nháº­n xÃ©t>" / "Sá»­a prompt video, <nháº­n xÃ©t>"'
+            ? '  â€¢ "Duyệt video" / "Sửa video, <nhận xét>" / "Sửa prompt video, <nhận xét>"'
             : state?.stage === "awaiting_publish_decision"
-              ? '  â€¢ "Táº¡o video" / "ÄÄƒng ngay" / "Háº¹n giá» <thá»i gian>"'
-              : '  â€¢ "Duyá»‡t" / "Sá»­a"',
+              ? '  â€¢ "Tạo video" / "Đăng ngay" / "Hẹn giờ <thời gian>"'
+              : '  â€¢ "Duyệt" / "Sửa"',
     ].join("\n"),
     data: { expected_stage: state?.stage || null },
   });
@@ -4487,8 +4585,8 @@ async function runCli(argv = process.argv.slice(2)) {
     printResult(
       buildResult({
         status: "reset",
-        summary: "ðŸ”„ ÄÃ£ reset workflow pending cá»§a agent-orchestrator-test.",
-        humanMessage: "ðŸ”„ ÄÃ£ reset workflow pending.",
+        summary: "Đã reset workflow pending của agent-orchestrator-test.",
+        humanMessage: "Đã reset workflow pending.",
       }),
       options.json,
     );
@@ -4549,13 +4647,15 @@ async function runCli(argv = process.argv.slice(2)) {
         workflowId: currentState.workflow_id,
         status: "reset",
         summary: "Da huy workflow dang pending.",
-        humanMessage: "Workflow da duoc huy thanh cong. Ban co the bat dau brief moi bat cu luc nao.",
+        humanMessage:
+          "Workflow da duoc huy thanh cong. Ban co the bat dau brief moi bat cu luc nao.",
       });
     } else {
       result = buildResult({
         status: "ok",
         summary: "Khong co workflow dang chay.",
-        humanMessage: "Hien khong co workflow nao dang pending. Ban co the gui brief moi de bat dau.",
+        humanMessage:
+          "Hien khong co workflow nao dang pending. Ban co the gui brief moi de bat dau.",
       });
     }
   } else if (currentState && shouldSupersedePendingWorkflow(message, currentState, intent)) {
