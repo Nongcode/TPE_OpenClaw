@@ -371,6 +371,12 @@ function classifyPendingDecision(message, currentStage) {
   }
 
   if (currentStage === "awaiting_media_approval") {
+    if (
+      /\b(tao video|lam video|them video|tao them video|video quang cao)\b/.test(normalized)
+    ) {
+      return "generate_video";
+    }
+
     const approveSignals = [
       "duyet media", "duyet anh", "ok anh", "ok media",
       "dang bai", "publish", "dang len page", "dang facebook",
@@ -387,7 +393,7 @@ function classifyPendingDecision(message, currentStage) {
     if (rejectSignals.some((s) => normalized.includes(s))) return "reject";
     if (
       containsAny(normalized, GENERIC_REJECT_SIGNALS) &&
-      !containsAny(normalized, ["dang ngay", "publish", "tao video", "hen gio", "schedule"])
+      !containsAny(normalized, ["dang ngay", "publish", "tao video", "lam video", "them video", "hen gio", "schedule"])
     ) {
       return "reject";
     }

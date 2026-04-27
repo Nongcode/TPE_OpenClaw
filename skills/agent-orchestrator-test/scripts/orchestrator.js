@@ -321,6 +321,18 @@ function buildMediaDirective(filePath) {
   return normalized ? `MEDIA: "${normalized}"` : "";
 }
 
+function summarizeReferenceUsage(media) {
+  const logoCount = Array.isArray(media?.usedLogoPaths)
+    ? media.usedLogoPaths.filter(Boolean).length
+    : 0;
+  return [
+    media?.usedProductImage ? "Da dung anh goc san pham lam tham chieu." : "",
+    logoCount > 0 ? `Da dung ${logoCount} logo cong ty.` : "",
+  ]
+    .filter(Boolean)
+    .join("\n");
+}
+
 function normalizePublishedSummaryText(message) {
   return String(message || "")
     .replaceAll("📤 Bài viết đã được đăng thành công lên Fanpage!")
@@ -345,7 +357,6 @@ function buildFrontendApprovalMessage(params) {
     "------------------------------",
     'Sep muon duyet? Noi: "Duyet content, tao anh"',
     'Muon sua? Ghi ro nhan xet, vi du: "Sua content, them gia"',
-    params.primaryProductImage ? "" : "",
     params.primaryProductImage ? "Anh goc san pham de doi chieu:" : "",
     buildMediaDirective(params.primaryProductImage),
   ];
@@ -948,7 +959,8 @@ async function syncRootConversationMessage(params) {
       timestamp,
       status: params.stage || "active",
       conversationRole: "root",
-      injectToGateway: false,
+      sessionKey: params.sessionKey || null,
+      injectToGateway: params.injectToGateway === true,
       eventId:
         params.eventId || `${workflowId}:${params.stage || "active"}:${params.type || "regular"}`,
     });
@@ -1198,16 +1210,8 @@ function mergeMediaData(existingMedia, incomingMedia, content = {}) {
 }
 
 function buildMediaApprovalSummary(params) {
-  const { media, promptPackage, route } = params;
-  const promptPreview = buildPromptPreview(promptPackage);
-  const referenceText = [
-    media?.usedProductImage ? `Anh san pham goc da dung: ${media.usedProductImage}` : "",
-    Array.isArray(media?.usedLogoPaths) && media.usedLogoPaths.length > 0
-      ? `Logo da dung: ${media.usedLogoPaths.join(" ; ")}`
-      : "",
-  ]
-    .filter(Boolean)
-    .join("\n");
+  const { media, route } = params;
+  const referenceText = summarizeReferenceUsage(media);
 
   return [
     `NV Media da tao xong media (${route.effectiveType}), dang cho Sep duyet.`,
@@ -1215,13 +1219,10 @@ function buildMediaApprovalSummary(params) {
     buildMediaDirective(media?.generatedImagePath),
     media?.generatedVideoPath ? "Video media vua tao:" : "",
     buildMediaDirective(media?.generatedVideoPath),
-    media?.usedProductImage ? "Anh goc san pham de doi chieu:" : "",
-    buildMediaDirective(media?.usedProductImage),
     referenceText,
     "",
-    promptPreview,
-    "",
-    'Duyet va sang buoc tiep: "Duyet anh va dang bai" hoac "Duyet media"',
+    'Duyet anh, tao video: "Duyet anh, tao video"',
+    'Duyet va dang bai: "Duyet anh va dang bai" hoac "Duyet media"',
     'Sua tiep: "Sua anh, <nhan xet>" hoac "Sua prompt, <nhan xet>"',
   ]
     .filter(Boolean)
@@ -1229,18 +1230,8 @@ function buildMediaApprovalSummary(params) {
 }
 
 function buildVideoApprovalSummary(params) {
-  const { media, promptPackage } = params;
-  const promptPreview = buildPromptPreview({
-    videoPrompt: promptPackage?.videoPrompt || media?.videoPrompt || "",
-  });
-  const referenceText = [
-    media?.usedProductImage ? `Anh san pham goc da dung: ${media.usedProductImage}` : "",
-    Array.isArray(media?.usedLogoPaths) && media.usedLogoPaths.length > 0
-      ? `Logo da dung: ${media.usedLogoPaths.join(" ; ")}`
-      : "",
-  ]
-    .filter(Boolean)
-    .join("\n");
+  const { media } = params;
+  const referenceText = summarizeReferenceUsage(media);
 
   return [
     "Media_Video da tao xong video quang cao, dang cho Sep duyet.",
@@ -1248,11 +1239,7 @@ function buildVideoApprovalSummary(params) {
     buildMediaDirective(media?.generatedVideoPath),
     media?.generatedImagePath ? "Anh quang cao da duyet de doi chieu:" : "",
     buildMediaDirective(media?.generatedImagePath),
-    media?.usedProductImage ? "Anh goc san pham de doi chieu:" : "",
-    buildMediaDirective(media?.usedProductImage),
     referenceText,
-    "",
-    promptPreview,
     "",
     'Duyet video: "Duyet video"',
     'Sua video: "Sua video, <nhan xet>" hoac "Sua prompt video, <nhan xet>"',
@@ -1268,16 +1255,16 @@ function buildPublishDecisionSummary(state) {
 
   return [
     hasVideo
-      ? "✅ Sep da duyet content, anh va video. Da san sang dang bai."
-      : "✅ Sep da duyet content va anh. Da san sang dang bai.",
+      ? "Sep da duyet content, anh va video. Da san sang dang bai."
+      : "Sep da duyet content va anh. Da san sang dang bai.",
     hasImage ? "Anh se dang:" : "",
     buildMediaDirective(state.media?.generatedImagePath),
-    hasVideo ? "Video da duyet va san sang dang trong luot nay." : "",
-    offerVideo ? "" : "",
+    hasVideo ? "Video se dang trong luot nay:" : "",
+    hasVideo ? buildMediaDirective(state.media?.generatedVideoPath) : "",
     offerVideo ? "Co muon tao them video quang cao san pham tren roi dang len page khong?" : "",
-    offerVideo ? '👉 Tao video: "Tao video"' : "",
-    '👉 Dang ngay: "Dang ngay" hoac "Publish"',
-    '👉 Hen gio: "Hen gio 20:00 hom nay" hoac "Schedule 2026-04-10T20:00:00+07:00"',
+    offerVideo ? 'Tao video: "Tao video"' : "",
+    'Dang ngay: "Dang ngay" hoac "Publish"',
+    'Hen gio: "Hen gio 20:00 hom nay" hoac "Schedule 2026-04-10T20:00:00+07:00"',
   ]
     .filter(Boolean)
     .join("\n");
@@ -1590,16 +1577,21 @@ async function runAutoNotifyWatcher(options) {
         return;
       }
       try {
-        await transport.callGatewayMethod({
-          openClawHome,
-          method: "chat.inject",
-          params: {
-            sessionKey: targetSessionKey,
-            message: humanMessage,
-            label: "workflow-auto-notify",
-          },
-          timeoutMs: 30000,
+        const delivered = await syncRootConversationMessage({
+          workflowId: targetWorkflowId,
+          stage: targetStage,
+          type: targetStage.startsWith("awaiting_") ? "approval_request" : "regular",
+          content: humanMessage,
+          managerId: "pho_phong",
+          rootConversationId: state.rootConversationId || null,
+          sessionKey: targetSessionKey,
+          title: `[AUTO] pho_phong • ${targetWorkflowId}`,
+          eventId: `${targetWorkflowId}:${targetStage}:checkpoint`,
+          injectToGateway: true,
         });
+        if (!delivered) {
+          throw new Error("backend_sync_failed");
+        }
       } catch (error) {
         logger.logError("auto_notify_inject", error);
         await new Promise((resolve) => setTimeout(resolve, 5000));
@@ -1875,10 +1867,8 @@ async function startNewWorkflow(context) {
     " NV Content đã viết xong bài nháp, đang chờ Sếp duyệt.",
     content.productName ? `Sản phẩm: ${content.productName}` : "",
     "",
-    "â” â” â”  NỘI DUNG CHỜ DUYỆT â” â” â” ",
+    "NỘI DUNG CHỜ DUYỆT",
     content.approvedContent,
-    "â” â” â” â” â” â” â” â” â” â” â” â” â” â” â” â” â” â” â” â” â” â” â” â” â” â” ",
-    "",
     'Sếp muốn duyệt? Nói: "Duyệt content, tạo ảnh"',
     'Muốn sửa? Ghi rõ nhận xét, ví dụ: "Sửa content, thêm giá"',
   ]
@@ -2004,9 +1994,8 @@ async function reviseContent(context, state) {
   const summary = [
     " NV Content đã sửa lại bài theo nhận xét, đang chờ Sếp duyệt lại.",
     "",
-    "â” â” â”  NỘI DUNG ĐÃ SỬA â” â” â” ",
+    "NỘI DUNG ĐÃ SỬA",
     content.approvedContent,
-    "â” â” â” â” â” â” â” â” â” â” â” â” â” â” â” â” â” â” â” â” â” â” â” â” â” ",
     "",
     'Duyệt: "Duyệt content, tạo ảnh"',
     "Sửa tiếp: ghi rõ nhận xét",
@@ -2176,7 +2165,9 @@ async function generateMedia(context, state) {
       finalMediaPath = compositePath;
       logger.log("media", `Ghép ảnh 3 lớp thành công: ${compositePath}`);
     } catch (compErr) {
-      process.stderr.write(`[COMPOSITE_ERROR] ${compErr.stack || compErr.message || compErr}\n`);
+      if (logger.isEnabled()) {
+        process.stderr.write(`[COMPOSITE_ERROR] ${compErr.stack || compErr.message || compErr}\n`);
+      }
       logger.logError("composite", compErr);
       logger.log("info", "Sử dụng ảnh nền AI gốc (chưa ghép sản phẩm).");
       media.composited = false;
@@ -3694,19 +3685,48 @@ function publishNowAction(context, state) {
     });
   }
 
-  const postIds = publisher.extractPostIds(publishResult);
-  const postId = postIds[0] || "";
+  const canonicalPublish = publisher.extractCanonicalPublishResult(publishResult);
+  const postIds = canonicalPublish.postIds;
+  const postId = canonicalPublish.postId;
 
   const publishState = {
     ...state,
     status: "completed",
     stage: "published",
     publish: publishResult,
+    publish_canonical: canonicalPublish,
     updated_at: nowIso(),
   };
   archiveWorkflow(context.paths, publishState);
 
   logger.logPublished(postId);
+
+  const canonicalPublishedSummary = [
+    "Bai viet da duoc dang thanh cong len Fanpage.",
+    canonicalPublish.pageIds.length > 0 ? `Page IDs: ${canonicalPublish.pageIds.join(", ")}` : "",
+    postIds.length > 1 ? `Post IDs: ${postIds.join(", ")}` : postId ? `Post ID: ${postId}` : "",
+    canonicalPublish.permalink ? `Permalink: ${canonicalPublish.permalink}` : "",
+  ]
+    .filter(Boolean)
+    .join("\n");
+  const normalizedPublishedSummary = normalizePublishedSummaryText(canonicalPublishedSummary);
+
+  return buildResult({
+    workflowId: state.workflow_id,
+    stage: "published",
+    summary: normalizedPublishedSummary || canonicalPublishedSummary,
+    humanMessage: normalizedPublishedSummary || canonicalPublishedSummary,
+    data: {
+      status: canonicalPublish.status,
+      page_id: canonicalPublish.pageId,
+      page_ids: canonicalPublish.pageIds,
+      post_id: postId,
+      post_ids: postIds,
+      permalink: canonicalPublish.permalink,
+      publish_canonical: canonicalPublish,
+      publish_result: publishResult,
+    },
+  });
 
   const summary = [
     "Bài viết đã được đăng thành công lên Fanpage",
@@ -3775,19 +3795,49 @@ function schedulePostAction(context, state) {
     });
   }
 
-  const postIds = publisher.extractPostIds(scheduleResult);
-  const postId = postIds[0] || "";
+  const canonicalSchedule = publisher.extractCanonicalPublishResult(scheduleResult);
+  const postIds = canonicalSchedule.postIds;
+  const postId = canonicalSchedule.postId;
 
   const schedState = {
     ...state,
     status: "completed",
     stage: "scheduled",
     publish: scheduleResult,
+    publish_canonical: canonicalSchedule,
     updated_at: nowIso(),
   };
   archiveWorkflow(context.paths, schedState);
 
   logger.logScheduled(scheduleTime);
+
+  const scheduledSummary = [
+    "Bai viet da duoc hen gio dang thanh cong.",
+    `Thoi gian: ${scheduleTime}`,
+    canonicalSchedule.pageIds.length > 0 ? `Page IDs: ${canonicalSchedule.pageIds.join(", ")}` : "",
+    postIds.length > 1 ? `Post IDs: ${postIds.join(", ")}` : postId ? `Post ID: ${postId}` : "",
+    canonicalSchedule.permalink ? `Permalink: ${canonicalSchedule.permalink}` : "",
+  ]
+    .filter(Boolean)
+    .join("\n");
+
+  return buildResult({
+    workflowId: state.workflow_id,
+    stage: "scheduled",
+    summary: scheduledSummary,
+    humanMessage: scheduledSummary,
+    data: {
+      status: canonicalSchedule.status,
+      page_id: canonicalSchedule.pageId,
+      page_ids: canonicalSchedule.pageIds,
+      post_id: postId,
+      post_ids: postIds,
+      permalink: canonicalSchedule.permalink,
+      schedule_time: scheduleTime,
+      schedule_canonical: canonicalSchedule,
+      schedule_result: scheduleResult,
+    },
+  });
 
   const summary = [
     "Bài viết đã được hẹn giờ đăng thành công!",
@@ -3872,9 +3922,8 @@ async function editPublishedFlow(context) {
     "NV Content đã viết nội dung mới cho bài đã đăng, đang chờ Sếp duyệt.",
     `Post ID sẽ cập nhật: ${postId}`,
     "",
-    "â” â” â”  NỘI DUNG MỚI â” â” â” ",
+    "NỘI DUNG MỚI",
     content.approvedContent,
-    "â” â” â” â” â” â” â” â” â” â” â” â” â” â” â” â” â” â” â” â” â” ",
     "",
     'Duyệt: "Duyệt content" â€” nội dung sẽ được cập nhật lên Facebook',
     "Sửa: ghi rõ nhận xét",
@@ -4347,7 +4396,11 @@ async function continueWorkflow(context, state) {
           finalPath = compositePath;
           logger.log("media", `Ghép 3 lớp thành công: ${compositePath}`);
         } catch (compErr) {
-          process.stderr.write(`[COMPOSITE_RECOVERY_ERROR] ${compErr.stack || compErr.message}\n`);
+          if (logger.isEnabled()) {
+            process.stderr.write(
+              `[COMPOSITE_RECOVERY_ERROR] ${compErr.stack || compErr.message}\n`,
+            );
+          }
           logger.logError("composite", compErr);
           logger.log("info", "Dùng ảnh nền gốc (composite thất bại).");
         }
@@ -4428,6 +4481,11 @@ async function continueWorkflow(context, state) {
   if (state.stage === "awaiting_media_approval") {
     if (context.intent?.intent === "EDIT_CONTENT") {
       return reviseContent(context, { ...state, stage: "awaiting_content_approval" });
+    }
+    if (decision === "generate_video") {
+      logger.logApproved("media");
+      rememberApprovedPrompt(state, context.openClawHome, "image");
+      return generateVideoFlow(context, state);
     }
     if (decision === "approve") {
       logger.logApproved("media");
@@ -4567,6 +4625,7 @@ function buildBlockedResult(state, message) {
 
 async function runCli(argv = process.argv.slice(2)) {
   const options = parseArgs(argv);
+  logger.setEnabled(!options.json);
   if (options.autoNotifyWatch) {
     await runAutoNotifyWatcher(options);
     return;
@@ -4767,6 +4826,7 @@ module.exports = {
   parseMediaReply,
   buildRootSyncPayloadFromResult,
   resolveRootWorkflowBinding,
+  runAutoNotifyWatcher,
   scanLatestGeneratedMedia,
   syncRootMessageFromResult,
   shouldSupersedePendingWorkflow,

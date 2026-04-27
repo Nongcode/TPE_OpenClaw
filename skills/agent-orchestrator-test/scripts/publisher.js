@@ -127,6 +127,103 @@ function publishNow(params) {
   });
 }
 
+function normalizeCanonicalPostId(candidatePostId, pageId) {
+  const rawPostId = String(candidatePostId || "").trim();
+  const normalizedPageId = String(pageId || "").trim();
+  if (!rawPostId) {
+    return "";
+  }
+  if (rawPostId.includes("_") || !normalizedPageId) {
+    return rawPostId;
+  }
+  return `${normalizedPageId}_${rawPostId}`;
+}
+
+function collectPublishEntries(publishResult) {
+  if (!publishResult || typeof publishResult !== "object") {
+    return [];
+  }
+
+  const nestedResults = [
+    publishResult?.data?.image_publish_result,
+    publishResult?.data?.video_publish_result,
+  ]
+    .filter(Boolean)
+    .flatMap((entry) => collectPublishEntries(entry));
+  if (nestedResults.length > 0) {
+    return nestedResults;
+  }
+
+  if (Array.isArray(publishResult?.data?.post_ids) && publishResult.data.post_ids.length > 0) {
+    return publishResult.data.post_ids
+      .map((postId) => {
+        const normalizedPostId = String(postId || "").trim();
+        if (!normalizedPostId) {
+          return null;
+        }
+        const pageId = normalizedPostId.includes("_") ? normalizedPostId.split("_")[0] : "";
+        return {
+          pageId,
+          postId: normalizedPostId,
+          permalink: "",
+          rawPostId: normalizedPostId,
+          raw: { post_id: normalizedPostId },
+        };
+      })
+      .filter(Boolean);
+  }
+
+  const directResults = Array.isArray(publishResult?.data?.results)
+    ? publishResult.data.results
+    : [publishResult];
+
+  return directResults
+    .map((entry) => {
+      const payload = entry?.data?.results ? null : entry;
+      if (!payload || typeof payload !== "object") {
+        return null;
+      }
+      const rawResponse = payload.raw_fb_response || publishResult?.data?.raw_fb_response || {};
+      const pageId = String(payload.page_id || publishResult?.data?.page_id || rawResponse.page_id || "").trim();
+      const rawPostId =
+        rawResponse.post_id ||
+        payload.post_id ||
+        publishResult?.data?.post_id ||
+        rawResponse.id ||
+        "";
+      const canonicalPostId = normalizeCanonicalPostId(rawPostId, pageId);
+      const permalink = String(
+        payload.permalink_url || rawResponse.permalink_url || publishResult?.data?.permalink_url || "",
+      ).trim();
+
+      return {
+        pageId,
+        postId: canonicalPostId,
+        permalink,
+        rawPostId: String(rawPostId || "").trim(),
+        raw: payload,
+      };
+    })
+    .filter(Boolean);
+}
+
+function extractCanonicalPublishResult(publishResult) {
+  const entries = collectPublishEntries(publishResult);
+  const pageIds = [...new Set(entries.map((entry) => entry.pageId).filter(Boolean))];
+  const postIds = [...new Set(entries.map((entry) => entry.postId).filter(Boolean))];
+  const permalink = entries.find((entry) => entry.permalink)?.permalink || "";
+
+  return {
+    status: publishResult?.success ? "published" : "error",
+    pageId: pageIds[0] || "",
+    pageIds,
+    postId: postIds[0] || "",
+    postIds,
+    permalink,
+    entries,
+  };
+}
+
 /**
  * Hẹn giờ đăng bài lên Fanpage.
  *
@@ -186,27 +283,16 @@ function editPublishedPost(params) {
  * Trích xuất Post ID từ kết quả publish.
  */
 function extractPostId(publishResult) {
-  if (Array.isArray(publishResult?.data?.post_ids) && publishResult.data.post_ids.length > 0) {
-    return String(publishResult.data.post_ids[0] || "").trim();
-  }
-  return (
-    publishResult?.data?.post_id ||
-    publishResult?.data?.raw_fb_response?.id ||
-    publishResult?.data?.raw_fb_response?.post_id ||
-    ""
-  );
+  return extractCanonicalPublishResult(publishResult).postId;
 }
 
 function extractPostIds(publishResult) {
-  if (Array.isArray(publishResult?.data?.post_ids)) {
-    return publishResult.data.post_ids.map((item) => String(item || "").trim()).filter(Boolean);
-  }
-  const singleId = extractPostId(publishResult);
-  return singleId ? [singleId] : [];
+  return extractCanonicalPublishResult(publishResult).postIds;
 }
 
 module.exports = {
   editPublishedPost,
+  extractCanonicalPublishResult,
   extractPostId,
   extractPostIds,
   parseJsonFromOutput,

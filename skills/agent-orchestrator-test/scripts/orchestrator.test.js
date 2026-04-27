@@ -3,6 +3,7 @@ const assert = require("node:assert/strict");
 const fs = require("fs");
 const path = require("path");
 const os = require("os");
+const { spawnSync } = require("child_process");
 
 const {
   buildContentApprovalCheckpointMessage,
@@ -20,6 +21,7 @@ const {
   parseMediaReply,
   migrateState,
   resolveRootWorkflowBinding,
+  runAutoNotifyWatcher,
   scanLatestGeneratedMedia,
   shouldSupersedePendingWorkflow,
   validateContentCheckpointReply,
@@ -48,6 +50,10 @@ test("classifyMediaDecision detects publish approval", () => {
   assert.equal(classifyMediaDecision("Duyet anh va dang bai"), "approve");
 });
 
+test("classifyMediaDecision detects image approval that requests video", () => {
+  assert.equal(classifyMediaDecision("Duyet anh, tao video"), "generate_video");
+});
+
 test("classifyMediaDecision detects prompt rejection keywords", () => {
   assert.equal(classifyMediaDecision("Sua prompt, prompt chua on"), "reject");
 });
@@ -67,7 +73,10 @@ test("buildStageHumanMessage builds media approval checkpoint text", () => {
   });
   assert.ok(text.includes("NV Media da tao xong media"));
   assert.ok(text.includes('MEDIA: "C:/media/generated.png"'));
-  assert.ok(text.includes("Prompt anh test"));
+  assert.ok(text.includes("Da dung anh goc san pham lam tham chieu."));
+  assert.ok(text.includes("Da dung 1 logo cong ty."));
+  assert.ok(text.includes('Duyet anh, tao video: "Duyet anh, tao video"'));
+  assert.doesNotMatch(text, /Prompt anh test/);
 });
 
 test("buildRootSyncPayloadFromResult creates approval_request payload for media approval", () => {
@@ -207,6 +216,30 @@ test("buildRootSyncPayloadFromResult skips transient running placeholders", () =
   assert.equal(payload, null);
 });
 
+test("CLI JSON mode stays machine-safe without stderr progress logs", () => {
+  const openClawHome = fs.mkdtempSync(path.join(os.tmpdir(), "orchestrator-json-home-"));
+  const result = spawnSync(
+    process.execPath,
+    [
+      path.join(__dirname, "orchestrator.js"),
+      "--json",
+      "--openclaw-home",
+      openClawHome,
+      "--reset",
+    ],
+    {
+      cwd: path.resolve(__dirname, "..", "..", ".."),
+      encoding: "utf8",
+    },
+  );
+
+  assert.equal(result.status, 0);
+  assert.equal(result.stderr.trim(), "");
+  assert.equal(JSON.parse(result.stdout).status, "reset");
+
+  fs.rmSync(openClawHome, { recursive: true, force: true });
+});
+
 test("hasWorkflowStageNotification detects delivered checkpoints", () => {
   assert.equal(
     hasWorkflowStageNotification(
@@ -216,6 +249,71 @@ test("hasWorkflowStageNotification detects delivered checkpoints", () => {
     true,
   );
   assert.equal(hasWorkflowStageNotification({}, "awaiting_media_approval"), false);
+});
+
+test("runAutoNotifyWatcher persists root checkpoint through backend sync instead of gateway-only inject", async () => {
+  const harness = createWorkflowHarness("orchestrator-auto-notify");
+  const originalPushAutomationEvent = beClient.pushAutomationEvent;
+  const originalUpdateWorkflowStatus = beClient.updateWorkflowStatus;
+  const originalCallGatewayMethod = transport.callGatewayMethod;
+
+  const pushedEvents = [];
+  let statusUpdated = null;
+  let gatewayInjected = false;
+
+  beClient.pushAutomationEvent = async (payload) => {
+    pushedEvents.push(payload);
+    return { success: true };
+  };
+  beClient.updateWorkflowStatus = async (workflowId, status) => {
+    statusUpdated = { workflowId, status };
+    return { success: true };
+  };
+  transport.callGatewayMethod = async () => {
+    gatewayInjected = true;
+    return { ok: true };
+  };
+
+  fs.writeFileSync(
+    harness.paths.currentFile,
+    JSON.stringify({
+      workflow_id: "wf_auto_notify",
+      stage: "awaiting_media_approval",
+      rootConversationId: "conv_root_auto_notify",
+      media: {
+        generatedImagePath: "D:\\media\\generated.png",
+        usedProductImage: "D:\\media\\product.png",
+        usedLogoPaths: ["D:\\logos\\logo.png"],
+      },
+      notifications: {},
+    }),
+  );
+
+  try {
+    await runAutoNotifyWatcher({
+      openClawHome: harness.openClawHome,
+      notifyWorkflowId: "wf_auto_notify",
+      notifyStage: "awaiting_media_approval",
+      notifySessionKey: "agent:pho_phong:automation:wf_auto_notify:root",
+      timeoutMs: 30_000,
+    });
+  } finally {
+    beClient.pushAutomationEvent = originalPushAutomationEvent;
+    beClient.updateWorkflowStatus = originalUpdateWorkflowStatus;
+    transport.callGatewayMethod = originalCallGatewayMethod;
+    harness.cleanup();
+  }
+
+  assert.equal(gatewayInjected, false);
+  assert.deepEqual(statusUpdated, {
+    workflowId: "wf_auto_notify",
+    status: "awaiting_media_approval",
+  });
+  assert.equal(pushedEvents.length, 1);
+  assert.equal(pushedEvents[0].conversationId, "conv_root_auto_notify");
+  assert.equal(pushedEvents[0].injectToGateway, true);
+  assert.equal(pushedEvents[0].type, "approval_request");
+  assert.match(String(pushedEvents[0].content || ""), /NV Media da tao xong media/);
 });
 
 test("extract helpers read workflow markers", () => {
@@ -507,6 +605,57 @@ test("continueWorkflow promotes generating_video to awaiting_video_approval when
   }
 });
 
+test("continueWorkflow routes 'Duyet anh, tao video' into the video flow from media approval", async () => {
+  const harness = createWorkflowHarness("orchestrator-media-approve-video");
+
+  try {
+    const state = {
+      workflow_id: "wf_live_media_approve_video",
+      stage: "awaiting_media_approval",
+      intent: { intent: "CREATE_NEW", media_type_requested: "image" },
+      content: {
+        approvedContent: "Noi dung bai da duyet.",
+        primaryProductImage: "D:\\images\\product.png",
+      },
+      media: {
+        generatedImagePath: "D:\\media\\poster.png",
+        imagePrompt: "Prompt anh test",
+        usedProductImage: "D:\\images\\product.png",
+        usedLogoPaths: ["C:\\logos\\logo.png"],
+      },
+      prompt_package: {
+        imagePrompt: "Prompt anh test",
+      },
+      notifications: {},
+      reject_history: [],
+      prompt_versions: [],
+      global_guidelines: [],
+    };
+    fs.writeFileSync(harness.paths.currentFile, JSON.stringify(state, null, 2));
+
+    const result = await continueWorkflow(
+      {
+        message: "Duyet anh, tao video",
+        openClawHome: harness.openClawHome,
+        paths: harness.paths,
+        registry: {
+          byId: {},
+        },
+        options: {
+          timeoutMs: 120_000,
+        },
+      },
+      state,
+    );
+
+    assert.equal(result.status, "error");
+    assert.match(result.summary, /media_video/i);
+    assert.doesNotMatch(result.summary, /Da san sang dang bai/i);
+  } finally {
+    harness.cleanup();
+  }
+});
+
 test("parseIntentByKeywords: CREATE_NEW default for normal brief", () => {
   const result = intentParser.parseIntentByKeywords("Tao bai quang cao may nang dien");
   assert.equal(result.intent, "CREATE_NEW");
@@ -610,6 +759,13 @@ test("classifyPendingDecision: media approve", () => {
   assert.equal(
     intentParser.classifyPendingDecision("Duyet nhe", "awaiting_media_approval"),
     "approve",
+  );
+});
+
+test("classifyPendingDecision: media approval can branch to video", () => {
+  assert.equal(
+    intentParser.classifyPendingDecision("Duyet anh, tao video", "awaiting_media_approval"),
+    "generate_video",
   );
 });
 
@@ -1433,7 +1589,7 @@ APPROVED_CONTENT_END
   }
 });
 
-test("buildStageHumanMessage returns marker-rich content checkpoint for awaiting_content_approval", () => {
+test("buildStageHumanMessage returns sanitized content checkpoint for awaiting_content_approval", () => {
   const rawReply = `
 WORKFLOW_META
 workflow_id: wf_test_live
@@ -1463,12 +1619,15 @@ APPROVED_CONTENT_END
     reject_history: [],
   });
 
-  assert.match(text, /PRODUCT_URL: https:\/\/example\.test\/product/);
-  assert.match(text, /PRIMARY_PRODUCT_IMAGE: D:\\images\\product\.png/);
-  assert.match(text, /APPROVED_CONTENT_BEGIN/);
+  assert.match(text, /Noi dung chot\./);
+  assert.match(text, /Anh goc san pham de doi chieu:/);
+  assert.match(text, /MEDIA: "D:\/images\/product\.png"/);
+  assert.doesNotMatch(text, /PRODUCT_URL:/);
+  assert.doesNotMatch(text, /PRIMARY_PRODUCT_IMAGE:/);
+  assert.doesNotMatch(text, /APPROVED_CONTENT_BEGIN/);
 });
 
-test("buildContentApprovalCheckpointMessage preserves canonical content markers for root approval", () => {
+test("buildContentApprovalCheckpointMessage defaults to sanitized root approval message", () => {
   const text = buildContentApprovalCheckpointMessage({
     productName: "May nang 2 tru",
     approvedContent: "Noi dung chot.",
@@ -1484,6 +1643,30 @@ Noi dung chot.
 APPROVED_CONTENT_END
 `,
     revised: false,
+  });
+
+  assert.match(text, /San pham: May nang 2 tru/);
+  assert.match(text, /Anh goc san pham de doi chieu:/);
+  assert.match(text, /MEDIA: "D:\/images\/product\.png"/);
+  assert.doesNotMatch(text, /CHECKPOINT_GOC_TU_NV_CONTENT/);
+  assert.doesNotMatch(text, /PRODUCT_URL: https:\/\/example\.test\/product/);
+  assert.doesNotMatch(text, /APPROVED_CONTENT_END/);
+});
+
+test("buildContentApprovalCheckpointMessage can include raw checkpoint for debug flows", () => {
+  const text = buildContentApprovalCheckpointMessage({
+    productName: "May nang 2 tru",
+    approvedContent: "Noi dung chot.",
+    rawReply: `
+WORKFLOW_META
+workflow_id: wf_test_live
+step_id: step_01_content
+PRODUCT_URL: https://example.test/product
+APPROVED_CONTENT_BEGIN
+Noi dung chot.
+APPROVED_CONTENT_END
+`,
+    includeRawCheckpoint: true,
   });
 
   assert.match(text, /CHECKPOINT_GOC_TU_NV_CONTENT/);
@@ -1508,9 +1691,12 @@ test("parseJsonFromOutput returns null for empty input", () => {
   assert.equal(publisherModule.parseJsonFromOutput(null), null);
 });
 
-test("extractPostId extracts from various response shapes", () => {
+test("extractPostId extracts canonical publish ids from various response shapes", () => {
   assert.equal(publisherModule.extractPostId({ data: { post_id: "123_456" } }), "123_456");
-  assert.equal(publisherModule.extractPostId({ data: { raw_fb_response: { id: "789" } } }), "789");
+  assert.equal(
+    publisherModule.extractPostId({ data: { page_id: "123", raw_fb_response: { id: "789" } } }),
+    "123_789",
+  );
   assert.equal(publisherModule.extractPostId({}), "");
 });
 
@@ -1523,6 +1709,50 @@ test("extractPostIds supports split image/video publish result", () => {
     publisherModule.extractPostIds({ data: { post_id: "555_666" } }),
     ["555_666"],
   );
+});
+
+test("extractCanonicalPublishResult normalizes nested page results into canonical post ids", () => {
+  const result = publisherModule.extractCanonicalPublishResult({
+    success: true,
+    data: {
+      image_publish_result: {
+        success: true,
+        data: {
+          results: [
+            {
+              page_id: "102",
+              post_id: "998",
+              raw_fb_response: {
+                id: "998",
+                post_id: "102_998",
+                permalink_url: "https://facebook.example/post/102_998",
+              },
+            },
+          ],
+        },
+      },
+      video_publish_result: {
+        success: true,
+        data: {
+          results: [
+            {
+              page_id: "112",
+              post_id: "445",
+              raw_fb_response: {
+                id: "445",
+              },
+            },
+          ],
+        },
+      },
+    },
+  });
+
+  assert.equal(result.status, "published");
+  assert.equal(result.pageId, "102");
+  assert.equal(result.postId, "102_998");
+  assert.deepEqual(result.postIds, ["102_998", "112_445"]);
+  assert.equal(result.permalink, "https://facebook.example/post/102_998");
 });
 
 test("splitMediaPathsByType separates images and videos", () => {
