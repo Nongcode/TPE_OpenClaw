@@ -1,4 +1,5 @@
 import { mkdir, writeFile } from "node:fs/promises";
+import { createHash } from "node:crypto";
 import path from "node:path";
 
 function sanitizeFileName(value) {
@@ -7,6 +8,7 @@ function sanitizeFileName(value) {
     .replace(/[^\w.-]+/g, "-")
     .replace(/-+/g, "-")
     .replace(/^-|-$/g, "")
+    .replace(/[. ]+$/g, "")
     .toLowerCase() || "product";
 }
 
@@ -63,6 +65,7 @@ export async function extractImageForMedia(options) {
 
   const downloaded = [];
   const usedNames = new Set();
+  const seenContentHashes = new Set();
   for (let index = 0; index < uniqueImages.length; index += 1) {
     const image = uniqueImages[index];
     const response = await fetch(image.url, {
@@ -82,6 +85,12 @@ export async function extractImageForMedia(options) {
     }
 
     const arrayBuffer = await response.arrayBuffer();
+    const fileBuffer = Buffer.from(arrayBuffer);
+    const contentHash = createHash("sha256").update(fileBuffer).digest("hex");
+    if (seenContentHashes.has(contentHash)) {
+      continue;
+    }
+    seenContentHashes.add(contentHash);
     const contentType = response.headers.get("content-type") || "";
     let fileName = getFileNameFromUrl(image.url, productSlug, index, contentType);
     if (usedNames.has(fileName)) {
@@ -95,11 +104,12 @@ export async function extractImageForMedia(options) {
     }
     usedNames.add(fileName);
     const filePath = path.join(outputDir, fileName);
-    await writeFile(filePath, Buffer.from(arrayBuffer));
+    await writeFile(filePath, fileBuffer);
 
     downloaded.push({
       ...image,
       content_type: contentType,
+      content_hash: contentHash,
       file_path: filePath,
       file_name: fileName,
       size_bytes: arrayBuffer.byteLength,

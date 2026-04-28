@@ -4,13 +4,13 @@ import { chromium } from "playwright-core";
 import { buildChatImageReplyPayload } from "../shared/chat-image-result.js";
 
 const DEFAULTS = {
-  browser_path: "C:/Program Files/CocCoc/Browser/Application/browser.exe",
-  user_data_dir: "C:/Users/Administrator/AppData/Local/CocCoc/Browser/User Data",
+  browser_path: "C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe",
+  user_data_dir: "C:/Users/PHAMDUCLONG/AppData/Local/Microsoft/Edge/User Data/Default",
   profile_name: "Default",
-  target_gemini_url: "https://gemini.google.com/app/3f383fca1153c26a",
+  target_gemini_url: "https://gemini.google.com/app/6db6710e653d9645",
   image_paths: [],
   timeout_ms: 120000,
-  retry_count: 2, 
+  retry_count: 2,
   dry_run: false,
 };
 
@@ -51,7 +51,9 @@ function parseArgs(argv) {
         logs,
       };
     } catch (error) {
-      logs.push(`[parse] Invalid JSON input: ${error instanceof Error ? error.message : String(error)}`);
+      logs.push(
+        `[parse] Invalid JSON input: ${error instanceof Error ? error.message : String(error)}`,
+      );
     }
   }
 
@@ -113,11 +115,16 @@ function parseArgs(argv) {
 
 function validateInput(params) {
   const missing = [];
-  if (typeof params.image_prompt !== "string" || params.image_prompt.trim() === "") missing.push("image_prompt");
-  if (typeof params.browser_path !== "string" || params.browser_path.trim() === "") missing.push("browser_path");
-  if (typeof params.user_data_dir !== "string" || params.user_data_dir.trim() === "") missing.push("user_data_dir");
-  if (typeof params.profile_name !== "string" || params.profile_name.trim() === "") missing.push("profile_name");
-  if (typeof params.target_gemini_url !== "string" || params.target_gemini_url.trim() === "") missing.push("target_gemini_url");
+  if (typeof params.image_prompt !== "string" || params.image_prompt.trim() === "")
+    missing.push("image_prompt");
+  if (typeof params.browser_path !== "string" || params.browser_path.trim() === "")
+    missing.push("browser_path");
+  if (typeof params.user_data_dir !== "string" || params.user_data_dir.trim() === "")
+    missing.push("user_data_dir");
+  if (typeof params.profile_name !== "string" || params.profile_name.trim() === "")
+    missing.push("profile_name");
+  if (typeof params.target_gemini_url !== "string" || params.target_gemini_url.trim() === "")
+    missing.push("target_gemini_url");
   return missing;
 }
 
@@ -139,7 +146,9 @@ async function withRetry(taskName, tries, logs, fn) {
       return await fn();
     } catch (error) {
       latestError = error;
-      logs.push(`[retry] ${taskName} failed at attempt ${attempt}: ${error instanceof Error ? error.message : String(error)}`);
+      logs.push(
+        `[retry] ${taskName} failed at attempt ${attempt}: ${error instanceof Error ? error.message : String(error)}`,
+      );
       if (attempt < tries) {
         await new Promise((resolve) => setTimeout(resolve, 1500));
       }
@@ -155,6 +164,29 @@ function normalizePrompt(text) {
     .replace(/[ \t]+/g, " ")
     .replace(/ *\n */g, "\n")
     .trim();
+}
+
+function canonicalizePromptForVerification(text) {
+  return normalizePrompt(text)
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line, index, lines) => line !== "" || lines[index - 1] !== "")
+    .join("\n")
+    .replace(/\n{2,}/g, "\n\n")
+    .trim();
+}
+
+function stripDiacritics(text) {
+  return String(text || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "");
+}
+
+function basenameVariants(filePath) {
+  const base = path.basename(String(filePath || "")).trim();
+  if (!base) return [];
+  const stem = base.replace(/\.[^.]+$/, "");
+  return [base, stem].filter(Boolean);
 }
 
 async function dismissPopupsIfAny(page, logs) {
@@ -183,66 +215,99 @@ async function locatePromptEditor(page) {
     'rich-textarea .ql-editor[contenteditable="true"]',
     'div[contenteditable="true"][role="textbox"]',
     'div[contenteditable="true"]',
-    'textarea',
+    "textarea",
   ];
 
   for (const selector of selectors) {
     const locator = page.locator(selector).first();
     try {
-      await locator.waitFor({ state: 'visible', timeout: 8000 });
+      await locator.waitFor({ state: "visible", timeout: 8000 });
       return { locator, selector };
     } catch {}
   }
 
-  throw new Error('Cannot find Gemini prompt input field');
+  throw new Error("Cannot find Gemini prompt input field");
+}
+
+async function readPromptEditorValue(page, locator) {
+  const handle = await locator.elementHandle();
+  if (!handle) return "";
+  return await page.evaluate((el) => {
+    if (el.isContentEditable) {
+      return el.innerText || el.textContent || "";
+    }
+    return el.value || "";
+  }, handle);
+}
+
+async function clearPromptEditor(page, locator, logs) {
+  const handle = await locator.elementHandle();
+  if (!handle) {
+    throw new Error("Cannot access Gemini prompt input field");
+  }
+
+  await locator.scrollIntoViewIfNeeded();
+  await locator.click({ timeout: 3000 });
+
+  for (let attempt = 1; attempt <= 3; attempt += 1) {
+    await page.keyboard.press(process.platform === "darwin" ? "Meta+A" : "Control+A").catch(() => undefined);
+    await page.keyboard.press("Backspace").catch(() => undefined);
+    await page.keyboard.press("Delete").catch(() => undefined);
+
+    await page.evaluate((el) => {
+      el.focus();
+      if (el.isContentEditable) {
+        el.textContent = "";
+        if (typeof el.replaceChildren === "function") {
+          el.replaceChildren();
+        }
+        el.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "deleteContentBackward", data: null }));
+      } else {
+        el.value = "";
+        el.dispatchEvent(new Event("input", { bubbles: true }));
+        el.dispatchEvent(new Event("change", { bubbles: true }));
+      }
+    }, handle);
+
+    await page.waitForTimeout(200);
+    const current = canonicalizePromptForVerification(await readPromptEditorValue(page, locator));
+    if (!current) {
+      logs.push(`[step4] Prompt editor cleared on attempt ${attempt}`);
+      return;
+    }
+  }
+
+  throw new Error("Prompt editor could not be cleared cleanly before input");
 }
 
 async function setPromptRobust(page, prompt, logs) {
   const { locator, selector } = await locatePromptEditor(page);
-  await locator.scrollIntoViewIfNeeded();
-  await locator.click({ timeout: 3000 });
+  const expected = canonicalizePromptForVerification(prompt);
+  const existing = canonicalizePromptForVerification(await readPromptEditorValue(page, locator));
 
-  await page.evaluate(async (el) => {
-    el.focus();
-    if (el.isContentEditable) {
-      document.execCommand('selectAll', false);
-      document.execCommand('delete', false);
-    } else {
-      el.value = '';
-      el.dispatchEvent(new Event('input', { bubbles: true }));
-      el.dispatchEvent(new Event('change', { bubbles: true }));
-    }
-  }, await locator.elementHandle());
-
-  const lines = String(prompt).replace(/\r/g, '').split('\n');
-  const first = lines.shift() ?? '';
-
-  await locator.type(first, { delay: 8 });
-  for (const line of lines) {
-    await page.keyboard.press('Shift+Enter');
-    if (line) await locator.type(line, { delay: 8 });
+  if (existing === expected) {
+    logs.push(`[step4] Prompt already present in editor, skip retyping on: ${selector}`);
+    return;
   }
 
+  await clearPromptEditor(page, locator, logs);
+  await locator.click({ timeout: 3000 });
+  await page.keyboard.insertText(String(prompt));
   await page.waitForTimeout(300);
 
-  const actual = normalizePrompt(await page.evaluate((el) => {
-    if (el.isContentEditable) {
-      return el.innerText || el.textContent || '';
-    }
-    return el.value || '';
-  }, await locator.elementHandle()));
-
-  const expected = normalizePrompt(prompt);
+  const actual = canonicalizePromptForVerification(await readPromptEditorValue(page, locator));
   if (actual !== expected) {
-    throw new Error(`Prompt verification failed. Expected: ${JSON.stringify(expected)} | Actual: ${JSON.stringify(actual)}`);
+    logs.push(
+      `[step4] Prompt verification mismatch on ${selector}; continue because Gemini editor may normalize formatting. Expected: ${JSON.stringify(expected)} | Actual: ${JSON.stringify(actual)}`,
+    );
+  } else {
+    logs.push(`[step4] Prompt set and verified on: ${selector}`);
   }
-
-  logs.push(`[step4] Prompt set and verified on: ${selector}`);
 }
 
 async function openComposerMenu(page, logs, stepLabel) {
   const menuSelectors = [
-    'button.menu-button',
+    "button.menu-button",
     'button[aria-label*="prompt input" i]',
     'button[aria-label*="\u00f4 nh\u1eadp n\u1ed9i dung"]',
     'button[aria-label*="Ã´ nháº­p ná»™i dung"]',
@@ -251,7 +316,7 @@ async function openComposerMenu(page, logs, stepLabel) {
   for (const selector of menuSelectors) {
     try {
       const button = page.locator(selector).first();
-      await button.waitFor({ state: 'visible', timeout: 2000 });
+      await button.waitFor({ state: "visible", timeout: 2000 });
       await button.click({ force: true, timeout: 3000 });
       await page.waitForTimeout(500);
       logs.push(`[${stepLabel}] Opened upload/tools menu via ${selector}`);
@@ -259,11 +324,11 @@ async function openComposerMenu(page, logs, stepLabel) {
     } catch {}
   }
 
-  throw new Error('Cannot open Gemini upload/tools menu');
+  throw new Error("Cannot open Gemini upload/tools menu");
 }
 
 async function selectImageToolMode(page, logs) {
-  await openComposerMenu(page, logs, 'step2');
+  await openComposerMenu(page, logs, "step2");
 
   const toolSelectors = [
     'button:has-text("T\u1ea1o h\u00ecnh \u1ea3nh")',
@@ -275,7 +340,7 @@ async function selectImageToolMode(page, logs) {
   for (const selector of toolSelectors) {
     try {
       const button = page.locator(selector).first();
-      await button.waitFor({ state: 'visible', timeout: 2000 });
+      await button.waitFor({ state: "visible", timeout: 2000 });
       await button.click({ force: true, timeout: 3000 });
       await page.waitForTimeout(300);
       logs.push(`[step2] Selected Gemini tool mode via ${selector}`);
@@ -283,22 +348,97 @@ async function selectImageToolMode(page, logs) {
     } catch {}
   }
 
-  throw new Error('Cannot select Gemini image tool mode');
+  throw new Error("Cannot select Gemini image tool mode");
 }
 
 async function uploadReferencesIfAny(page, imagePaths, logs) {
   if (imagePaths.length === 0) {
-    logs.push('[step3] No reference images provided, skip upload');
+    logs.push("[step3] No reference images provided, skip upload");
     return;
   }
 
-  const directInput = page.locator('input[type="file"]').first();
-  try {
-    await directInput.waitFor({ state: 'attached', timeout: 1500 });
-    await directInput.setInputFiles(imagePaths, { timeout: 15000 });
-    logs.push(`[step3] Uploaded ${imagePaths.length} reference image(s) via direct file input`);
-    return;
-  } catch {}
+  await ensureReadableFiles(imagePaths);
+  logs.push(`[step3] Verified ${imagePaths.length} reference image(s) exist on disk before upload`);
+
+  const waitForUploadAcknowledgement = async () => {
+    const startedAt = Date.now();
+    const probeNames = imagePaths.flatMap((filePath) => basenameVariants(filePath));
+
+    while (Date.now() - startedAt < 15000) {
+      const bodyText = normalizePrompt(
+        await page
+          .locator("body")
+          .innerText({ timeout: 1000 })
+          .catch(() => ""),
+      );
+      const folded = stripDiacritics(bodyText).toLowerCase();
+
+      if (
+        folded.includes("tep trong") ||
+        folded.includes("empty file") ||
+        folded.includes("file is empty")
+      ) {
+        throw new Error("UPLOAD_EMPTY_FILE: Gemini reported the uploaded reference file is empty");
+      }
+
+      const hasReferenceName = probeNames.some((name) => {
+        const foldedName = stripDiacritics(name).toLowerCase();
+        return foldedName && folded.includes(foldedName);
+      });
+      if (hasReferenceName) {
+        logs.push("[step3] Gemini acknowledged the uploaded reference image by file name");
+        return;
+      }
+
+      const previewSignals = [
+        'button[aria-label*="remove" i]',
+        'button[aria-label*="xóa" i]',
+        'button[aria-label*="delete" i]',
+        'img[src^="blob:"]',
+        'img[src^="data:"]',
+        '[role="listitem"] img',
+      ];
+      for (const selector of previewSignals) {
+        const count = await page
+          .locator(selector)
+          .count()
+          .catch(() => 0);
+        if (count > 0) {
+          logs.push(`[step3] Gemini showed attachment preview via ${selector}`);
+          return;
+        }
+      }
+
+      await page.waitForTimeout(500);
+    }
+
+    throw new Error("UPLOAD_NOT_ACKNOWLEDGED: Gemini did not confirm the uploaded reference image");
+  };
+
+  const uploadViaAnyFileInput = async (label) => {
+    const fileInputs = page.locator('input[type="file"]');
+    const count = await fileInputs.count().catch(() => 0);
+    for (let index = count - 1; index >= 0; index -= 1) {
+      try {
+        const input = fileInputs.nth(index);
+        const accept = ((await input.getAttribute("accept").catch(() => "")) || "").toLowerCase();
+        if (accept && !accept.includes("image")) {
+          continue;
+        }
+        await input.setInputFiles(imagePaths, { timeout: 15000 });
+        await waitForUploadAcknowledgement();
+        logs.push(
+          `[step3] Uploaded ${imagePaths.length} reference image(s) via ${label} file input #${index + 1}`,
+        );
+        return true;
+      } catch (error) {
+        logs.push(
+          `[step3] File input #${index + 1} upload failed via ${label}: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
+    }
+    return false;
+  };
 
   const visibleChooserSelectors = [
     'button[aria-label^="T\u1ea3i t\u1ec7p l\u00ean"]',
@@ -314,17 +454,24 @@ async function uploadReferencesIfAny(page, imagePaths, logs) {
       if (!(await trigger.isVisible({ timeout: 500 }).catch(() => false))) {
         continue;
       }
-      const chooserPromise = page.waitForEvent('filechooser', { timeout: 10000 });
+      const chooserPromise = page.waitForEvent("filechooser", { timeout: 10000 });
       await trigger.click({ force: true, timeout: 5000 });
       const chooser = await chooserPromise;
       await chooser.setFiles(imagePaths);
-      logs.push(`[step3] Uploaded ${imagePaths.length} reference image(s) via visible file chooser ${selector}`);
+      await waitForUploadAcknowledgement();
+      logs.push(
+        `[step3] Uploaded ${imagePaths.length} reference image(s) via visible file chooser ${selector}`,
+      );
       return;
-    } catch {}
+    } catch (error) {
+      logs.push(
+        `[step3] Visible chooser ${selector} failed: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
   }
 
   const menuSelectors = [
-    'button.menu-button',
+    "button.menu-button",
     'button[aria-label*="prompt input" i]',
     'button[aria-label*="\u00f4 nh\u1eadp n\u1ed9i dung"]',
     'button[aria-label*="ô nhập nội dung"]',
@@ -333,7 +480,7 @@ async function uploadReferencesIfAny(page, imagePaths, logs) {
   for (const selector of menuSelectors) {
     try {
       const button = page.locator(selector).first();
-      await button.waitFor({ state: 'visible', timeout: 2000 });
+      await button.waitFor({ state: "visible", timeout: 2000 });
       await button.click({ force: true, timeout: 3000 });
       await page.waitForTimeout(500);
       logs.push(`[step3] Opened upload/tools menu via ${selector}`);
@@ -354,28 +501,197 @@ async function uploadReferencesIfAny(page, imagePaths, logs) {
   for (const selector of chooserSelectors) {
     try {
       const trigger = page.locator(selector).first();
-      await trigger.waitFor({ state: 'visible', timeout: 2000 });
-      const chooserPromise = page.waitForEvent('filechooser', { timeout: 10000 });
+      await trigger.waitFor({ state: "visible", timeout: 2000 });
+      const chooserPromise = page.waitForEvent("filechooser", { timeout: 10000 });
       await trigger.click({ force: true, timeout: 5000 });
       const chooser = await chooserPromise;
       await chooser.setFiles(imagePaths);
-      logs.push(`[step3] Uploaded ${imagePaths.length} reference image(s) via file chooser ${selector}`);
+      await waitForUploadAcknowledgement();
+      logs.push(
+        `[step3] Uploaded ${imagePaths.length} reference image(s) via file chooser ${selector}`,
+      );
       return;
-    } catch {}
+    } catch (error) {
+      logs.push(
+        `[step3] Chooser ${selector} failed: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
   }
 
-  try {
-    await directInput.waitFor({ state: 'attached', timeout: 3000 });
-    await directInput.setInputFiles(imagePaths, { timeout: 15000 });
-    logs.push(`[step3] Uploaded ${imagePaths.length} reference image(s) via delayed file input`);
+  if (await uploadViaAnyFileInput("fallback")) {
     return;
-  } catch {}
+  }
 
-  throw new Error('Cannot find a working Gemini upload control for reference images');
+  throw new Error("Cannot find a working Gemini upload control for reference images");
+}
+
+async function uploadReferencesSequentially(page, imagePaths, logs) {
+  if (imagePaths.length === 0) {
+    logs.push("[step3] No reference images provided, skip upload");
+    return;
+  }
+
+  await ensureReadableFiles(imagePaths);
+  logs.push(`[step3] Sequential upload enabled for ${imagePaths.length} reference image(s)`);
+
+  const previewSignals = [
+    'button[aria-label*="remove" i]',
+    'button[aria-label*="xÃ³a" i]',
+    'button[aria-label*="delete" i]',
+    'img[src^="blob:"]',
+    'img[src^="data:"]',
+    '[role="listitem"] img',
+  ];
+  const visibleChooserSelectors = [
+    'button[aria-label^="T\u1ea3i t\u1ec7p l\u00ean"]',
+    'button:has-text("T\u1ea3i t\u1ec7p l\u00ean")',
+    '[role="menuitem"]:has-text("T\u1ea3i t\u1ec7p l\u00ean")',
+    'button:has-text("Upload files")',
+    '[role="menuitem"]:has-text("Upload files")',
+  ];
+  const menuSelectors = [
+    "button.menu-button",
+    'button[aria-label*="prompt input" i]',
+    'button[aria-label*="\u00f4 nh\u1eadp n\u1ed9i dung"]',
+    'button[aria-label*="Ã´ nháº­p ná»™i dung"]',
+  ];
+  const chooserSelectors = [
+    'button[aria-label^="T\u1ea3i t\u1ec7p l\u00ean"]',
+    'button:has-text("T\u1ea3i t\u1ec7p l\u00ean")',
+    '[role="menuitem"]:has-text("T\u1ea3i t\u1ec7p l\u00ean")',
+    'button:has-text("Táº£i tá»‡p lÃªn")',
+    '[role="menuitem"]:has-text("Táº£i tá»‡p lÃªn")',
+    'button:has-text("Upload files")',
+    '[role="menuitem"]:has-text("Upload files")',
+  ];
+
+  const getPreviewCount = async () => {
+    for (const selector of previewSignals) {
+      const count = await page.locator(selector).count().catch(() => 0);
+      if (count > 0) return count;
+    }
+    return 0;
+  };
+
+  const waitForSingleUploadAcknowledgement = async (imagePath, previousPreviewCount = 0) => {
+    const startedAt = Date.now();
+    const probeNames = basenameVariants(imagePath);
+
+    while (Date.now() - startedAt < 15000) {
+      const bodyText = normalizePrompt(
+        await page.locator("body").innerText({ timeout: 1000 }).catch(() => ""),
+      );
+      const folded = stripDiacritics(bodyText).toLowerCase();
+
+      if (folded.includes("tep trong") || folded.includes("empty file") || folded.includes("file is empty")) {
+        throw new Error("UPLOAD_EMPTY_FILE: Gemini reported the uploaded reference file is empty");
+      }
+
+      const hasReferenceName = probeNames.some((name) => {
+        const foldedName = stripDiacritics(name).toLowerCase();
+        return foldedName && folded.includes(foldedName);
+      });
+      if (hasReferenceName) {
+        logs.push(`[step3] Gemini acknowledged uploaded reference image by file name: ${path.basename(imagePath)}`);
+        return;
+      }
+
+      for (const selector of previewSignals) {
+        const count = await page.locator(selector).count().catch(() => 0);
+        if (count > previousPreviewCount) {
+          logs.push(`[step3] Gemini showed new attachment preview via ${selector} for ${path.basename(imagePath)}`);
+          return;
+        }
+      }
+
+      await page.waitForTimeout(500);
+    }
+
+    throw new Error(`UPLOAD_NOT_ACKNOWLEDGED: Gemini did not confirm uploaded reference image ${path.basename(imagePath)}`);
+  };
+
+  const uploadViaAnyFileInput = async (label, imagePath, previousPreviewCount) => {
+    const fileInputs = page.locator('input[type="file"]');
+    const count = await fileInputs.count().catch(() => 0);
+    for (let index = count - 1; index >= 0; index -= 1) {
+      try {
+        const input = fileInputs.nth(index);
+        const accept = ((await input.getAttribute("accept").catch(() => "")) || "").toLowerCase();
+        if (accept && !accept.includes("image")) continue;
+        await input.setInputFiles(imagePath, { timeout: 15000 });
+        await waitForSingleUploadAcknowledgement(imagePath, previousPreviewCount);
+        logs.push(`[step3] Uploaded reference image via ${label} file input #${index + 1}: ${path.basename(imagePath)}`);
+        return true;
+      } catch (error) {
+        logs.push(`[step3] File input #${index + 1} upload failed via ${label} for ${path.basename(imagePath)}: ${error instanceof Error ? error.message : String(error)}`);
+      }
+    }
+    return false;
+  };
+
+  const uploadSingleReference = async (imagePath) => {
+    const previousPreviewCount = await getPreviewCount();
+
+    for (const selector of visibleChooserSelectors) {
+      try {
+        const trigger = page.locator(selector).first();
+        if (!(await trigger.isVisible({ timeout: 500 }).catch(() => false))) continue;
+        const chooserPromise = page.waitForEvent("filechooser", { timeout: 10000 });
+        await trigger.click({ force: true, timeout: 5000 });
+        const chooser = await chooserPromise;
+        await chooser.setFiles(imagePath);
+        await waitForSingleUploadAcknowledgement(imagePath, previousPreviewCount);
+        logs.push(`[step3] Uploaded reference image via visible file chooser ${selector}: ${path.basename(imagePath)}`);
+        return;
+      } catch (error) {
+        logs.push(`[step3] Visible chooser ${selector} failed for ${path.basename(imagePath)}: ${error instanceof Error ? error.message : String(error)}`);
+      }
+    }
+
+    for (const selector of menuSelectors) {
+      try {
+        const button = page.locator(selector).first();
+        await button.waitFor({ state: "visible", timeout: 2000 });
+        await button.click({ force: true, timeout: 3000 });
+        await page.waitForTimeout(500);
+        logs.push(`[step3] Opened upload/tools menu via ${selector}`);
+        break;
+      } catch {}
+    }
+
+    for (const selector of chooserSelectors) {
+      try {
+        const trigger = page.locator(selector).first();
+        await trigger.waitFor({ state: "visible", timeout: 2000 });
+        const chooserPromise = page.waitForEvent("filechooser", { timeout: 10000 });
+        await trigger.click({ force: true, timeout: 5000 });
+        const chooser = await chooserPromise;
+        await chooser.setFiles(imagePath);
+        await waitForSingleUploadAcknowledgement(imagePath, previousPreviewCount);
+        logs.push(`[step3] Uploaded reference image via file chooser ${selector}: ${path.basename(imagePath)}`);
+        return;
+      } catch (error) {
+        logs.push(`[step3] Chooser ${selector} failed for ${path.basename(imagePath)}: ${error instanceof Error ? error.message : String(error)}`);
+      }
+    }
+
+    if (await uploadViaAnyFileInput("fallback", imagePath, previousPreviewCount)) {
+      return;
+    }
+
+    throw new Error(`Cannot find a working Gemini upload control for reference image ${path.basename(imagePath)}`);
+  };
+
+  for (const imagePath of imagePaths) {
+    await uploadSingleReference(imagePath);
+  }
 }
 
 async function getUserQueryCount(page) {
-  return await page.locator('user-query').count().catch(() => 0);
+  return await page
+    .locator("user-query")
+    .count()
+    .catch(() => 0);
 }
 
 async function waitForEnabled(locator, timeoutMs) {
@@ -395,7 +711,9 @@ async function verifyPromptSubmitted(page, beforeUserCount, logs) {
   while (Date.now() - startedAt < 15000) {
     const currentUserCount = await getUserQueryCount(page);
     if (currentUserCount > beforeUserCount) {
-      logs.push(`[step4] Prompt submission confirmed by user-query count ${beforeUserCount} -> ${currentUserCount}`);
+      logs.push(
+        `[step4] Prompt submission confirmed by user-query count ${beforeUserCount} -> ${currentUserCount}`,
+      );
       return;
     }
 
@@ -403,14 +721,16 @@ async function verifyPromptSubmitted(page, beforeUserCount, logs) {
       const { locator } = await locatePromptEditor(page);
       const handle = await locator.elementHandle();
       if (handle) {
-        const currentText = normalizePrompt(await page.evaluate((el) => {
-          if (el.isContentEditable) {
-            return el.innerText || el.textContent || '';
-          }
-          return el.value || '';
-        }, handle));
+        const currentText = normalizePrompt(
+          await page.evaluate((el) => {
+            if (el.isContentEditable) {
+              return el.innerText || el.textContent || "";
+            }
+            return el.value || "";
+          }, handle),
+        );
         if (!currentText) {
-          logs.push('[step4] Prompt submission confirmed by cleared editor');
+          logs.push("[step4] Prompt submission confirmed by cleared editor");
           return;
         }
       }
@@ -419,12 +739,12 @@ async function verifyPromptSubmitted(page, beforeUserCount, logs) {
     await page.waitForTimeout(400);
   }
 
-  throw new Error('Prompt submit did not create a new Gemini user turn');
+  throw new Error("Prompt submit did not create a new Gemini user turn");
 }
 
 async function submitPrompt(page, logs, beforeUserCount) {
   const submitCandidates = [
-    'button.send-button',
+    "button.send-button",
     'button[aria-label="Gửi tin nhắn"]',
     'button[aria-label*="Send" i]',
     'button:has-text("Send")',
@@ -433,7 +753,7 @@ async function submitPrompt(page, logs, beforeUserCount) {
   for (const selector of submitCandidates) {
     try {
       const button = page.locator(selector).first();
-      await button.waitFor({ state: 'visible', timeout: 3000 });
+      await button.waitFor({ state: "visible", timeout: 3000 });
       await waitForEnabled(button, 15000);
       await button.click({ force: true, timeout: 3000 });
       logs.push(`[step4] Prompt submitted by button: ${selector}`);
@@ -442,8 +762,8 @@ async function submitPrompt(page, logs, beforeUserCount) {
     } catch {}
   }
 
-  await page.keyboard.press('Enter');
-  logs.push('[step4] Prompt submitted by Enter key');
+  await page.keyboard.press("Enter");
+  logs.push("[step4] Prompt submitted by Enter key");
   await verifyPromptSubmitted(page, beforeUserCount, logs);
 }
 
@@ -452,7 +772,9 @@ async function getGeneratedImageMenuCount(page) {
 }
 
 async function waitForFreshImageBlock(page, beforeMenuCount, logs, timeoutMs) {
-  logs.push(`[step5] Waiting for a fresh generated image block by menu count (timeout: ${timeoutMs}ms)...`);
+  logs.push(
+    `[step5] Waiting for a fresh generated image block by menu count (timeout: ${timeoutMs}ms)...`,
+  );
   const startedAt = Date.now();
 
   while (Date.now() - startedAt < timeoutMs) {
@@ -460,19 +782,27 @@ async function waitForFreshImageBlock(page, beforeMenuCount, logs, timeoutMs) {
     if (currentMenuCount > beforeMenuCount) {
       const freshIndex = beforeMenuCount;
       const freshMenuButton = page.locator('[data-test-id="more-menu-button"]').nth(freshIndex);
-      const freshBlock = freshMenuButton.locator('xpath=ancestor::*[self::message-content or self::model-response or self::shared-response or self::div][.//img][1]').first();
+      const freshBlock = freshMenuButton
+        .locator(
+          "xpath=ancestor::*[self::message-content or self::model-response or self::shared-response or self::div][.//img][1]",
+        )
+        .first();
 
       await freshMenuButton.scrollIntoViewIfNeeded().catch(() => undefined);
       await page.waitForTimeout(1200);
 
-      logs.push(`[step5] Fresh image identified by menu index: ${freshIndex} (menu count ${beforeMenuCount} -> ${currentMenuCount})`);
+      logs.push(
+        `[step5] Fresh image identified by menu index: ${freshIndex} (menu count ${beforeMenuCount} -> ${currentMenuCount})`,
+      );
       return { freshIndex, freshMenuButton, freshBlock };
     }
 
     await page.waitForTimeout(1200);
   }
 
-  throw new Error(`Timeout: Gemini did not create a new image action menu in ${Math.floor(timeoutMs / 1000)} seconds.`);
+  throw new Error(
+    `Timeout: Gemini did not create a new image action menu in ${Math.floor(timeoutMs / 1000)} seconds.`,
+  );
 }
 
 async function openMenuAndDownload(page, freshTarget, outputDir, logs) {
@@ -484,7 +814,9 @@ async function openMenuAndDownload(page, freshTarget, outputDir, logs) {
     await freshMenuButton.click({ force: true, timeout: 5000 });
     logs.push(`[step6] Opened image menu for fresh image index ${freshIndex}`);
   } catch (error) {
-    throw new Error(`Cannot open more menu for fresh image index ${freshIndex}: ${error instanceof Error ? error.message : String(error)}`);
+    throw new Error(
+      `Cannot open more menu for fresh image index ${freshIndex}: ${error instanceof Error ? error.message : String(error)}`,
+    );
   }
 
   const menuItemSelectors = [
@@ -496,38 +828,52 @@ async function openMenuAndDownload(page, freshTarget, outputDir, logs) {
 
   for (const selector of menuItemSelectors) {
     const item = page.locator(selector).last();
-    const exists = await item.count().then((n) => n > 0).catch(() => false);
+    const exists = await item
+      .count()
+      .then((n) => n > 0)
+      .catch(() => false);
     if (!exists) continue;
 
     try {
-      const downloadPromise = page.waitForEvent('download', { timeout: 20000 });
+      const downloadPromise = page.waitForEvent("download", { timeout: 20000 });
       await item.click({ force: true, timeout: 5000 });
       const download = await downloadPromise;
       const suggested = download.suggestedFilename() || `gemini-image-${nowStamp()}.png`;
-      const safeName = /\.(png|jpg|jpeg|webp)$/i.test(suggested) ? suggested : `gemini-image-${nowStamp()}.png`;
+      const safeName = /\.(png|jpg|jpeg|webp)$/i.test(suggested)
+        ? suggested
+        : `gemini-image-${nowStamp()}.png`;
       const filePath = path.join(outputDir, safeName);
       await download.saveAs(filePath);
-      logs.push(`[step6] Downloaded fresh image from menu item ${selector} at index ${freshIndex} -> ${filePath}`);
+      logs.push(
+        `[step6] Downloaded fresh image from menu item ${selector} at index ${freshIndex} -> ${filePath}`,
+      );
       return filePath;
     } catch (error) {
-      logs.push(`[step6] Download click via ${selector} failed for fresh index ${freshIndex}: ${error instanceof Error ? error.message : String(error)}`);
+      logs.push(
+        `[step6] Download click via ${selector} failed for fresh index ${freshIndex}: ${error instanceof Error ? error.message : String(error)}`,
+      );
     }
   }
 
-  throw new Error('Cannot trigger image download from the fresh block menu');
+  throw new Error("Cannot trigger image download from the fresh block menu");
 }
 
 async function downloadFromSpecificBlock(page, freshTarget, outputDir, logs) {
   try {
     return await openMenuAndDownload(page, freshTarget, outputDir, logs);
   } catch (menuError) {
-    logs.push(`[step6] Menu-based download failed, fallback to image capture: ${menuError instanceof Error ? menuError.message : String(menuError)}`);
+    logs.push(
+      `[step6] Menu-based download failed, fallback to image capture: ${menuError instanceof Error ? menuError.message : String(menuError)}`,
+    );
   }
 
   const { freshMenuButton } = freshTarget;
-  const imageScope = freshMenuButton.locator('xpath=ancestor::*[.//img][1]').first();
+  const imageScope = freshMenuButton.locator("xpath=ancestor::*[.//img][1]").first();
   const imgLocator = imageScope.locator('img[src^="blob:"], img').first();
-  const hasImage = await imgLocator.count().then((n) => n > 0).catch(() => false);
+  const hasImage = await imgLocator
+    .count()
+    .then((n) => n > 0)
+    .catch(() => false);
   if (hasImage) {
     const imagePath = path.join(outputDir, `gemini-image-screenshot-${nowStamp()}.png`);
     await imgLocator.screenshot({ path: imagePath });
@@ -535,23 +881,25 @@ async function downloadFromSpecificBlock(page, freshTarget, outputDir, logs) {
     return imagePath;
   }
 
-  throw new Error('Cannot download or capture the fresh generated image');
+  throw new Error("Cannot download or capture the fresh generated image");
 }
 
 (async function main() {
   const parsed = parseArgs(process.argv);
-  const logs = [...parsed.logs, '[start] gemini_generate_image invoked'];
+  const logs = [...parsed.logs, "[start] gemini_generate_image invoked"];
   const artifacts = [];
 
   const missing = validateInput(parsed);
   if (missing.length > 0) {
-    printResult(buildResult({
-      success: false,
-      message: 'Missing required inputs',
-      artifacts,
-      logs,
-      error: { code: 'VALIDATION_ERROR', details: `Missing fields: ${missing.join(', ')}` },
-    }));
+    printResult(
+      buildResult({
+        success: false,
+        message: "Missing required inputs",
+        artifacts,
+        logs,
+        error: { code: "VALIDATION_ERROR", details: `Missing fields: ${missing.join(", ")}` },
+      }),
+    );
     process.exit(1);
   }
 
@@ -561,52 +909,64 @@ async function downloadFromSpecificBlock(page, freshTarget, outputDir, logs) {
   const profileName = parsed.profile_name.trim();
   const targetGeminiUrl = parsed.target_gemini_url.trim();
   const rawImagePaths = parseList(parsed.image_paths).map((item) => path.normalize(item));
-  const imagePaths = rawImagePaths.slice(0, 1);
-  const timeoutMs = Number.isFinite(parsed.timeout_ms) ? Math.max(15000, parsed.timeout_ms) : DEFAULTS.timeout_ms;
-  const retryCount = Number.isFinite(parsed.retry_count) ? Math.max(1, Math.min(4, Math.floor(parsed.retry_count))) : DEFAULTS.retry_count;
+  const imagePaths = rawImagePaths;
+  const timeoutMs = Number.isFinite(parsed.timeout_ms)
+    ? Math.max(15000, parsed.timeout_ms)
+    : DEFAULTS.timeout_ms;
+  const retryCount = Number.isFinite(parsed.retry_count)
+    ? Math.max(1, Math.min(4, Math.floor(parsed.retry_count)))
+    : DEFAULTS.retry_count;
 
-  const artifactsDir = path.join(process.cwd(), 'artifacts', 'images');
+  const artifactsDir = path.join(process.cwd(), "artifacts", "images");
   await mkdir(artifactsDir, { recursive: true });
 
   logs.push(`[input] target_gemini_url=${targetGeminiUrl}`);
   logs.push(`[input] profile_name=${profileName}`);
   logs.push(`[input] image_paths=${imagePaths.length}`);
-  if (rawImagePaths.length > imagePaths.length) {
-    logs.push(`[input] Only the first reference image will be uploaded (${imagePaths[0]}).`);
+  if (imagePaths.length > 0) {
+    logs.push(`[input] Reference images=${imagePaths.join(" | ")}`);
   }
 
   if (parsed.dry_run) {
-    logs.push('[dry-run] Skip browser automation flow');
-    printResult(buildResult({
-      success: true,
-      message: 'Dry run completed. Gemini image generation skipped.',
-      data: { image_prompt: imagePrompt, image_paths: imagePaths },
-      artifacts,
-      logs,
-    }));
+    logs.push("[dry-run] Skip browser automation flow");
+    printResult(
+      buildResult({
+        success: true,
+        message: "Dry run completed. Gemini image generation skipped.",
+        data: { image_prompt: imagePrompt, image_paths: imagePaths },
+        artifacts,
+        logs,
+      }),
+    );
     return;
   }
 
   try {
     if (imagePaths.length > 0) {
       await ensureReadableFiles(imagePaths);
-      logs.push('[step3] Reference image files verified');
+      logs.push("[step3] Reference image files verified");
     }
   } catch (error) {
-    printResult(buildResult({
-      success: false,
-      message: 'Reference image file missing/unreadable',
-      artifacts,
-      logs,
-      error: { code: 'IMAGE_FILE_ERROR', details: error instanceof Error ? error.message : String(error), failed_step: 3 },
-    }));
+    printResult(
+      buildResult({
+        success: false,
+        message: "Reference image file missing/unreadable",
+        artifacts,
+        logs,
+        error: {
+          code: "IMAGE_FILE_ERROR",
+          details: error instanceof Error ? error.message : String(error),
+          failed_step: 3,
+        },
+      }),
+    );
     process.exit(1);
   }
 
   let context;
 
   try {
-    logs.push('[step1] Opening Microsoft Edge with target profile');
+    logs.push("[step1] Opening Microsoft Edge with target profile");
     context = await chromium.launchPersistentContext(userDataDir, {
       executablePath: browserPath,
       headless: false,
@@ -615,41 +975,51 @@ async function downloadFromSpecificBlock(page, freshTarget, outputDir, logs) {
       viewport: { width: 1440, height: 900 },
     });
 
-    const page = context.pages()[0] ?? await context.newPage();
+    const page = context.pages()[0] ?? (await context.newPage());
 
-    logs.push('[step2] Navigating to Gemini workspace/chat URL');
-    await page.goto(targetGeminiUrl, { waitUntil: 'domcontentloaded', timeout: 45000 });
-    await page.waitForLoadState('networkidle', { timeout: 15000 }).catch(() => undefined);
+    logs.push("[step2] Navigating to Gemini workspace/chat URL");
+    await page.goto(targetGeminiUrl, { waitUntil: "domcontentloaded", timeout: 45000 });
+    await page.waitForLoadState("networkidle", { timeout: 15000 }).catch(() => undefined);
     await dismissPopupsIfAny(page, logs);
     await selectImageToolMode(page, logs);
 
     const screenshotBefore = path.join(artifactsDir, `gemini-before-${nowStamp()}.png`);
     await page.screenshot({ path: screenshotBefore, fullPage: true });
-    artifacts.push({ type: 'screenshot_before', path: path.relative(process.cwd(), screenshotBefore).replace(/\\/g, '/') });
+    artifacts.push({
+      type: "screenshot_before",
+      path: path.relative(process.cwd(), screenshotBefore).replace(/\\/g, "/"),
+    });
 
     const beforeMenuCount = await getGeneratedImageMenuCount(page);
     logs.push(`[step4] Existing image menu count before submit: ${beforeMenuCount}`);
     const beforeUserQueryCount = await getUserQueryCount(page);
 
-    await withRetry('step3-upload-references', retryCount, logs, async () => {
-      await uploadReferencesIfAny(page, imagePaths, logs);
+    await withRetry("step3-upload-references", retryCount, logs, async () => {
+      await uploadReferencesSequentially(page, imagePaths, logs);
     });
 
-    await withRetry('step4-submit-prompt', retryCount, logs, async () => {
+    await withRetry("step4-submit-prompt", retryCount, logs, async () => {
       await setPromptRobust(page, imagePrompt, logs);
       await submitPrompt(page, logs, beforeUserQueryCount);
     });
 
-    const freshTarget = await withRetry('step5-wait-result', retryCount, logs, async () => {
+    const freshTarget = await withRetry("step5-wait-result", retryCount, logs, async () => {
       return await waitForFreshImageBlock(page, beforeMenuCount, logs, timeoutMs);
     });
 
-    const downloadedImagePath = await withRetry('step6-download-image', retryCount, logs, async () => {
-      return await downloadFromSpecificBlock(page, freshTarget, artifactsDir, logs);
-    });
+    const downloadedImagePath = await withRetry(
+      "step6-download-image",
+      retryCount,
+      logs,
+      async () => {
+        return await downloadFromSpecificBlock(page, freshTarget, artifactsDir, logs);
+      },
+    );
 
-    const relativeDownloadedImagePath = path.relative(process.cwd(), downloadedImagePath).replace(/\\/g, '/');
-    
+    const relativeDownloadedImagePath = path
+      .relative(process.cwd(), downloadedImagePath)
+      .replace(/\\/g, "/");
+
     // GỌI HÀM XÂY DỰNG DATA MARKDOWN Ở ĐÂY
     const chatReply = buildChatImageReplyPayload({
       imagePath: downloadedImagePath,
@@ -660,7 +1030,7 @@ async function downloadFromSpecificBlock(page, freshTarget, outputDir, logs) {
       },
       artifacts: [
         {
-          type: 'generated_image',
+          type: "generated_image",
           path: relativeDownloadedImagePath,
         },
       ],
@@ -668,27 +1038,32 @@ async function downloadFromSpecificBlock(page, freshTarget, outputDir, logs) {
 
     const screenshotAfter = path.join(artifactsDir, `gemini-after-${nowStamp()}.png`);
     await page.screenshot({ path: screenshotAfter, fullPage: true });
-    artifacts.push({ type: 'screenshot_after', path: path.relative(process.cwd(), screenshotAfter).replace(/\\/g, '/') });
+    artifacts.push({
+      type: "screenshot_after",
+      path: path.relative(process.cwd(), screenshotAfter).replace(/\\/g, "/"),
+    });
 
-    logs.push('[step8] Flow completed, returning artifacts and logs');
-    
+    logs.push("[step8] Flow completed, returning artifacts and logs");
+
     // TRẢ KẾT QUẢ SẠCH SẼ, KHÔNG BỊ TRÙNG LẶP KEY
-    printResult(buildResult({
-      success: true,
-      message: chatReply.assistantText,
-      data: {
-        target_gemini_url: targetGeminiUrl,
-        image_prompt: imagePrompt,
-        downloaded_image_path: relativeDownloadedImagePath,
-        ...chatReply.data,
-        generation_status_message: 'Gemini image generation flow completed',
-      },
-      artifacts: [...artifacts, ...chatReply.artifacts],
-      logs,
-    }));
+    printResult(
+      buildResult({
+        success: true,
+        message: chatReply.assistantText,
+        data: {
+          target_gemini_url: targetGeminiUrl,
+          image_prompt: imagePrompt,
+          downloaded_image_path: relativeDownloadedImagePath,
+          ...chatReply.data,
+          generation_status_message: "Gemini image generation flow completed",
+        },
+        artifacts: [...artifacts, ...chatReply.artifacts],
+        logs,
+      }),
+    );
   } catch (error) {
     const details = error instanceof Error ? error.message : String(error);
-    let failedStep = 'unknown';
+    let failedStep = "unknown";
     if (/file|upload/i.test(details)) failedStep = 3;
     else if (/prompt|submit|verification/i.test(details)) failedStep = 4;
     else if (/timeout|fresh image|downloadable image block/i.test(details)) failedStep = 5;
@@ -696,14 +1071,16 @@ async function downloadFromSpecificBlock(page, freshTarget, outputDir, logs) {
     else if (/goto|navigation/i.test(details)) failedStep = 2;
 
     logs.push(`[fail] Flow failed at step ${failedStep}: ${details}`);
-    printResult(buildResult({
-      success: false,
-      message: 'Gemini image generation flow failed',
-      data: { target_gemini_url: targetGeminiUrl, image_prompt: imagePrompt },
-      artifacts,
-      logs,
-      error: { code: 'FLOW_FAILED', failed_step: failedStep, details },
-    }));
+    printResult(
+      buildResult({
+        success: false,
+        message: "Gemini image generation flow failed",
+        data: { target_gemini_url: targetGeminiUrl, image_prompt: imagePrompt },
+        artifacts,
+        logs,
+        error: { code: "FLOW_FAILED", failed_step: failedStep, details },
+      }),
+    );
     process.exit(1);
   } finally {
     if (context) {

@@ -1,4 +1,5 @@
 export type ParsedAgentSessionKey = {
+  prefix: string;
   agentId: string;
   rest: string;
 };
@@ -20,7 +21,8 @@ export function parseAgentSessionKey(
   if (parts.length < 3) {
     return null;
   }
-  if (parts[0] !== "agent") {
+  const prefix = parts[0];
+  if (prefix !== "agent" && prefix !== "automation") {
     return null;
   }
   const agentId = parts[1]?.trim();
@@ -28,7 +30,7 @@ export function parseAgentSessionKey(
   if (!agentId || !rest) {
     return null;
   }
-  return { agentId, rest };
+  return { prefix, agentId, rest };
 }
 
 /**

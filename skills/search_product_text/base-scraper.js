@@ -32,6 +32,8 @@ const SEARCH_ENGINES = [
   },
 ];
 
+const MIN_SEARCH_ENGINE_MATCH_SCORE = 120;
+
 function normalizeUrlCandidate(rawHref) {
   if (!rawHref) return "";
   try {
@@ -214,6 +216,11 @@ function buildKeywordSignals(keyword, categoryHint = "") {
   if (normalizedKeyword.includes("2 tru")) addCategoryHint("2 tru");
   if (normalizedKeyword.includes("rua xe")) addCategoryHint("rua xe");
   if (normalizedKeyword.includes("xuong lam lop")) addCategoryHint("xuong lam lop");
+  if (normalizedKeyword.includes("lop")) addCategoryHint("xuong lam lop");
+  if (normalizedKeyword.includes("ra vao lop")) addCategoryHint("may ra vao lop");
+  if (normalizedKeyword.includes("lop xe con")) addCategoryHint("may ra vao lop");
+  if (normalizedKeyword.includes("cam bien ap suat lop")) addCategoryHint("may ra vao lop");
+  if (normalizedKeyword.includes("ap suat lop")) addCategoryHint("may ra vao lop");
   addCategoryHint(categoryHint);
 
   return {
@@ -496,18 +503,12 @@ export class BaseScraper {
       }
     }
 
-    if (rankedCandidates[0] && rankedCandidates[0].score > 0 && hasStrongKeywordMatch(rankedCandidates[0], keywordSignals)) {
+    if (
+      rankedCandidates[0] &&
+      rankedCandidates[0].score >= MIN_SEARCH_ENGINE_MATCH_SCORE &&
+      hasStrongKeywordMatch(rankedCandidates[0], keywordSignals)
+    ) {
       return rankedCandidates[0].url;
-    }
-
-    const fallbackAnchors = await page.locator("a[href]").evaluateAll((nodes) =>
-      nodes.map((node) => node.getAttribute("href") || ""),
-    );
-    for (const href of fallbackAnchors) {
-      const normalized = normalizeUrlCandidate(href);
-      if (isProductUrl(normalized, this.targetSite)) {
-        return normalized;
-      }
     }
 
     throw new Error(`No ${engineName} result matched target site ${this.targetSite}`);

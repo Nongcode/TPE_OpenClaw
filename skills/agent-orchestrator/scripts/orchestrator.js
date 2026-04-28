@@ -1,6 +1,8 @@
+const fs = require("fs");
 const { discoverRegistry } = require("./registry");
 const { createPlan } = require("./planner");
 const { executePlan } = require("./executor");
+const { normalizeText } = require("./common");
 
 function parseArgs(argv) {
   const options = {
@@ -15,6 +17,7 @@ function parseArgs(argv) {
     list: false,
     openClawHome: null,
     manifestDir: null,
+    messageFile: null,
     productKeyword: null,
     targetSite: "uptek.vn",
     artifactsDir: null,
@@ -59,6 +62,11 @@ function parseArgs(argv) {
     }
     if (token === "--manifest-dir") {
       options.manifestDir = argv[index + 1] || null;
+      index += 1;
+      continue;
+    }
+    if (token === "--message-file") {
+      options.messageFile = argv[index + 1] || null;
       index += 1;
       continue;
     }
@@ -111,6 +119,17 @@ function parseArgs(argv) {
   options.target = positional[0] || null;
   options.message = options.file ? require("fs").readFileSync(options.file, "utf8").trim() : positional.slice(1).join(" ").trim();
   return options;
+}
+
+function loadMessageFromFile(messageFile) {
+  const filePath = String(messageFile || "").trim();
+  if (!filePath) {
+    throw new Error("Missing --message-file path.");
+  }
+  if (!fs.existsSync(filePath)) {
+    throw new Error(`Message file not found: ${filePath}`);
+  }
+  return fs.readFileSync(filePath, "utf8").replace(/^\uFEFF/, "").trim();
 }
 
 function printRegistry(registry, asJson) {
@@ -171,8 +190,16 @@ async function runCli(argv = process.argv.slice(2)) {
     return;
   }
 
+  if (options.messageFile) {
+    options.message = loadMessageFromFile(options.messageFile);
+  }
+
   if (!options.message) {
     throw new Error("Missing task message.");
+  }
+  const normalizedMessage = normalizeText(options.message);
+  if (!normalizedMessage || normalizedMessage.includes("[task_text]") || normalizedMessage.includes("<task_text>")) {
+    throw new Error("Task message is still a placeholder. Replace it with the real user brief before running the orchestrator.");
   }
   if (options.mode === "direct" && !options.target) {
     throw new Error("Missing target agent.");

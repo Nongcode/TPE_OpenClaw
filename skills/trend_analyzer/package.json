@@ -1,0 +1,10 @@
+{
+  "name": "trend-analyzer",
+  "version": "1.0.0",
+  "private": true,
+  "type": "commonjs",
+  "dependencies": {
+    "google-trends-api": "^4.9.2",
+    "sharp": "^0.34.5"
+  }
+}

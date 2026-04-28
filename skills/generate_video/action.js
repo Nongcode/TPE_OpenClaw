@@ -140,6 +140,34 @@ function normalizeText(text) {
     .trim();
 }
 
+function stripDiacritics(text) {
+  return String(text || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "");
+}
+
+function basenameVariants(filePath) {
+  const base = path.basename(String(filePath || "")).trim();
+  if (!base) return [];
+  const stem = base.replace(/\.[^.]+$/, "");
+  return [base, stem].filter(Boolean);
+}
+
+function extractQuotaResetHint(details) {
+  const text = normalizeText(details);
+  const patterns = [
+    /đợi đến\s+([0-9]{1,2}:[0-9]{2}\s+[0-9]{1,2}\s+thg\s+[0-9]{1,2})/i,
+    /wait until\s+([^\n.]+)/i,
+  ];
+  for (const pattern of patterns) {
+    const match = text.match(pattern);
+    if (match?.[1]) {
+      return match[1].trim();
+    }
+  }
+  return "";
+}
+
 async function withRetry(taskName, tries, logs, fn) {
   const total = Math.max(1, Math.floor(tries || 1));
   let latestError = null;
@@ -296,31 +324,78 @@ async function uploadReferencesIfAny(page, imagePaths, logs) {
     return;
   }
 
+  await ensureReadableFiles(imagePaths);
+  logs.push(`[step2] Verified ${imagePaths.length} reference image(s) exist on disk before upload`);
+
+  const waitForUploadAcknowledgement = async () => {
+    const startedAt = Date.now();
+    const probeNames = imagePaths.flatMap((filePath) => basenameVariants(filePath));
+
+    while (Date.now() - startedAt < 15000) {
+      const bodyText = normalizeText(
+        await page.locator("body").innerText({ timeout: 1000 }).catch(() => ""),
+      );
+      const folded = stripDiacritics(bodyText).toLowerCase();
+
+      if (folded.includes("tep trong") || folded.includes("empty file") || folded.includes("file is empty")) {
+        throw new Error("UPLOAD_EMPTY_FILE: Gemini reported the uploaded reference file is empty");
+      }
+
+      const hasReferenceName = probeNames.some((name) => {
+        const foldedName = stripDiacritics(name).toLowerCase();
+        return foldedName && folded.includes(foldedName);
+      });
+      if (hasReferenceName) {
+        logs.push("[step2] Gemini acknowledged the uploaded reference image by file name");
+        return;
+      }
+
+      const previewSignals = [
+        'button[aria-label*="remove" i]',
+        'button[aria-label*="xóa" i]',
+        'button[aria-label*="delete" i]',
+        'img[src^="blob:"]',
+        'img[src^="data:"]',
+        '[role="listitem"] img',
+      ];
+      for (const selector of previewSignals) {
+        const count = await page.locator(selector).count().catch(() => 0);
+        if (count > 0) {
+          logs.push(`[step2] Gemini showed attachment preview via ${selector}`);
+          return;
+        }
+      }
+
+      await page.waitForTimeout(500);
+    }
+
+    throw new Error("UPLOAD_NOT_ACKNOWLEDGED: Gemini did not confirm the uploaded reference image");
+  };
+
   const uploadViaAnyFileInput = async (label) => {
     const fileInputs = page.locator('input[type="file"]');
     const count = await fileInputs.count().catch(() => 0);
-    for (let index = 0; index < count; index += 1) {
+    for (let index = count - 1; index >= 0; index -= 1) {
       try {
-        await fileInputs.nth(index).setInputFiles(imagePaths, { timeout: 15000 });
+        const input = fileInputs.nth(index);
+        const accept = ((await input.getAttribute("accept").catch(() => "")) || "").toLowerCase();
+        if (accept && !accept.includes("image")) {
+          continue;
+        }
+        await input.setInputFiles(imagePaths, { timeout: 15000 });
+        await waitForUploadAcknowledgement();
         logs.push(
           `[step2] Uploaded ${imagePaths.length} reference image(s) via ${label} file input #${index + 1}`,
         );
         return true;
-      } catch {}
+      } catch (error) {
+        logs.push(
+          `[step2] File input #${index + 1} upload failed via ${label}: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
     }
     return false;
   };
-
-  const directInput = page.locator('input[type="file"]').first();
-  if (await uploadViaAnyFileInput("direct")) {
-    return;
-  }
-  try {
-    await directInput.waitFor({ state: "attached", timeout: 1500 });
-    await directInput.setInputFiles(imagePaths, { timeout: 15000 });
-    logs.push(`[step2] Uploaded ${imagePaths.length} reference image(s) via direct file input`);
-    return;
-  } catch {}
 
   const visibleChooserSelectors = [
     'button[aria-label^="T\u1ea3i t\u1ec7p l\u00ean"]',
@@ -347,9 +422,14 @@ async function uploadReferencesIfAny(page, imagePaths, logs) {
       await trigger.click({ force: true, timeout: 5000 });
       const chooser = await chooserPromise;
       await chooser.setFiles(imagePaths);
+      await waitForUploadAcknowledgement();
       logs.push(`[step2] Uploaded ${imagePaths.length} reference image(s) via visible file chooser ${selector}`);
       return;
-    } catch {}
+    } catch (error) {
+      logs.push(
+        `[step2] Visible chooser ${selector} failed: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
   }
 
   const menuSelectors = [
@@ -397,12 +477,15 @@ async function uploadReferencesIfAny(page, imagePaths, logs) {
       await trigger.click({ force: true, timeout: 5000 });
       const chooser = await chooserPromise;
       await chooser.setFiles(imagePaths);
+      await waitForUploadAcknowledgement();
       logs.push(`[step2] Uploaded ${imagePaths.length} reference image(s) via file chooser ${selector}`);
       return;
-    } catch {}
+    } catch (error) {
+      logs.push(`[step2] Chooser ${selector} failed: ${error instanceof Error ? error.message : String(error)}`);
+    }
   }
 
-  if (await uploadViaAnyFileInput("delayed")) {
+  if (await uploadViaAnyFileInput("fallback")) {
     return;
   }
 
@@ -492,23 +575,21 @@ async function getVideoMenuCount(page) {
 async function detectQuotaMessage(page) {
   const messageLocators = [
     page.locator('[role="alert"]').last(),
+    page.locator('[aria-live="assertive"]').last(),
     page.locator('[aria-live="polite"]').last(),
-    page.locator('message-content').last(),
-    page.locator('.model-response-text').last(),
-    page.locator('model-response').last(),
-    page.locator('body').first(),
   ];
 
   for (const locator of messageLocators) {
     try {
       const text = await locator.innerText({ timeout: 500 });
       const normalized = normalizeText(text).toLowerCase();
+      const folded = stripDiacritics(normalized);
       if (!normalized) continue;
 
       const limitHints = ['tối đa', 'giới hạn', 'hết lượt', 'limit', 'quota', 'reached', 'không thể tạo thêm'];
       const mediaHints = ['video', 'veo'];
-      const hasLimit = limitHints.some((kw) => normalized.includes(kw));
-      const hasMedia = mediaHints.some((kw) => normalized.includes(kw));
+      const hasLimit = limitHints.some((kw) => folded.includes(kw));
+      const hasMedia = mediaHints.some((kw) => folded.includes(kw));
       if (hasLimit && hasMedia) return text;
     } catch {}
   }
@@ -523,22 +604,18 @@ async function detectVideoQuotaLimit(page) {
     if (!normalized) {
       return null;
     }
-    const folded = normalized.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+    const folded = stripDiacritics(normalized);
     const limitHints = [
-      'toi da',
       'gioi han',
       'het luot',
-      'limit',
+      'daily limit',
       'quota',
-      'reached',
+      'limit reached',
+      'youve reached your limit',
+      'you have reached your limit',
       'khong the tao them',
-      'ngay mai',
-      'tomorrow',
       'wait until tomorrow',
-      'thu lai vao ngay mai',
-      'quay lai vao ngay mai',
-      '3 video',
-      'three videos',
+      'try again tomorrow',
     ];
     const mediaHints = ['video', 'veo'];
     const hasLimit = limitHints.some((kw) => folded.includes(kw) || normalized.includes(kw));
@@ -787,6 +864,19 @@ async function downloadFreshVideo(page, freshTarget, outputDir, logs) {
     }));
   } catch (error) {
     const details = error instanceof Error ? error.message : String(error);
+    if (details.includes("QUOTA_REACHED")) {
+      const resetHint = extractQuotaResetHint(details);
+      logs.push(`[quota] Gemini Veo quota reached${resetHint ? `, available again around ${resetHint}` : ""}`);
+      printResult(buildResult({
+        success: false,
+        message: resetHint
+          ? `You have reached your daily limit for Veo video generation. Try again around ${resetHint}.`
+          : 'You have reached your daily limit for Veo video generation.',
+        logs,
+        error: { code: 'QUOTA_EXCEEDED', details },
+      }));
+      process.exit(0);
+    }
     logs.push(`[fail] Flow failed: ${details}`);
     printResult(buildResult({
       success: false,

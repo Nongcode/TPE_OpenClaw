@@ -9,10 +9,10 @@ function extractQuotedKeyword(source) {
 
 function extractKeywordAfterProductPhrase(source) {
   const patterns = [
-    /sản phẩm\s+(.+?)(?=$|[.?!,\n])/iu,
-    /san pham\s+(.+?)(?=$|[.?!,\n])/iu,
-    /về\s+(.+?)(?=$|[.?!,\n])/iu,
-    /ve\s+(.+?)(?=$|[.?!,\n])/iu,
+    /sản phẩm\s+(.+?)(?=$|[.?!\n])/iu,
+    /san pham\s+(.+?)(?=$|[.?!\n])/iu,
+    /về\s+(.+?)(?=$|[.?!\n])/iu,
+    /ve\s+(.+?)(?=$|[.?!\n])/iu,
   ];
 
   for (const pattern of patterns) {
@@ -38,6 +38,120 @@ function resolveKeyword(step, plan, options) {
 }
 
 function runProductResearch(step, plan, options = {}) {
+function normalizeTextField(value) {
+  return String(value || "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function normalizeMultilineField(value) {
+  return String(value || "")
+    .replace(/\r/g, "")
+    .split("\n")
+    .map((line) => normalizeTextField(line))
+    .filter(Boolean)
+    .join("\n");
+}
+
+function normalizeCategoryList(data) {
+  const candidates = [];
+
+  const categoryObject = data?.category;
+  if (categoryObject && typeof categoryObject === "object" && !Array.isArray(categoryObject)) {
+    const objectName = normalizeTextField(categoryObject?.name || categoryObject?.label);
+    if (objectName) {
+      candidates.push({
+        id: normalizeTextField(categoryObject?.id),
+        name: objectName,
+        url: normalizeTextField(categoryObject?.url),
+      });
+    }
+  }
+
+  if (Array.isArray(data?.categories)) {
+    candidates.push(
+      ...data.categories.map((item) => {
+        if (typeof item === "string") {
+          return { id: "", name: normalizeTextField(item), url: "" };
+        }
+        return {
+          id: normalizeTextField(item?.id),
+          name: normalizeTextField(item?.name || item?.label),
+          url: normalizeTextField(item?.url),
+        };
+      }),
+    );
+  }
+  const singleCategory =
+    typeof data?.category === "string" ? normalizeTextField(data.category) : "";
+  if (singleCategory) {
+    candidates.push({ id: "", name: singleCategory, url: "" });
+  }
+
+  const seen = new Set();
+  return candidates
+    .filter((item) => item.name)
+    .filter((item) => {
+      const key = item.name.toLowerCase();
+      if (seen.has(key)) {
+        return false;
+      }
+      seen.add(key);
+      return true;
+    });
+}
+
+function normalizeImages(data) {
+  const source = Array.isArray(data?.images) ? data.images : [];
+  const normalized = source
+    .map((item, index) => {
+      const filePath = normalizeTextField(item?.file_path || item?.path || item?.url);
+      if (!filePath) {
+        return null;
+      }
+      const fileName = normalizeTextField(item?.file_name) || path.basename(filePath);
+      return {
+        file_path: filePath,
+        file_name: fileName,
+        is_primary: Boolean(item?.is_primary) || index === 0,
+        source: normalizeTextField(item?.source) || "search_product_text",
+      };
+    })
+    .filter(Boolean);
+
+  if (normalized.length > 0) {
+    normalized[0].is_primary = true;
+  }
+  return normalized;
+}
+
+function normalizeResearchPayload(payload, keyword, targetSite) {
+  const data = payload?.data || {};
+  const productName = normalizeTextField(data.product_name) || normalizeTextField(keyword);
+  const productUrl = normalizeTextField(data.product_url || data.source_url);
+  const categories = normalizeCategoryList(data);
+  const category = normalizeTextField(data.category) || categories[0]?.name || "";
+  const images = normalizeImages(data);
+  const imageDownloadDir = normalizeTextField(data.image_download_dir);
+
+  return {
+    ...payload,
+    data: {
+      ...data,
+      product_name: productName,
+      product_url: productUrl,
+      source_url: normalizeTextField(data.source_url || productUrl),
+      category,
+      categories,
+      specifications_text: normalizeMultilineField(data.specifications_text),
+      long_description: normalizeMultilineField(data.long_description),
+      image_download_dir: imageDownloadDir,
+      images,
+      primary_image: images[0] || null,
+      target_site: normalizeTextField(data.target_site || targetSite),
+    },
+  };
+}
   const keyword = resolveKeyword(step, plan, options);
   if (!keyword) {
     throw new Error("Missing product keyword for product research.");
@@ -81,12 +195,14 @@ function runProductResearch(step, plan, options = {}) {
         throw new Error(payload?.error?.message || "search_product_text failed.");
       }
 
-      return {
+          const normalizedPayload = normalizeResearchPayload(payload, keyword, targetSite);
+
+          return {
         command: `${process.execPath} ${scriptPath} --keyword \"${keyword}\" --target_site \"${targetSite}\"`,
         targetSite,
         keyword,
         researchAttempt: attempt,
-        ...payload,
+            ...normalizedPayload,
       };
     } catch (error) {
       lastError = error;

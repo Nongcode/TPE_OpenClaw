@@ -1,0 +1,63 @@
+{
+  "agents": {
+    "list": [
+      {
+        "id": "pho_phong",
+        "workspace": "C:\\Users\\PHAMDUCLONG\\.openclaw\\workspace_phophong",
+        "model": "openai-codex/gpt-5.4",
+        "skills": [
+          "agent-orchestrator-test",
+          "search-product-text",
+          "schedule-facebook-post",
+          "facebook-edit-post"
+        ],
+        "subagents": {
+          "allowAgents": [
+            "nv_content",
+            "nv_prompt",
+            "nv_media"
+          ]
+        }
+      },
+      {
+        "id": "nv_content",
+        "workspace": "C:\\Users\\PHAMDUCLONG\\.openclaw\\workspace_content",
+        "model": "openai-codex/gpt-5.4",
+        "skills": [
+          "search-product-text",
+          "trend-analyzer"
+        ],
+        "subagents": {
+          "allowAgents": [
+            "pho_phong"
+          ]
+        }
+      },
+      {
+        "id": "nv_prompt",
+        "workspace": "C:\\Users\\PHAMDUCLONG\\.openclaw\\workspace_prompt",
+        "model": "openai-codex/gpt-5.4",
+        "skills": [],
+        "subagents": {
+          "allowAgents": [
+            "pho_phong"
+          ]
+        }
+      },
+      {
+        "id": "nv_media",
+        "workspace": "C:\\Users\\PHAMDUCLONG\\.openclaw\\workspace_media",
+        "model": "openai-codex/gpt-5.4",
+        "skills": [
+          "gemini-generate-image",
+          "generate-veo-video"
+        ],
+        "subagents": {
+          "allowAgents": [
+            "pho_phong"
+          ]
+        }
+      }
+    ]
+  }
+}
