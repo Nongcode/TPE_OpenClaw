@@ -28,11 +28,9 @@ File JSON can co toi thieu:
 ```json
 {
   "image_prompt": "...",
-  "image_paths": [
-    "C:/path/to/product-image.png",
-    "C:/path/to/logo.png"
-  ],
+  "image_paths": ["C:/path/to/product-image.png", "C:/path/to/logo.png"],
   "output_dir": "C:/Users/Administrator/.openclaw/workspace_media/artifacts/images",
+  "automation_mode": "playwright",
   "dry_run": false
 }
 ```
@@ -50,5 +48,6 @@ https://labs.google/fx/vi/tools/flow/project/64c7c243-037d-4136-a867-4ba4d834605
 - Neu workflow muon luu anh o thu muc co dinh, phai truyen ro `output_dir`.
 - Mac dinh tai ban `2k` tu Flow.
 - Tren Windows/PowerShell, uu tien `--input_file`.
+- Mac dinh dung Playwright deterministic trong `action.js`. Khong dung `browser-use`/Ollama cho Flow vi cham va khong on dinh voi UI thuc te.
 - Khong sua file skill trong luc dang chay workflow thong thuong.
 - Neu tool fail, bao lai loi that tu output cua tool.

@@ -1023,6 +1023,14 @@ IMAGE_PROMPT_END
 GENERATED_IMAGE_PATH: D:\\output\\test.png
 USED_PRODUCT_IMAGE: D:\\images\\product.png
 USED_LOGO_PATHS: C:\\logos\\logo-a.png ; C:\\logos\\logo-b.png
+COMPANY_GALLERY_SYNCED: true
+COMPANY_GALLERY_PATH: D:\\UpTek_FE\\backend\\storage\\images\\UpTek\\Phong_Marketing\\test.png
+COMPANY_GALLERY_COMPANY_ID: UpTek
+COMPANY_GALLERY_DEPARTMENT_ID: Phong_Marketing
+COMPANY_GALLERY_PRODUCT_MODEL: GL-3.2-2E
+COMPANY_GALLERY_URL: /storage/images/UpTek/Phong_Marketing/test.png
+COMPANY_GALLERY_IMAGE_ID: img_1
+COMPANY_GALLERY_MEDIA_FILE_ID: media_1
 
 RUI_RO: khong
 DE_XUAT_BUOC_TIEP: cho duyet
@@ -1033,6 +1041,13 @@ DE_XUAT_BUOC_TIEP: cho duyet
   assert.equal(result.mediaType, "image");
   assert.equal(result.usedProductImage, "D:\\images\\product.png");
   assert.deepEqual(result.usedLogoPaths, ["C:\\logos\\logo-a.png", "C:\\logos\\logo-b.png"]);
+  assert.equal(result.companyGallerySynced, true);
+  assert.equal(result.companyGalleryCompanyId, "UpTek");
+  assert.equal(result.companyGalleryDepartmentId, "Phong_Marketing");
+  assert.equal(result.companyGalleryProductModel, "GL-3.2-2E");
+  assert.equal(result.companyGalleryUrl, "/storage/images/UpTek/Phong_Marketing/test.png");
+  assert.equal(result.companyGalleryImageId, "img_1");
+  assert.equal(result.companyGalleryMediaFileId, "media_1");
 });
 
 test("parseImageResult repairs malformed .openclaw paths from nv_media reply", () => {
@@ -1063,6 +1078,36 @@ USED_LOGO_PATHS: C:\\Users\\Administrator.openclaw\\assets\\logos\\logo.png
   assert.deepEqual(result.usedLogoPaths, [
     "C:\\Users\\Administrator\\.openclaw\\assets\\logos\\logo.png",
   ]);
+});
+
+test("parseImageResult keeps empty gallery markers empty when sync fails", () => {
+  const reply = `
+WORKFLOW_META:
+workflow_id: wf_test
+step_id: step_03_media
+
+KET_QUA:
+IMAGE_PROMPT_BEGIN
+Anh quang cao may nang dien
+IMAGE_PROMPT_END
+GENERATED_IMAGE_PATH: D:\\output\\test.png
+USED_PRODUCT_IMAGE: D:\\images\\product.png
+USED_LOGO_PATHS: C:\\logos\\logo-a.png
+COMPANY_GALLERY_SYNCED: false
+COMPANY_GALLERY_PATH:
+COMPANY_GALLERY_URL:
+COMPANY_GALLERY_IMAGE_ID:
+COMPANY_GALLERY_MEDIA_FILE_ID:
+
+RUI_RO:
+Gallery sync failed do PayloadTooLargeError.
+`;
+  const result = mediaAgent.parseImageResult(reply);
+  assert.equal(result.companyGallerySynced, false);
+  assert.equal(result.companyGalleryPath, "");
+  assert.equal(result.companyGalleryUrl, "");
+  assert.equal(result.companyGalleryImageId, "");
+  assert.equal(result.companyGalleryMediaFileId, "");
 });
 
 test("parseVideoResult parses valid reply", () => {
@@ -1135,7 +1180,9 @@ test("buildMediaGeneratePrompt includes prompt package and references", () => {
   assert.ok(prompt.includes("D:\\images\\product.png"));
   assert.ok(prompt.includes("C:\\logos\\logo.png"));
   assert.ok(prompt.includes("khong phai background-only"));
-  assert.ok(prompt.includes("skills/gemini_generate_image/action.js"));
+  assert.ok(prompt.includes("skills/generate_flow_image/action.js"));
+  assert.ok(prompt.includes('download_resolution="2k"'));
+  assert.ok(!prompt.includes("skills/gemini_generate_image/action.js"));
 });
 
 test("buildVideoGeneratePrompt uses absolute veo action path and required references", () => {
@@ -1247,6 +1294,8 @@ test("buildMediaRevisePrompt includes revised prompt package", () => {
   assert.ok(prompt.includes("Prompt moi"));
   assert.ok(prompt.includes("D:\\images\\product.png"));
   assert.ok(prompt.includes("C:\\logos\\logo.png"));
+  assert.ok(prompt.includes("generate_flow_image"));
+  assert.ok(!prompt.includes("skills/gemini_generate_image/action.js"));
 });
 
 test("parseMediaPromptRequest extracts media-owned prompt brief", () => {

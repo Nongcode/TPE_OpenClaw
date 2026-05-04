@@ -15,6 +15,8 @@ const memory = require("./memory");
 const REPO_ROOT = path.resolve(__dirname, "..", "..", "..");
 const DEFAULT_LOGO_DIR = "C:/Users/Administrator/.openclaw/assets/logos";
 const DEFAULT_LOGO_PATH = `${DEFAULT_LOGO_DIR}/logo.png`;
+const FLOW_IMAGE_PROJECT_URL =
+  "https://labs.google/fx/vi/tools/flow/project/a6bfa516-4c6c-4628-a210-561b3337a034";
 
 function extractBlock(source, startMarker, endMarker) {
   const text = String(source || "");
@@ -122,7 +124,7 @@ function buildMediaSystemPrompt(agentId, openClawHome) {
     "- Khong publish",
     "- Khong gia lap duong dan file",
     "- Neu skill tao anh/video tra ve loi, phai noi ro loi that tu tool",
-    "- Khi goi gemini_generate_image tren Windows/PowerShell, uu tien tao file JSON tam va goi action.js bang tham so --input_file.",
+    "- Khi goi generate_flow_image tren Windows/PowerShell, uu tien tao file JSON tam va goi action.js bang tham so --input_file.",
     "- Khong duoc thu nhieu cach goi lung tung neu da co cach goi --input_file hoat dong.",
     "- Khong doc lai noi dung SKILL.md ra chat, khong ke lai command thu nghiem, khong dump log terminal dai dong vao cau tra loi workflow.",
     "- Khong duoc tu sua file code/skill trong luc dang thuc thi media thong thuong. Neu phat hien loi he thong, dung lai va bao dung loi that thay vi tu hot-fix trong lane.",
@@ -259,7 +261,7 @@ function buildMediaGeneratePrompt(params) {
   const agentId = "nv_media";
   const systemPrompt = buildMediaSystemPrompt(agentId, openClawHome);
   const guidelineSection = memory.buildWorkflowGuidelinesPromptSection(state.global_guidelines || []);
-  const imageActionPath = path.join(REPO_ROOT, "skills", "gemini_generate_image", "action.js").replace(/\\/g, "/");
+  const imageActionPath = path.join(REPO_ROOT, "skills", "generate_flow_image", "action.js").replace(/\\/g, "/");
 
   const productImagePath = state.content?.primaryProductImage || "";
   const mediaOutputDir = resolveMediaOutputDir(openClawHome);
@@ -285,8 +287,8 @@ function buildMediaGeneratePrompt(params) {
 
   const imageInstruction = [
     "NEU CAN TAO ANH:",
-    "- Goi skill gemini_generate_image trong lane cua ban.",
-    `- Tren Windows/PowerShell, tao 1 file JSON tam chua image_prompt + image_paths + output_dir roi goi: node ${imageActionPath} --input_file <duong_dan_file_json>.`,
+    "- Goi skill generate_flow_image trong lane cua ban. Khong dung gemini_generate_image nua.",
+    `- Tren Windows/PowerShell, tao 1 file JSON tam chua target_gemini_url=\"${FLOW_IMAGE_PROJECT_URL}\" + image_prompt + image_paths + output_dir + download_resolution=\"2k\" roi goi: node ${imageActionPath} --input_file <duong_dan_file_json>.`,
     "- Dung DUNG IMAGE_PROMPT_DUOC_GIAO, khong tu y doi nghia.",
     "- image_paths BAT BUOC gom: [anh san pham goc, ...tat ca logo cong ty].",
     `- output_dir BAT BUOC la: ${mediaOutputDir}. Khong duoc de tool tu suy ra theo cwd.`,
@@ -300,6 +302,11 @@ function buildMediaGeneratePrompt(params) {
     "GENERATED_IMAGE_PATH: <duong dan anh quang cao that vua tao>",
     "USED_PRODUCT_IMAGE: <duong dan anh san pham goc da truyen vao skill>",
     "USED_LOGO_PATHS: <danh sach logo da truyen, ngan cach boi ;>",
+    "COMPANY_GALLERY_SYNCED: <true/false neu tool tra ve>",
+    "COMPANY_GALLERY_PATH: <company_gallery_path neu co>",
+    "COMPANY_GALLERY_URL: <company_gallery_url neu co>",
+    "COMPANY_GALLERY_IMAGE_ID: <company_gallery_image_id neu co>",
+    "COMPANY_GALLERY_MEDIA_FILE_ID: <company_gallery_media_file_id neu co>",
   ].join("\n");
 
   const videoInstruction = [
@@ -453,6 +460,7 @@ function buildMediaRevisePrompt(params) {
     `User yeu cau sua lai ${isBoth ? "anh va video" : isVideo ? "video" : "anh"}.`,
     "Hay thuc thi lai media theo dung prompt package da duoc giao va sua theo nhan xet cua sep.",
     "Khong duoc bo qua reference product image. Khi tao anh, khong duoc bo qua logo paths.",
+    "Khi tao anh, bat buoc goi skill generate_flow_image. Khong dung gemini_generate_image nua.",
     `Khi tao anh, output_dir BAT BUOC la: ${mediaOutputDir}.`,
     "",
     markerInstructions,
@@ -494,18 +502,38 @@ function parseImageResult(reply) {
   };
 
   const extractField = (source, label) => {
-    const match = source.match(new RegExp(`${label}\\s*:\\s*(.+)`, "i"));
-    return match?.[1]?.trim() || "";
+    const match = source.match(new RegExp(`^\\s*${label}\\s*:\\s*([^\\r\\n]*)`, "im"));
+    const value = match?.[1]?.trim() || "";
+    return /^[A-Z0-9_]+:\s*$/i.test(value) ? "" : value;
+  };
+  const extractBooleanField = (source, label) => {
+    const value = extractField(source, label).toLowerCase();
+    if (["true", "1", "yes", "co", "có", "synced"].includes(value)) return true;
+    if (["false", "0", "no", "khong", "không", "null", "none"].includes(value)) return false;
+    return false;
   };
 
-  const extractFirstExistingPath = (source, extensions) => {
+  const extractFirstExistingPath = (source, extensions, excludedPaths = []) => {
+    const excluded = new Set(
+      excludedPaths
+        .map((item) => normalizeAgentReportedPath(item))
+        .filter(Boolean)
+        .map((item) => path.resolve(item).replace(/\\/g, "/").toLowerCase()),
+    );
     // Match cả backslash (C:\...) lẫn forward slash (C:/...) — agent hay trả cả 2 dạng
     const backslashMatches = source.match(/[A-Za-z]:\\[^\r\n"]+/g) || [];
     const forwardSlashMatches = source.match(/[A-Za-z]:\/[^\r\n"]+/g) || [];
     const repoMatches = source.match(/artifacts\/[^\r\n"]+/g) || [];
     const candidates = [...backslashMatches, ...forwardSlashMatches, ...repoMatches]
       .map((item) => normalizeAgentReportedPath(item.trim().replace(/[`"'.,]+$/g, "")))
-      .filter(Boolean);
+      .filter(Boolean)
+      .filter((item) => {
+        const normalized = path.resolve(item).replace(/\\/g, "/").toLowerCase();
+        if (excluded.has(normalized)) return false;
+        if (normalized.includes("/workspace_content/artifacts/references/")) return false;
+        if (normalized.includes("/.openclaw/assets/logos/")) return false;
+        return true;
+      });
     for (const candidate of candidates) {
       const ext = path.extname(candidate).toLowerCase();
       if (extensions.length > 0 && !extensions.includes(ext)) continue;
@@ -537,6 +565,14 @@ function parseImageResult(reply) {
     .map((item) => item.trim())
     .filter(Boolean),
   );
+  const companyGallerySynced = extractBooleanField(text, "COMPANY_GALLERY_SYNCED");
+  const companyGalleryPath = normalizeAgentReportedPath(extractField(text, "COMPANY_GALLERY_PATH"));
+  const companyGalleryCompanyId = extractField(text, "COMPANY_GALLERY_COMPANY_ID");
+  const companyGalleryDepartmentId = extractField(text, "COMPANY_GALLERY_DEPARTMENT_ID");
+  const companyGalleryProductModel = extractField(text, "COMPANY_GALLERY_PRODUCT_MODEL");
+  const companyGalleryUrl = extractField(text, "COMPANY_GALLERY_URL");
+  const companyGalleryImageId = extractField(text, "COMPANY_GALLERY_IMAGE_ID");
+  const companyGalleryMediaFileId = extractField(text, "COMPANY_GALLERY_MEDIA_FILE_ID");
 
   // Ưu tiên extractField, nếu chưa có thì scan toàn bộ reply
   let generatedImagePath = extractField(text, "GENERATED_IMAGE_PATH");
@@ -547,7 +583,10 @@ function parseImageResult(reply) {
   } else if (generatedImagePath) {
     generatedImagePath = path.resolve(generatedImagePath);
   } else {
-    generatedImagePath = extractFirstExistingPath(text, [".png", ".jpg", ".jpeg", ".webp"]);
+    generatedImagePath = extractFirstExistingPath(text, [".png", ".jpg", ".jpeg", ".webp"], [
+      usedProductImage,
+      ...usedLogoPaths,
+    ]);
     if (isTransientGeneratedImagePath(generatedImagePath)) {
       generatedImagePath = "";
     }
@@ -567,6 +606,14 @@ function parseImageResult(reply) {
     mediaType: "image",
     usedProductImage,
     usedLogoPaths,
+    companyGallerySynced,
+    companyGalleryPath,
+    companyGalleryCompanyId,
+    companyGalleryDepartmentId,
+    companyGalleryProductModel,
+    companyGalleryUrl,
+    companyGalleryImageId,
+    companyGalleryMediaFileId,
     reply: text,
   };
 }
@@ -629,6 +676,14 @@ function parseMediaResult(reply, mediaType) {
       mediaType: "both",
       usedProductImage: imageResult.usedProductImage || videoResult.usedProductImage,
       usedLogoPaths: [...new Set([...(imageResult.usedLogoPaths || []), ...(videoResult.usedLogoPaths || [])])],
+      companyGallerySynced: imageResult.companyGallerySynced,
+      companyGalleryPath: imageResult.companyGalleryPath,
+      companyGalleryCompanyId: imageResult.companyGalleryCompanyId,
+      companyGalleryDepartmentId: imageResult.companyGalleryDepartmentId,
+      companyGalleryProductModel: imageResult.companyGalleryProductModel,
+      companyGalleryUrl: imageResult.companyGalleryUrl,
+      companyGalleryImageId: imageResult.companyGalleryImageId,
+      companyGalleryMediaFileId: imageResult.companyGalleryMediaFileId,
       reply: String(reply || "").trim(),
     };
   }

@@ -1,4 +1,4 @@
-﻿import { createHash } from "node:crypto";
+import { createHash } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
 import { access, mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
@@ -7,7 +7,7 @@ import { buildChatImageReplyPayload } from "../shared/chat-image-result.js";
 import { publishGeneratedImageToUpTekGallery } from "../shared/uptek-gallery-publisher.js";
 
 const FLOW_PROJECT_URL =
-  "https://labs.google/fx/vi/tools/flow/project/a6bfa516-4c6c-4628-a210-561b3337a034";
+  "https://labs.google/fx/tools/flow/project/0049461b-a587-4c3d-ba90-464aa0f51336";
 
 const DEFAULTS = {
   browser_path: "C:/Program Files/CocCoc/Browser/Application/browser.exe",
@@ -27,9 +27,7 @@ const DEFAULTS = {
 };
 
 const MIN_GENERATED_IMAGE_BYTES = 50 * 1024;
-const UPLOAD_SETTLE_MS = 3000;
-const PRE_SUBMIT_SETTLE_MS = 3000;
-const AUTOMATION_REVISION = "flow-rewrite-stepwise-20260503-upload-settle-before-submit";
+const AUTOMATION_REVISION = "flow-rewrite-stepwise-20260503-restore-1748";
 
 function buildResult({ success, message, data = {}, artifacts = [], logs = [], error = null }) {
   return { success, message, data, artifacts, logs, error };
@@ -151,12 +149,6 @@ function normalizeText(value) {
     .replace(/\s+/g, " ")
     .trim()
     .toLowerCase();
-}
-
-function normalizePromptForComposer(value) {
-  return String(value || "")
-    .replace(/\s+/g, " ")
-    .trim();
 }
 
 function mediaNameFromSource(source) {
@@ -474,7 +466,6 @@ async function readComposerRootState(page, promptBox) {
         imageCount: 0,
         mediaNames: [],
         loading: false,
-        failed: false,
         rootBox: null,
         inputCount: 0,
       };
@@ -533,19 +524,12 @@ async function readComposerRootState(page, promptBox) {
       textBlob.includes("dang xu ly") ||
       textBlob.includes("uploading") ||
       textBlob.includes("processing");
-    const failed =
-      textBlob.includes("failed") ||
-      textBlob.includes("khong thanh cong") ||
-      textBlob.includes("không thành công") ||
-      textBlob.includes("loi") ||
-      textBlob.includes("lỗi");
 
     return {
       found: true,
       imageCount: images.length,
       mediaNames: [...new Set(mediaNames)],
       loading,
-      failed,
       rootBox: {
         x: rootRect.x,
         y: rootRect.y,
@@ -610,47 +594,23 @@ async function uploadImages(page, imagePaths, logs) {
 
   const startedAt = Date.now();
   let stablePasses = 0;
-  const expectedImageCount = Math.max(imagePaths.length, beforeCount + imagePaths.length);
   while (Date.now() - startedAt < 180000) {
     const state = await readComposerRootState(page, promptBox).catch(() => null);
     const count = state?.imageCount || 0;
     const loading = Boolean(state?.loading);
-    const failed = Boolean(state?.failed);
-    const enoughImages = count >= expectedImageCount;
-    if (failed) {
-      stablePasses = 0;
-      logs.push(
-        `[step3] Waiting upload recovery: composerImages=${count}, expected=${expectedImageCount}, failed=${failed}`,
-      );
-    } else if (enoughImages && !loading) {
+    const elapsedMs = Date.now() - startedAt;
+    const enoughImages = count >= Math.max(1, imagePaths.length);
+    if (enoughImages && (!loading || elapsedMs > 12000)) {
       stablePasses += 1;
       if (stablePasses >= 3) {
-        const elapsedMs = Date.now() - startedAt;
         logs.push(
-          `[step3] Upload appears complete: composerImages=${count}, expected=${expectedImageCount}, loading=${loading}, elapsedMs=${elapsedMs}`,
+          `[step3] PASS upload: composer image count=${count}, loading=${loading}, elapsedMs=${elapsedMs}`,
         );
-        logs.push(`[step3] Waiting ${UPLOAD_SETTLE_MS}ms for uploaded images to settle`);
-        await page.waitForTimeout(UPLOAD_SETTLE_MS);
-        const settledState = await readComposerRootState(page, promptBox).catch(() => null);
-        const settledCount = settledState?.imageCount || 0;
-        const settledLoading = Boolean(settledState?.loading);
-        const settledFailed = Boolean(settledState?.failed);
-        if (settledCount >= expectedImageCount && !settledLoading && !settledFailed) {
-          logs.push(
-            `[step3] PASS upload settled: composerImages=${settledCount}, loading=${settledLoading}, failed=${settledFailed}`,
-          );
-          return promptBox;
-        }
-        logs.push(
-          `[step3] Upload changed during settle wait: composerImages=${settledCount}, loading=${settledLoading}, failed=${settledFailed}`,
-        );
-        stablePasses = 0;
+        return promptBox;
       }
     } else {
       stablePasses = 0;
-      logs.push(
-        `[step3] Waiting upload complete: composerImages=${count}, expected=${expectedImageCount}, loading=${loading}, failed=${failed}`,
-      );
+      logs.push(`[step3] Waiting upload: composerImages=${count}, loading=${loading}`);
     }
     await page.waitForTimeout(1200);
   }
@@ -743,53 +703,7 @@ async function clickPlaceholderPrompt(page, logs) {
   }
 }
 
-async function readPromptText(locator) {
-  return locator.evaluate((element) => {
-    if ("value" in element && typeof element.value === "string") return element.value;
-    return element.innerText || element.textContent || "";
-  });
-}
-
-async function waitForPromptText(locator, expectedPrompt, timeoutMs = 6000) {
-  const expected = normalizePromptForComposer(expectedPrompt);
-  const startedAt = Date.now();
-  while (Date.now() - startedAt < timeoutMs) {
-    const current = normalizePromptForComposer(await readPromptText(locator).catch(() => ""));
-    if (current === expected || current.includes(expected)) return true;
-    await new Promise((resolve) => setTimeout(resolve, 250));
-  }
-  return false;
-}
-
-async function pastePromptIntoFocusedComposer(page, locator, normalizedPrompt, logs) {
-  const origin = new URL(page.url()).origin;
-  try {
-    await page.context().grantPermissions(["clipboard-read", "clipboard-write"], { origin });
-    await page.evaluate(async (text) => navigator.clipboard.writeText(text), normalizedPrompt);
-    await page.keyboard.press(process.platform === "darwin" ? "Meta+V" : "Control+V");
-    logs.push("[step4] Prompt inserted via clipboard paste");
-    return;
-  } catch (error) {
-    logs.push(
-      `[step4] Clipboard paste failed, using keyboard.insertText: ${error.message.split("\n")[0]}`,
-    );
-  }
-
-  try {
-    await page.keyboard.insertText(normalizedPrompt);
-    logs.push("[step4] Prompt inserted via keyboard.insertText");
-  } catch (error) {
-    logs.push(
-      `[step4] keyboard.insertText failed, using locator.fill: ${error.message.split("\n")[0]}`,
-    );
-    await locator.fill(normalizedPrompt, { timeout: 5000 });
-  }
-}
-
 async function typePrompt(page, prompt, logs, promptBox = null) {
-  const normalizedPrompt = normalizePromptForComposer(prompt);
-  if (!normalizedPrompt) throw new Error("Prompt rong sau khi normalize, khong the submit Flow");
-
   const freshGeometry = await findComposerGeometry(page, logs).catch((error) => {
     logs.push(`[step4] Could not refresh composer geometry before typing: ${error.message}`);
     return null;
@@ -820,202 +734,43 @@ async function typePrompt(page, prompt, logs, promptBox = null) {
   await page.keyboard.press("Backspace").catch(() => {});
   await page.waitForTimeout(300);
 
-  await pastePromptIntoFocusedComposer(page, locator, normalizedPrompt, logs);
-
   if (tagName === "textarea" || tagName === "input") {
+    await locator.fill(prompt);
     await locator.evaluate((element) =>
       element.dispatchEvent(new Event("input", { bubbles: true })),
     );
-  }
-
-  if (!(await waitForPromptText(locator, normalizedPrompt, 7000))) {
-    const current = normalizePromptForComposer(await readPromptText(locator).catch(() => ""));
-    throw new Error(
-      `Prompt text was not fully inserted before submit: expectedLength=${normalizedPrompt.length}, currentLength=${current.length}`,
-    );
+  } else {
+    await page.keyboard.type(prompt, { delay: 10 });
   }
 
   await page.waitForTimeout(800);
-  logs.push(
-    `[step4] PASS prompt inserted as single composer value length=${normalizedPrompt.length}`,
-  );
-  return { promptBox: activePromptBox, promptLocator: locator, normalizedPrompt };
+  logs.push("[step4] PASS prompt typed successfully");
 }
 
-async function findComposerSubmitButtonBox(page, promptBox = null) {
-  return page.evaluate((box) => {
-    const isVisible = (element) => {
-      if (!(element instanceof HTMLElement)) return false;
-      const rect = element.getBoundingClientRect();
-      const style = window.getComputedStyle(element);
-      return (
-        style.display !== "none" &&
-        style.visibility !== "hidden" &&
-        Number(style.opacity || "1") > 0 &&
-        rect.width >= 16 &&
-        rect.height >= 16
-      );
-    };
-    const buttons = Array.from(document.querySelectorAll("button"))
-      .filter(isVisible)
-      .map((button) => {
-        const rect = button.getBoundingClientRect();
-        const text = (button.textContent || "").toLowerCase();
-        const disabled =
-          button.disabled ||
-          button.getAttribute("aria-disabled") === "true" ||
-          button.getAttribute("disabled") !== null;
-        const inComposer = box
-          ? rect.x >= box.x - 120 &&
-            rect.x <= box.x + box.width + 140 &&
-            rect.y >= box.y - 140 &&
-            rect.y <= box.y + box.height + 240
-          : rect.y > window.innerHeight * 0.45;
-        const isArrow = text.includes("arrow_forward");
-        const isModelSelector =
-          text.includes("nano banana") ||
-          text.includes("crop_16_9") ||
-          text.includes("pro") ||
-          text.includes("1x");
-        const squareish = rect.width <= 72 && rect.height <= 72;
-        let score = 0;
-        if (isArrow) score += 500;
-        if (inComposer) score += 400;
-        if (squareish) score += 180;
-        if (isModelSelector) score -= 500;
-        score += rect.x / 6 + rect.y / 40;
-        return {
-          x: rect.x,
-          y: rect.y,
-          width: rect.width,
-          height: rect.height,
-          text,
-          score,
-          disabled,
-        };
-      })
-      .filter((item) => item.score > 300)
-      .sort((left, right) => right.score - left.score);
-    return buttons[0] || null;
-  }, promptBox);
-}
-
-async function findComposerSubmitTarget(page, promptBox = null) {
-  const buttonBox = await findComposerSubmitButtonBox(page, promptBox).catch(() => null);
-  if (buttonBox) {
-    return { ...buttonBox, source: "button" };
+async function submitPrompt(page, logs) {
+  const arrowButtons = page
+    .locator("button")
+    .filter({ has: page.locator('i:has-text("arrow_forward")') });
+  const count = await arrowButtons.count().catch(() => 0);
+  const candidates = [];
+  for (let index = 0; index < count; index += 1) {
+    const button = arrowButtons.nth(index);
+    if (!(await button.isVisible({ timeout: 300 }).catch(() => false))) continue;
+    if (!(await button.isEnabled().catch(() => false))) continue;
+    const box = await button.boundingBox().catch(() => null);
+    if (!box || box.y < 300) continue;
+    candidates.push({ button, box });
   }
-
-  const state = promptBox ? await readComposerRootState(page, promptBox).catch(() => null) : null;
-  if (state?.rootBox) {
-    return {
-      x: state.rootBox.x + state.rootBox.width - 28,
-      y: state.rootBox.y + state.rootBox.height - 24,
-      width: 1,
-      height: 1,
-      text: "composer-bottom-right-fallback",
-      disabled: false,
-      source: "root-fallback",
-    };
-  }
-
-  if (promptBox) {
-    return {
-      x: promptBox.x + promptBox.width + 16,
-      y: promptBox.y + promptBox.height + 32,
-      width: 1,
-      height: 1,
-      text: "prompt-box-fallback",
-      disabled: false,
-      source: "prompt-fallback",
-    };
-  }
-
-  return null;
-}
-
-async function waitForComposerReadyToSubmit(page, promptBox, logs, timeoutMs = 60000) {
-  const startedAt = Date.now();
-  let lastLogAt = 0;
-  while (Date.now() - startedAt < timeoutMs) {
-    const state = promptBox ? await readComposerRootState(page, promptBox).catch(() => null) : null;
-    const submitButton = await findComposerSubmitTarget(page, promptBox).catch(() => null);
-    const loading = Boolean(state?.loading);
-    const failed = Boolean(state?.failed);
-    if (submitButton && !loading && !failed) {
-      logs.push(
-        `[step5] PASS composer submit target is visible and upload loading is complete source=${submitButton.source} disabled=${submitButton.disabled}`,
-      );
-      logs.push(`[step5] Waiting ${PRE_SUBMIT_SETTLE_MS}ms before submit`);
-      await page.waitForTimeout(PRE_SUBMIT_SETTLE_MS);
-      const settledState = promptBox
-        ? await readComposerRootState(page, promptBox).catch(() => null)
-        : null;
-      if (!Boolean(settledState?.loading) && !Boolean(settledState?.failed)) return true;
-      logs.push(
-        `[step5] Composer changed during pre-submit settle: loading=${Boolean(
-          settledState?.loading,
-        )}, failed=${Boolean(settledState?.failed)}`,
-      );
-    }
-    if (Date.now() - lastLogAt > 5000) {
-      lastLogAt = Date.now();
-      logs.push(
-        `[step5] Waiting composer submit ready: hasButton=${Boolean(submitButton)}, disabled=${
-          submitButton?.disabled ?? "unknown"
-        }, loading=${loading}, failed=${failed}`,
-      );
-    }
-    await page.waitForTimeout(1000);
-  }
-  throw new Error("Timeout waiting for composer submit button to become active after upload");
-}
-
-async function composerStillHasPrompt(promptLocator, expectedPrompt) {
-  const current = normalizePromptForComposer(await readPromptText(promptLocator).catch(() => ""));
-  const expected = normalizePromptForComposer(expectedPrompt);
-  return Boolean(expected && (current === expected || current.includes(expected)));
-}
-
-async function submitPrompt(
-  page,
-  logs,
-  promptBox = null,
-  promptLocator = null,
-  expectedPrompt = "",
-) {
-  await waitForComposerReadyToSubmit(page, promptBox, logs);
-
-  const clickSubmit = async (label) => {
-    const buttonBox = await findComposerSubmitTarget(page, promptBox);
-    if (buttonBox) {
-      const x = buttonBox.width > 1 ? buttonBox.x + buttonBox.width / 2 : buttonBox.x;
-      const y = buttonBox.height > 1 ? buttonBox.y + buttonBox.height / 2 : buttonBox.y;
-      logs.push(
-        `[step5] Clicking composer submit ${label} source=${buttonBox.source} x=${Math.round(x)}, y=${Math.round(y)}, disabled=${buttonBox.disabled}, text="${buttonBox.text}"`,
-      );
-      await page.mouse.click(x, y);
-      await page.waitForTimeout(2500);
-      return true;
-    }
-    return false;
-  };
-
-  if (await clickSubmit("primary")) {
-    if (
-      promptLocator &&
-      expectedPrompt &&
-      (await composerStillHasPrompt(promptLocator, expectedPrompt))
-    ) {
-      logs.push("[step5] Prompt still visible after submit click; retrying composer submit once");
-      await clickSubmit("retry");
-      if (await composerStillHasPrompt(promptLocator, expectedPrompt)) {
-        logs.push("[step5] Prompt still visible after retry; sending Control+Enter fallback");
-        await promptLocator.click({ force: true, timeout: 2000 }).catch(() => {});
-        await page.keyboard.press("Control+Enter").catch(() => {});
-        await page.waitForTimeout(1500);
-      }
-    }
+  candidates.sort((left, right) => right.box.y - left.box.y || right.box.x - left.box.x);
+  if (candidates.length) {
+    const { button, box } = candidates[0];
+    logs.push(
+      `[step5] Clicking submit arrow_forward button x=${Math.round(box.x + box.width / 2)}, y=${Math.round(
+        box.y + box.height / 2,
+      )}`,
+    );
+    await button.click({ force: true, timeout: 5000 });
+    await page.waitForTimeout(1500);
     return;
   }
 
@@ -1316,18 +1071,12 @@ async function runPostGenerationQc(imagePath) {
       logs.push(`[step3] Composer uploaded media names excluded: ${uploadedMediaNames.join(", ")}`);
     }
 
-    const promptState = await typePrompt(page, imagePrompt, logs, promptBox);
+    await typePrompt(page, imagePrompt, logs, promptBox);
     const beforeGenerationSources = await collectImageSources(page);
     logs.push(
       `[step5] Baseline after upload/prompt before submit, visible image sources=${beforeGenerationSources.length}`,
     );
-    await submitPrompt(
-      page,
-      logs,
-      promptState.promptBox || promptBox,
-      promptState.promptLocator,
-      promptState.normalizedPrompt,
-    );
+    await submitPrompt(page, logs);
     await page.waitForTimeout(5000);
 
     const generatedSource = await waitForNewImageSource(

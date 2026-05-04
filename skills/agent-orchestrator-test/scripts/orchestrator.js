@@ -51,6 +51,7 @@ function parseArgs(argv) {
     reset: false,
     timeoutMs: 900000,
     dryRun: false,
+    noCompanyLogo: true,
     useLLMIntent: false, // Táº¯t máº·c Ä‘á»‹nh â€” LLM intent gá»­i prompt vÃ o lane phÃ³ phÃ²ng gÃ¢y lá»™ ná»™i dung. DÃ¹ng keyword matching.
     autoNotifyWatch: false,
     notifySessionKey: "",
@@ -86,6 +87,14 @@ function parseArgs(argv) {
     }
     if (token === "--dry-run") {
       options.dryRun = true;
+      continue;
+    }
+    if (token === "--no-company-logo" || token === "--no-logo") {
+      options.noCompanyLogo = true;
+      continue;
+    }
+    if (token === "--with-company-logo" || token === "--logo") {
+      options.noCompanyLogo = false;
       continue;
     }
     if (token === "--no-llm-intent") {
@@ -321,6 +330,25 @@ function buildMediaDirective(filePath) {
   return normalized ? `MEDIA: "${normalized}"` : "";
 }
 
+function buildVideoChatPayload(videoPath) {
+  const normalized = normalizeMediaPathForDirective(videoPath);
+  if (!normalized) {
+    return { data: {}, artifacts: [] };
+  }
+  return {
+    data: {
+      relative_video_path: normalized,
+      absolute_video_path: normalized,
+      video_path: normalized,
+      reply_mode: "show_video_in_chat",
+    },
+    artifacts: [
+      { type: "generated_video", path: normalized },
+      { type: "chat_video", path: normalized },
+    ],
+  };
+}
+
 function summarizeReferenceUsage(media) {
   const logoCount = Array.isArray(media?.usedLogoPaths)
     ? media.usedLogoPaths.filter(Boolean).length
@@ -331,6 +359,13 @@ function summarizeReferenceUsage(media) {
   ]
     .filter(Boolean)
     .join("\n");
+}
+
+function resolveWorkflowLogoPaths(context) {
+  if (context?.options?.noCompanyLogo || process.env.OPENCLAW_NO_COMPANY_LOGO === "1") {
+    return [];
+  }
+  return mediaAgent.resolveLogoAssetPaths(context.openClawHome);
 }
 
 function normalizePublishedSummaryText(message) {
@@ -383,6 +418,7 @@ function buildResult(params) {
     summary: params.summary || "",
     human_message: params.humanMessage || params.summary || "",
     data: params.data || {},
+    artifacts: Array.isArray(params.artifacts) ? params.artifacts : [],
   };
 }
 
@@ -3040,7 +3076,7 @@ async function generateVideoFlow(context, state) {
   const videoRequestStepId = "step_04_video_prepare";
   const promptStepId = "step_05_video_prompt";
   const videoStepId = "step_06_video_generate";
-  const logoPaths = mediaAgent.resolveLogoAssetPaths(context.openClawHome);
+  const logoPaths = resolveWorkflowLogoPaths(context);
 
   logger.logPhase("TAO VIDEO", "Phat sinh them video quang cao theo yeu cau cua Sep");
   logger.logHandoff(
@@ -3118,6 +3154,7 @@ async function generateVideoFlow(context, state) {
     promptPackage = enforceDefaultVideoPrompt(
       promptAgent.parsePromptResult(promptReply, "video"),
       true,
+      logoPaths.length > 0,
     );
     promptVersion = promptAgent.trackPromptVersion(context.paths.baseDir, state.workflow_id, {
       type: "video",
@@ -3288,6 +3325,7 @@ async function generateVideoFlow(context, state) {
   markWorkflowStageNotified(context.paths, state.workflow_id, "awaiting_video_approval", "sync");
 
   logger.logApprovalWait("awaiting_video_approval", summary);
+  const videoChatPayload = buildVideoChatPayload(mergedMedia.generatedVideoPath);
 
   return buildResult({
     workflowId: state.workflow_id,
@@ -3298,7 +3336,9 @@ async function generateVideoFlow(context, state) {
       media: mergedMedia,
       prompt_package: mergedPromptPackage,
       next_expected_action: "video_approval",
+      ...videoChatPayload.data,
     },
+    artifacts: videoChatPayload.artifacts,
   });
 }
 
@@ -3315,7 +3355,7 @@ async function reviseVideoFlow(context, state) {
   const videoRequestStepId = "step_06a_video_prepare_revise";
   const promptStepId = "step_06b_video_prompt_revise";
   const videoStepId = "step_06c_video_revise";
-  const logoPaths = mediaAgent.resolveLogoAssetPaths(context.openClawHome);
+  const logoPaths = resolveWorkflowLogoPaths(context);
   const promptFocused = isPromptFocusedFeedback(context.message);
 
   logger.logRejected("video", context.message);
@@ -3590,6 +3630,7 @@ async function reviseVideoFlow(context, state) {
     promptPackage: mergedPromptPackage,
   });
   markWorkflowStageNotified(context.paths, state.workflow_id, "awaiting_video_approval", "sync");
+  const videoChatPayload = buildVideoChatPayload(mergedMedia.generatedVideoPath);
 
   return buildResult({
     workflowId: state.workflow_id,
@@ -3600,7 +3641,9 @@ async function reviseVideoFlow(context, state) {
       media: mergedMedia,
       prompt_package: mergedPromptPackage,
       next_expected_action: "video_approval",
+      ...videoChatPayload.data,
     },
+    artifacts: videoChatPayload.artifacts,
   });
 }
 
@@ -3641,13 +3684,19 @@ function buildPublishFailureSummary(actionLabel, error) {
   return summaryLines.join("\n");
 }
 
-function enforceDefaultVideoPrompt(promptPackage, forceTemplate = false) {
+function enforceDefaultVideoPrompt(promptPackage, forceTemplate = false, includeLogo = true) {
   if (!promptPackage || !forceTemplate) {
     return promptPackage;
   }
+  const videoPrompt = includeLogo
+    ? DEFAULT_VIDEO_PROMPT_TEMPLATE
+    : String(DEFAULT_VIDEO_PROMPT_TEMPLATE || "")
+        .split(/\r?\n/)
+        .filter((line) => !/logo/i.test(line))
+        .join("\n");
   return {
     ...promptPackage,
-    videoPrompt: DEFAULT_VIDEO_PROMPT_TEMPLATE,
+    videoPrompt,
   };
 }
 

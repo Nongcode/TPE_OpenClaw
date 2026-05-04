@@ -1,4 +1,4 @@
-﻿import { createHash } from "node:crypto";
+import { createHash } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
 import { access, mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
@@ -7,12 +7,12 @@ import { buildChatImageReplyPayload } from "../shared/chat-image-result.js";
 import { publishGeneratedImageToUpTekGallery } from "../shared/uptek-gallery-publisher.js";
 
 const FLOW_PROJECT_URL =
-  "https://labs.google/fx/vi/tools/flow/project/a6bfa516-4c6c-4628-a210-561b3337a034";
+  "https://labs.google/fx/vi/tools/flow/project/ca452ad9-8b12-485f-9357-9def62da6ab2";
 
 const DEFAULTS = {
   browser_path: "C:/Program Files/CocCoc/Browser/Application/browser.exe",
   user_data_dir: "C:/Users/Administrator/AppData/Local/CocCoc/Browser/User Data",
-  profile_name: "Default",
+  profile_name: "Profile 2",
   project_url: FLOW_PROJECT_URL,
   target_gemini_url: FLOW_PROJECT_URL,
   image_prompt: "",
