@@ -1,0 +1,13 @@
+{
+  "project_url": "https://labs.google/fx/vi/tools/flow/project/d53d9599-c04a-4c2e-95be-d1d1a96d81f1",
+  "prompt": "Tạo video quảng cáo ô tô trong gara ô tô hiện đại, ánh sáng cao cấp, logo Tân Phát Etek ở góc phải, chuyển động camera mượt, 9:16",
+  "reference_image": "d:/CodeAiTanPhat/TPE_OpenClaw/assets/avatar-placeholder.svg",
+  "aspect_ratio": "9:16",
+  "multiplier": "1",
+  "model": "Veo 3.1 - Quality",
+  "download_resolution": "720p",
+  "output_dir": "d:/CodeAiTanPhat/TPE_OpenClaw/outputs/veo",
+  "cdp_url": "http://127.0.0.1:9222",
+  "auto_close_browser": false,
+  "timeout_ms": 1200000
+}

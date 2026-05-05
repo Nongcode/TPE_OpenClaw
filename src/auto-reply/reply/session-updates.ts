@@ -26,6 +26,9 @@ export async function drainFormattedSystemEvents(params: {
       return null;
     }
     const lower = trimmed.toLowerCase();
+    if (lower.includes("exec completed") || lower.includes("exec failed")) {
+      return null;
+    }
     if (lower.includes("reason periodic")) {
       return null;
     }

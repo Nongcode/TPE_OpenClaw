@@ -126,6 +126,7 @@ export type GatewayControlUiConfig = {
     employeeId?: string;
     employeeName?: string;
     aliases?: string[];
+    managerInstanceId?: string;
     lockedAgentId: string;
     lockedSessionKey?: string;
     canViewAllSessions?: boolean;
@@ -142,6 +143,7 @@ export type GatewayControlUiConfig = {
       password: string;
       employeeId?: string;
       employeeName?: string;
+      managerInstanceId?: string;
       lockedAgentId?: string;
       lockedSessionKey?: string;
       label?: string;

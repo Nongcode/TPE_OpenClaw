@@ -1,0 +1,7 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(PGPASSWORD='admin123@' psql -h localhost -U postgres -d uptek_db -c 'TRUNCATE TABLE \"Messages\", \"Conversations\" RESTART IDENTITY CASCADE;')"
+    ]
+  }
+}

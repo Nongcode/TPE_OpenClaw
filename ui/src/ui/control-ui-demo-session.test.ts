@@ -18,6 +18,7 @@ describe("control-ui demo session storage", () => {
     storeControlUiDemoLoginState({
       employeeId: "tp-01",
       employeeName: "Truong Phong",
+      managerInstanceId: "mgr_pho_phong_A",
       lockedAgentId: "truong_phong",
       lockedSessionKey: "agent:truong_phong:main",
       visibleAgentIds: ["truong_phong", "pho_phong", "nv_content", "nv_media"],
@@ -29,6 +30,7 @@ describe("control-ui demo session storage", () => {
     expect(loadStoredControlUiDemoAccessPolicy()).toEqual({
       employeeId: "tp-01",
       employeeName: "Truong Phong",
+      managerInstanceId: "mgr_pho_phong_A",
       lockedAgentId: "truong_phong",
       lockedSessionKey: "agent:truong_phong:main",
       visibleAgentIds: ["truong_phong", "pho_phong", "nv_content", "nv_media"],

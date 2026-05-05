@@ -54,7 +54,7 @@ function inferManifest(agentId) {
       label: "Pho phong",
       role: "operations lead",
       reportsTo: "truong_phong",
-      canDelegateTo: ["nv_content", "nv_media"],
+      canDelegateTo: ["nv_content", "nv_media", "media_video"],
       requiresReviewBy: "truong_phong",
       capabilities: ["workflow", "coordination", "task-splitting"],
     };
@@ -90,6 +90,17 @@ function inferManifest(agentId) {
       requiresReviewBy: "pho_phong",
       capabilities: ["prompt", "image-prompt", "video-prompt", "prompt-research"],
       taskTypes: ["prompt.write", "prompt.revise"],
+    };
+  }
+  if (agentId === "media_video") {
+    return {
+      ...defaults,
+      label: "Nhan vien media video",
+      role: "video specialist",
+      reportsTo: "pho_phong",
+      requiresReviewBy: "pho_phong",
+      capabilities: ["video", "veo", "creative-video", "product-video"],
+      taskTypes: ["video.create", "video.revise"],
     };
   }
 

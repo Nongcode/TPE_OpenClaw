@@ -1,11 +1,15 @@
 const fs = require("fs");
 const path = require("path");
-const { listDirectories, loadOpenClawConfig, resolveOpenClawHome, unique } = require("./common");
-const { discoverRegistry } = require("./registry");
+const { loadOpenClawConfig, resolveOpenClawHome } = require("./common");
 
-function promptFileNameForAgent(agentId) {
-  return `${agentId}.SOUL.md`;
-}
+const PROMPT_FILE_BY_AGENT = {
+  quan_ly: "quan_ly.SOUL.md",
+  truong_phong: "truong_phong.SOUL.md",
+  pho_phong: "pho_phong.SOUL.md",
+  nv_content: "nv_content.SOUL.md",
+  nv_media: "nv_media.SOUL.md",
+  media_video: "media_video.SOUL.md",
+};
 
 function resolveWorkspaceByAgent(config, registry, agentId, openClawHome) {
   const configured = config?.agents?.list?.find((agent) => agent?.id === agentId)?.workspace;
@@ -24,6 +28,7 @@ function resolveWorkspaceByAgent(config, registry, agentId, openClawHome) {
     nv_content: path.join(openClawHome, "workspace_content"),
     nv_consultant: path.join(openClawHome, "workspace_consultant"),
     nv_media: path.join(openClawHome, "workspace_media"),
+    media_video: path.join(openClawHome, "workspace_media_video"),
   };
   return fallbacks[agentId] || null;
 }

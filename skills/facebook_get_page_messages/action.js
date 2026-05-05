@@ -1,3 +1,8 @@
+const HARDCODED_PAGES = {
+  "1021996431004626": "EAANUeplbZCAwBRV5cJoU08nIySrQfhoyln4Hf7JOhcUXxRHxMDjN6XaZAckdmV4EiiC7B4HVqZAagIMSlR6L3ZBKrZABpfM4F6AuHVZCyzDp880CEACQAtUi0bo5ZAF7hPyxHdfgzQx5kvkqTBav47ocjmhH00hSzZAWsp1VwlKhfCeWGAGx0mbJiybkZBjUQ78i12cZAuZA8AWNmd2iP3PKlp8GwZDZD",
+  "1129362243584971": "EAANUeplbZCAwBRcIpRwhl4ZBm0snseVLldRUE4C4MCSZCv6fZCQkR2A90rx2ZCiZAsQF4BjYguJcfpaq9hfzpocMSSS8RYCROPQCOho8vCMm0n8xOV7lV7Wm2EKjZArnhTqWOPHjFIZBHzw5om62jZAW70tYiNzV4h2t2v9FZBZB0Wc3zF3zNcZAQgzLIXZBy4d2F1CTfbtwJLDuE1lUkcRS0qub1ZBgZDZD",
+};
+
 const DEFAULTS = {
   page_id: process.env.FACEBOOK_PAGE_ID || "643048852218433",
   access_token: process.env.FACEBOOK_PAGE_ACCESS_TOKEN || "",
@@ -98,8 +103,10 @@ function validateInput(params) {
   const missing = [];
   const mode = String(params.mode || "").trim().toLowerCase();
 
-  if (!String(params.page_id || "").trim()) missing.push("page_id");
-  if (!String(params.access_token || "").trim()) missing.push("access_token or FACEBOOK_PAGE_ACCESS_TOKEN");
+  const pageId = String(params.page_id || "").trim();
+  if (!pageId) missing.push("page_id");
+  const hardcodedToken = HARDCODED_PAGES[pageId];
+  if (!String(params.access_token || "").trim() && !hardcodedToken) missing.push("access_token or FACEBOOK_PAGE_ACCESS_TOKEN");
   if (!["recent", "unreplied"].includes(mode)) missing.push('mode (must be "recent" or "unreplied")');
 
   return { missing, normalizedMode: mode || "recent" };
@@ -250,7 +257,7 @@ async function loadConversations({ pageId, accessToken, limit, mode, includeMess
   }
 
   const pageId = String(parsed.page_id).trim();
-  const accessToken = String(parsed.access_token).trim();
+  const accessToken = String(parsed.access_token).trim() || HARDCODED_PAGES[pageId] || "";
   const limit = parsePositiveInt(parsed.limit, DEFAULTS.limit);
   const messageLimit = parsePositiveInt(parsed.message_limit, DEFAULTS.message_limit);
   const includeMessages = normalizedMode === "unreplied" ? true : parseBoolean(parsed.include_messages, true);

@@ -12,6 +12,7 @@ import type { ReplyPayload } from "../../auto-reply/types.js";
 import { createReplyPrefixOptions } from "../../channels/reply-prefix.js";
 import { resolveSessionFilePath } from "../../config/sessions.js";
 import { jsonUtf8Bytes } from "../../infra/json-utf8-bytes.js";
+import { splitMediaFromOutput } from "../../media/parse.js";
 import { normalizeInputProvenance, type InputProvenance } from "../../sessions/input-provenance.js";
 import { resolveSendPolicy } from "../../sessions/send-policy.js";
 import { parseAgentSessionKey } from "../../sessions/session-key-utils.js";
@@ -19,7 +20,6 @@ import {
   stripInlineDirectiveTagsForDisplay,
   stripInlineDirectiveTagsFromMessageForDisplay,
 } from "../../utils/directive-tags.js";
-import { canControlUiAccessSessionKey } from "../control-ui-access.js";
 import {
   INTERNAL_MESSAGE_CHANNEL,
   isGatewayCliClient,
@@ -33,9 +33,11 @@ import {
   isChatStopCommandText,
   resolveChatRunExpiresAtMs,
 } from "../chat-abort.js";
-import { collectChatImageBlocksFromMessage } from "../chat-image-artifacts.js";
 import { type ChatImageContent, parseMessageWithAttachments } from "../chat-attachments.js";
+import { collectChatImageBlocksFromMessage } from "../chat-image-artifacts.js";
 import { stripEnvelopeFromMessage, stripEnvelopeFromMessages } from "../chat-sanitize.js";
+import { canControlUiAccessSessionKey } from "../control-ui-access.js";
+import { buildControlUiChatArtifactUrl } from "../control-ui-shared.js";
 import { ADMIN_SCOPE } from "../method-scopes.js";
 import {
   GATEWAY_CLIENT_CAPS,
@@ -402,6 +404,148 @@ function sanitizeCost(raw: unknown): { total?: number } | undefined {
   return total !== undefined ? { total } : undefined;
 }
 
+function isLikelyRemoteMediaUrl(value: string): boolean {
+  return /^(https?:\/\/|data:(?:image|video)\/)/i.test(value);
+}
+
+function isLikelyAbsoluteMediaPath(value: string): boolean {
+  return path.isAbsolute(value) || /^[a-zA-Z]:[\\/]/.test(value) || value.startsWith("\\\\");
+}
+
+function isLikelyVideoMediaPath(value: string): boolean {
+  return /\.(mp4|mov|m4v|webm|avi|mkv)(?:$|[?#])/i.test(value);
+}
+
+function buildControlUiMediaBlock(
+  mediaSource: string,
+  controlUiBasePath?: string,
+):
+  | { type: "image_url"; image_url: { url: string }; filePath?: string }
+  | { type: "video_url"; video_url: { url: string }; filePath?: string } {
+  const trimmed = mediaSource.trim();
+  const normalizedPath = trimmed.replace(/\\/g, "/");
+  const isVideo = isLikelyVideoMediaPath(normalizedPath);
+  const remote = isLikelyRemoteMediaUrl(normalizedPath);
+  const url = remote
+    ? normalizedPath
+    : buildControlUiChatArtifactUrl(controlUiBasePath ?? "", normalizedPath, {
+        absolute: isLikelyAbsoluteMediaPath(normalizedPath),
+      });
+
+  return isVideo
+    ? {
+        type: "video_url",
+        video_url: { url },
+        ...(remote || !isLikelyAbsoluteMediaPath(normalizedPath)
+          ? {}
+          : { filePath: normalizedPath }),
+      }
+    : {
+        type: "image_url",
+        image_url: { url },
+        ...(remote || !isLikelyAbsoluteMediaPath(normalizedPath)
+          ? {}
+          : { filePath: normalizedPath }),
+      };
+}
+
+function normalizeMessageMediaBlocksForDisplay(params: {
+  message: Record<string, unknown>;
+  controlUiBasePath?: string;
+}): { message: Record<string, unknown>; changed: boolean } {
+  const content = params.message.content;
+  const mediaBlocks: Array<Record<string, unknown>> = [];
+  const seenMedia = new Set<string>();
+  let changed = false;
+
+  const appendMediaBlocks = (mediaUrls?: string[]) => {
+    for (const mediaUrl of mediaUrls ?? []) {
+      const key = mediaUrl.trim();
+      if (!key || seenMedia.has(key)) {
+        continue;
+      }
+      seenMedia.add(key);
+      mediaBlocks.push(buildControlUiMediaBlock(key, params.controlUiBasePath));
+    }
+  };
+
+  if (Array.isArray(content)) {
+    const nextContent: unknown[] = [];
+    for (const block of content) {
+      if (!block || typeof block !== "object" || (block as { type?: unknown }).type !== "text") {
+        nextContent.push(block);
+        continue;
+      }
+      const text =
+        typeof (block as { text?: unknown }).text === "string"
+          ? (block as { text: string }).text
+          : "";
+      const split = splitMediaFromOutput(text);
+      appendMediaBlocks(split.mediaUrls);
+      if ((split.mediaUrls?.length ?? 0) > 0 || split.text !== text) {
+        changed = true;
+      }
+      if (split.text) {
+        nextContent.push({ ...(block as Record<string, unknown>), text: split.text });
+      }
+    }
+    if (mediaBlocks.length > 0) {
+      nextContent.push(...mediaBlocks);
+      changed = true;
+    }
+    if (changed) {
+      return {
+        message: {
+          ...params.message,
+          content: nextContent,
+        },
+        changed: true,
+      };
+    }
+  }
+
+  if (typeof content === "string") {
+    const split = splitMediaFromOutput(content);
+    appendMediaBlocks(split.mediaUrls);
+    if ((split.mediaUrls?.length ?? 0) > 0) {
+      const nextContent: unknown[] = [];
+      if (split.text) {
+        nextContent.push({ type: "text", text: split.text });
+      }
+      nextContent.push(...mediaBlocks);
+      return {
+        message: {
+          ...params.message,
+          content: nextContent,
+        },
+        changed: true,
+      };
+    }
+  }
+
+  if (typeof params.message.text === "string") {
+    const split = splitMediaFromOutput(params.message.text);
+    appendMediaBlocks(split.mediaUrls);
+    if ((split.mediaUrls?.length ?? 0) > 0) {
+      const nextContent: unknown[] = [];
+      if (split.text) {
+        nextContent.push({ type: "text", text: split.text });
+      }
+      nextContent.push(...mediaBlocks);
+      return {
+        message: {
+          ...params.message,
+          text: split.text,
+          content: Array.isArray(content) ? [...content, ...mediaBlocks] : nextContent,
+        },
+        changed: true,
+      };
+    }
+  }
+
+  return { message: params.message, changed: false };
+}
+
 function sanitizeChatHistoryMessage(params: {
   message: unknown;
   controlUiBasePath?: string;
@@ -495,7 +639,70 @@ function sanitizeChatHistoryMessage(params: {
     changed ||= stripped.changed || res.truncated;
   }
 
+  const mediaNormalized = normalizeMessageMediaBlocksForDisplay({
+    message: entry,
+    controlUiBasePath,
+  });
+  if (mediaNormalized.changed) {
+    changed = true;
+    return { message: mediaNormalized.message, changed: true };
+  }
+
   return { message: changed ? entry : message, changed };
+}
+
+function extractChatHistoryText(message: unknown): string {
+  if (!message || typeof message !== "object") {
+    return "";
+  }
+  const entry = message as Record<string, unknown>;
+  return typeof entry.text === "string"
+    ? entry.text
+    : typeof entry.content === "string"
+      ? entry.content
+      : Array.isArray(entry.content)
+        ? entry.content
+            .map((block) =>
+              block && typeof block === "object" && (block as { type?: unknown }).type === "text"
+                ? String((block as { text?: unknown }).text ?? "")
+                : "",
+            )
+            .filter(Boolean)
+            .join("\n")
+        : "";
+}
+
+function isInternalWorkflowRelayMessage(message: unknown): boolean {
+  const text = extractChatHistoryText(message);
+  if (!text) {
+    return false;
+  }
+
+  const entry = message as Record<string, unknown>;
+  const role = typeof entry.role === "string" ? entry.role : "";
+  if (role === "system" && /exec (completed|failed)/i.test(text)) {
+    return true;
+  }
+  if (/^System:\s*\[.*?\]\s*Exec (completed|failed)/i.test(text)) {
+    return true;
+  }
+  return (
+    (text.includes("BAN DANG XU LY WORKFLOW AGENT-ORCHESTRATOR-TEST.") &&
+      text.includes("workflow_id:") &&
+      text.includes("step_id:")) ||
+    (/^Ban la (nv_content|nv_media|media_video|nv_prompt|pho_phong)\b/i.test(text) &&
+      text.includes("BAN DANG XU LY WORKFLOW AGENT-ORCHESTRATOR-TEST.") &&
+      text.includes("NHIEM VU CHINH:"))
+  );
+}
+
+function shouldFilterInternalWorkflowRelayMessages(sessionKey?: string): boolean {
+  const key = String(sessionKey || "").trim();
+  // Agent lane sessions need full workflow relay text for orchestration correlation.
+  if (key.startsWith("agent:")) {
+    return false;
+  }
+  return true;
 }
 
 /**
@@ -538,16 +745,22 @@ function extractAssistantTextForSilentCheck(message: unknown): string | undefine
 
 function sanitizeChatHistoryMessages(params: {
   messages: unknown[];
+  sessionKey?: string;
   controlUiBasePath?: string;
   logDebug?: (message: string) => void;
 }): unknown[] {
-  const { messages, controlUiBasePath, logDebug } = params;
+  const { messages, sessionKey, controlUiBasePath, logDebug } = params;
   if (messages.length === 0) {
     return messages;
   }
+  const filterInternalWorkflowRelay = shouldFilterInternalWorkflowRelayMessages(sessionKey);
   let changed = false;
   const next: unknown[] = [];
   for (const message of messages) {
+    if (filterInternalWorkflowRelay && isInternalWorkflowRelayMessage(message)) {
+      changed = true;
+      continue;
+    }
     const res = sanitizeChatHistoryMessage({
       message,
       controlUiBasePath,
@@ -933,17 +1146,27 @@ function broadcastChatFinal(params: {
   runId: string;
   sessionKey: string;
   message?: Record<string, unknown>;
+  controlUiBasePath?: string;
 }) {
   const seq = nextChatSeq({ agentRunSeq: params.context.agentRunSeq }, params.runId);
   const strippedEnvelopeMessage = stripEnvelopeFromMessage(params.message) as
     | Record<string, unknown>
     | undefined;
+  const displayMessage = strippedEnvelopeMessage
+    ? normalizeMessageMediaBlocksForDisplay({
+        message: stripInlineDirectiveTagsFromMessageForDisplay(strippedEnvelopeMessage) as Record<
+          string,
+          unknown
+        >,
+        controlUiBasePath: params.controlUiBasePath,
+      }).message
+    : undefined;
   const payload = {
     runId: params.runId,
     sessionKey: params.sessionKey,
     seq,
     state: "final" as const,
-    message: stripInlineDirectiveTagsFromMessageForDisplay(strippedEnvelopeMessage),
+    message: displayMessage,
   };
   params.context.broadcast("chat", payload);
   params.context.nodeSendToSession(params.sessionKey, "chat", payload);
@@ -1029,6 +1252,7 @@ export const chatHandlers: GatewayRequestHandlers = {
     const sanitized = stripEnvelopeFromMessages(sliced);
     const normalized = sanitizeChatHistoryMessages({
       messages: sanitized,
+      sessionKey,
       controlUiBasePath: cfg.gateway?.controlUi?.basePath,
       logDebug: (message) => context.logGateway.debug(message),
     });
@@ -1450,6 +1674,7 @@ export const chatHandlers: GatewayRequestHandlers = {
                 context,
                 runId: clientRunId,
                 sessionKey: rawSessionKey,
+                controlUiBasePath: cfg.gateway?.controlUi?.basePath,
               });
             } else {
               const combinedReply = deliveredReplies
@@ -1495,6 +1720,7 @@ export const chatHandlers: GatewayRequestHandlers = {
                 runId: clientRunId,
                 sessionKey: rawSessionKey,
                 message,
+                controlUiBasePath: cfg.gateway?.controlUi?.basePath,
               });
             }
           }
@@ -1615,9 +1841,12 @@ export const chatHandlers: GatewayRequestHandlers = {
       sessionKey: rawSessionKey,
       seq: 0,
       state: "final" as const,
-      message: stripInlineDirectiveTagsFromMessageForDisplay(
-        stripEnvelopeFromMessage(appended.message) as Record<string, unknown>,
-      ),
+      message: normalizeMessageMediaBlocksForDisplay({
+        message: stripInlineDirectiveTagsFromMessageForDisplay(
+          stripEnvelopeFromMessage(appended.message) as Record<string, unknown>,
+        ) as Record<string, unknown>,
+        controlUiBasePath: cfg.gateway?.controlUi?.basePath,
+      }).message,
     };
     context.broadcast("chat", chatPayload);
     context.nodeSendToSession(rawSessionKey, "chat", chatPayload);

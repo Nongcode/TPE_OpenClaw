@@ -327,6 +327,7 @@ export class GatewayBrowserClient {
         ? {
             employeeId: this.opts.accessPolicy.employeeId?.trim() || undefined,
             employeeName: this.opts.accessPolicy.employeeName?.trim() || undefined,
+            managerInstanceId: this.opts.accessPolicy.managerInstanceId?.trim() || undefined,
             lockedAgentId: this.opts.accessPolicy.lockedAgentId?.trim() || undefined,
             lockedSessionKey: this.opts.accessPolicy.lockedSessionKey?.trim() || undefined,
             canViewAllSessions: this.opts.accessPolicy.canViewAllSessions === true,

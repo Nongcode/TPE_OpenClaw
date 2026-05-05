@@ -5,7 +5,11 @@ import { describe, expect, test, vi } from "vitest";
 import { WebSocket } from "ws";
 import { emitAgentEvent, registerAgentRunContext } from "../infra/agent-events.js";
 import { extractFirstTextBlock } from "../shared/chat-message-content.js";
-import { GATEWAY_CLIENT_IDS, GATEWAY_CLIENT_MODES, GATEWAY_CLIENT_NAMES } from "./protocol/client-info.js";
+import {
+  GATEWAY_CLIENT_IDS,
+  GATEWAY_CLIENT_MODES,
+  GATEWAY_CLIENT_NAMES,
+} from "./protocol/client-info.js";
 import {
   connectOk,
   getReplyFromConfig,
@@ -497,10 +501,10 @@ describe("gateway server chat", () => {
                   relative_image_path: "artifacts/images/generated-image-local.png",
                 },
               }),
-          },
-        ],
-        timestamp: 7,
-      },
+            },
+          ],
+          timestamp: 7,
+        },
         {
           role: "toolResult",
           content: [
@@ -628,6 +632,164 @@ describe("gateway server chat", () => {
       );
     } finally {
       testState.gatewayControlUi = undefined;
+    }
+  });
+
+  test("chat.history converts MEDIA lines in assistant text into image_url blocks", async () => {
+    testState.gatewayControlUi = { basePath: "/openclaw" };
+    try {
+      const history = await loadChatHistoryWithMessages([
+        {
+          role: "assistant",
+          content: [
+            {
+              type: "text",
+              text: 'Ban nhap dang cho duyet.\nAnh goc san pham de doi chieu:\nMEDIA: "C:/Users/Administrator/.openclaw/workspace_content/artifacts/references/search_product_text/demo/image_1920.png"',
+            },
+          ],
+          timestamp: 11,
+        },
+      ]);
+
+      const first = history[0] as { content?: unknown } | undefined;
+      const firstContent = Array.isArray(first?.content) ? first.content : [];
+      expect(firstContent).toEqual(
+        expect.arrayContaining([
+          {
+            type: "image_url",
+            image_url: {
+              url: "/openclaw/__openclaw/chat-artifact?absolute_path=C%3A%2FUsers%2FAdministrator%2F.openclaw%2Fworkspace_content%2Fartifacts%2Freferences%2Fsearch_product_text%2Fdemo%2Fimage_1920.png",
+            },
+            filePath:
+              "C:/Users/Administrator/.openclaw/workspace_content/artifacts/references/search_product_text/demo/image_1920.png",
+          },
+        ]),
+      );
+      expect(firstContent).toEqual(
+        expect.arrayContaining([
+          {
+            type: "text",
+            text: "Ban nhap dang cho duyet.\nAnh goc san pham de doi chieu:",
+          },
+        ]),
+      );
+    } finally {
+      testState.gatewayControlUi = undefined;
+    }
+  });
+
+  test("chat.history hides internal workflow relay user messages", async () => {
+    const history = await loadChatHistoryWithMessages([
+      {
+        role: "user",
+        content: [
+          {
+            type: "text",
+            text: "BAN DANG XU LY WORKFLOW AGENT-ORCHESTRATOR-TEST.\nworkflow_id: wf_test_demo\nstep_id: step_03_media\naction: media_generate",
+          },
+        ],
+        timestamp: 12,
+      },
+      {
+        role: "assistant",
+        content: [{ type: "text", text: "Da nhan yeu cau va dang xu ly." }],
+        timestamp: 13,
+      },
+    ]);
+
+    const textValues = collectHistoryTextValues(history);
+    expect(textValues).toEqual(["Da nhan yeu cau va dang xu ly."]);
+  });
+
+  test("chat.history hides internal workflow exec/system noise and assistant task prompts", async () => {
+    const history = await loadChatHistoryWithMessages([
+      {
+        role: "system",
+        content: [
+          {
+            type: "text",
+            text: "System: [2026-04-14 09:41:27 PDT] Exec failed (amber-or, code 1) :: workflow noise",
+          },
+        ],
+        timestamp: 14,
+      },
+      {
+        role: "assistant",
+        content: [
+          {
+            type: "text",
+            text: [
+              "Ban la nv_content, chuyen vien viet bai Facebook dua tren du lieu san pham that.",
+              "",
+              "NHIEM VU CHINH:",
+              "- Viet bai",
+              "",
+              "BAN DANG XU LY WORKFLOW AGENT-ORCHESTRATOR-TEST.",
+              "workflow_id: wf_test_demo",
+              "step_id: step_01_content",
+            ].join("\n"),
+          },
+        ],
+        timestamp: 15,
+      },
+      {
+        role: "assistant",
+        content: [{ type: "text", text: "Ban nhap content moi da san sang cho duyet." }],
+        timestamp: 16,
+      },
+    ]);
+
+    const textValues = collectHistoryTextValues(history);
+    expect(textValues).toEqual(["Ban nhap content moi da san sang cho duyet."]);
+  });
+
+  test("chat.history keeps internal workflow relay messages in agent sessions", async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), "openclaw-gw-"));
+    try {
+      testState.sessionStorePath = path.join(dir, "sessions.json");
+      await writeSessionStore({
+        entries: {
+          "agent:nv_content:main": {
+            sessionId: "sess-agent",
+            updatedAt: Date.now(),
+          },
+        },
+      });
+
+      const messages = [
+        {
+          role: "assistant",
+          content: [
+            {
+              type: "text",
+              text: [
+                "Ban la nv_content, chuyen vien viet bai Facebook dua tren du lieu san pham that.",
+                "NHIEM VU CHINH:",
+                "- Viet bai",
+                "",
+                "BAN DANG XU LY WORKFLOW AGENT-ORCHESTRATOR-TEST.",
+                "workflow_id: wf_test_demo",
+                "step_id: step_01_content",
+              ].join("\n"),
+            },
+          ],
+          timestamp: 20,
+        },
+      ];
+      const lines = messages.map((message) => JSON.stringify({ message }));
+      await fs.writeFile(path.join(dir, "sess-agent.jsonl"), lines.join("\n"), "utf-8");
+
+      const res = await rpcReq<{ messages?: unknown[] }>(ws, "chat.history", {
+        sessionKey: "agent:nv_content:main",
+      });
+      expect(res.ok).toBe(true);
+      const textValues = collectHistoryTextValues(res.payload?.messages ?? []);
+      expect(textValues[0]).toContain("BAN DANG XU LY WORKFLOW AGENT-ORCHESTRATOR-TEST.");
+      expect(textValues[0]).toContain("workflow_id: wf_test_demo");
+      expect(textValues[0]).toContain("step_id: step_01_content");
+    } finally {
+      testState.sessionStorePath = undefined;
+      await fs.rm(dir, { recursive: true, force: true });
     }
   });
 

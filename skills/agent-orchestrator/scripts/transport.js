@@ -6,6 +6,7 @@ const { loadOpenClawConfig, resolveGatewayToken } = require("./common");
 const REPO_ROOT = path.resolve(__dirname, "..", "..", "..");
 
 const UPTEK_API_BASE = process.env.UPTEK_FE_API_URL || "http://localhost:3001/api";
+const UPTEK_BACKEND_TOKEN = process.env.UPTEK_BACKEND_TOKEN || "";
 
 function resolveConversationIdFromSession(sessionKey, agentId) {
   const raw = String(sessionKey || `agent:${agentId}:main`).trim();
@@ -15,11 +16,18 @@ function resolveConversationIdFromSession(sessionKey, agentId) {
 }
 
 async function syncToUpTekFE(endpoint, data) {
+  if (!UPTEK_BACKEND_TOKEN) {
+    return;
+  }
+
   try {
     const url = `${UPTEK_API_BASE}${endpoint}`;
     const res = await fetch(url, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${UPTEK_BACKEND_TOKEN}`,
+      },
       body: JSON.stringify(data),
     });
     if (!res.ok) {
@@ -43,8 +51,15 @@ function resolveSessionKey(agentId, sessionKey, workflowId) {
     }
     // Nếu session cha đã có prefix automation, nhưng sub-agent lane chưa có prefix, thì gán prefix đó
     if (isAutomation && !parentKey.includes(`:${agentId}:`)) {
-       // Chuẩn hóa Session Key để Gateway phân loại đúng Agent, tránh đẩy vào role 'main'
-       return `automation:${agentId}:${workflowId ? (workflowId.startsWith("wf_") ? workflowId : "wf_" + workflowId) : "main"}`;
+      // Keep manager instance scopes such as automation:pho_phong:mgr_pho_phong_B:conv_*.
+      const managerMatch = parentKey.match(/:(mgr_[a-zA-Z0-9_-]+)(?::|$)/);
+      const managerSegment = managerMatch ? `${managerMatch[1]}:` : "";
+      const wfSegment = workflowId
+        ? workflowId.startsWith("wf_")
+          ? workflowId
+          : `wf_${workflowId}`
+        : "main";
+      return `automation:${agentId}:${managerSegment}${wfSegment}`;
     }
     return parentKey;
   }
@@ -104,6 +119,7 @@ function buildTaskEnvelope(step, registry, index, total, context = {}) {
   return {
     workflowId,
     stepId,
+    managerInstanceId: step.manager_instance_id || step.managerInstanceId || context.managerInstanceId || null,
     action,
     taskId: step.task_id || `task_${workflowId}_${stepId}`,
     parentTaskId: step.parent_task_id || null,
@@ -153,6 +169,8 @@ function buildTaskPrompt(envelope, registry) {
   const compactEnvelope = {
     workflow_id: envelope.workflowId,
     step_id: envelope.stepId,
+    task_id: envelope.taskId,
+    manager_instance_id: envelope.managerInstanceId || null,
     action: envelope.action,
     from_agent: envelope.fromAgent,
     to_agent: envelope.toAgent,
@@ -185,6 +203,7 @@ function buildTaskPrompt(envelope, registry) {
     "Thong tin truy vet:",
     `- workflow_id: ${envelope.workflowId}`,
     `- step_id: ${envelope.stepId}`,
+    `- task_id: ${envelope.taskId}`,
     `- action: ${envelope.action}`,
     `- loai_buoc: ${envelope.type}`,
     `- so_lan_thu_toi_da: ${envelope.maxRetries}`,
@@ -467,6 +486,10 @@ async function markStepFailed(options) {
 function sendTaskToAgentLane(options) {
   const sessionKey = resolveSessionKey(options.agentId, options.sessionKey, options.workflowId);
   const runId = options.runId || randomUUID();
+  const taskId =
+    String(options.taskId || "").trim() ||
+    `task_${String(options.workflowId || "wf_runtime").trim()}_${String(options.stepId || "step").trim()}`;
+  const workerAgentId = options.workerAgentId || options.agentId;
 
   // Đồng bộ sang Front-end UpTek: Tạo cuộc hội thoại và đẩy tin nhắn yêu cầu
   void (async () => {
@@ -476,6 +499,11 @@ function sendTaskToAgentLane(options) {
       id: convId,
       title: `[Auto] ${options.agentId} • ${options.workflowId || "Moi"}`,
       agentId: options.agentId,
+      workerAgentId,
+      workflowId: options.workflowId,
+      taskId,
+      stepId: options.stepId,
+      ...(options.managerInstanceId ? { managerInstanceId: options.managerInstanceId } : {}),
       sessionKey: sessionKey,
       employeeId: options.agentId, // Gán cho nhân viên sở hữu lane này
       status: "active",
@@ -487,6 +515,11 @@ function sendTaskToAgentLane(options) {
       messages: [{
         id: `msg_${runId}_req`,
         conversationId: convId,
+        workflowId: options.workflowId,
+        taskId,
+        stepId: options.stepId,
+        workerAgentId,
+        ...(options.managerInstanceId ? { managerInstanceId: options.managerInstanceId } : {}),
         role: "manager", // Hiển thị dưới dạng tin nhắn chỉ đạo
         content: options.prompt,
         timestamp: Date.now()
@@ -504,7 +537,6 @@ function sendTaskToAgentLane(options) {
         params: {
           sessionKey,
           message: options.prompt,
-          role: "user",
           label: "Manager Task Request"
         }
       });
@@ -517,7 +549,6 @@ function sendTaskToAgentLane(options) {
           params: {
             sessionKey: options.sessionKey,
             message: `[Giao việc cho ${options.agentId}]: ${options.prompt}`,
-            role: "assistant", // Hiện như phản hồi của manager trong lane của họ
             label: "Workflow Management"
           }
         });
@@ -544,10 +575,13 @@ function sendTaskToAgentLane(options) {
   return {
     runId,
     agentId: options.agentId,
+    workerAgentId,
     sessionKey,
     managerSessionKey: options.sessionKey, // Lưu lại để mirroring phản hồi
+    managerInstanceId: options.managerInstanceId || null,
     workflowId: options.workflowId,
     stepId: options.stepId,
+    taskId,
     pending,
     openClawHome: options.openClawHome
   };
@@ -566,6 +600,11 @@ async function waitForAgentResponse(task) {
       messages: [{
         id: `msg_${task.runId}_res`,
         conversationId: convId,
+        workflowId: task.workflowId,
+        taskId: task.taskId,
+        stepId: task.stepId,
+        workerAgentId: task.workerAgentId || task.agentId,
+        ...(task.managerInstanceId ? { managerInstanceId: task.managerInstanceId } : {}),
         role: "assistant",
         content: text,
         timestamp: Date.now()
@@ -581,7 +620,6 @@ async function waitForAgentResponse(task) {
           params: {
             sessionKey: task.managerSessionKey,
             message: `[Phản hồi từ ${task.agentId}]: ${text}`,
-            role: "assistant",
             label: "Workflow Result Sync"
           }
         });
@@ -614,6 +652,9 @@ async function sendToSession(options) {
     prompt: options.prompt,
     workflowId: options.envelope?.workflowId,
     stepId: options.envelope?.stepId,
+    taskId: options.envelope?.taskId,
+    managerInstanceId: options.envelope?.managerInstanceId || options.managerInstanceId,
+    workerAgentId: options.envelope?.toAgent || options.agentId,
     timeoutMs: options.timeoutMs,
   });
   const response = await waitForAgentResponse(task);

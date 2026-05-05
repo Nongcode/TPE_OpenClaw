@@ -3,7 +3,7 @@ name: gemini-generate-image
 metadata:
   openclaw:
     skillKey: "gemini_generate_image"
-description: Dùng Gemini web theo profile Edge cố định để tự động hóa trình duyệt, tạo ảnh, tải về thư mục `artifacts/images/` và ghi logs.
+description: Dung Gemini web theo profile browser co dinh de tao anh, tai anh ve thu muc `output_dir` duoc chi dinh (hoac mac dinh `artifacts/images/`), va ghi logs.
 requires:
   bins:
     - node
@@ -11,10 +11,37 @@ requires:
 
 # Skill `gemini_generate_image`
 
-## Instructions (Hướng dẫn cho AI Agent)
+## Instructions
 
-Để sử dụng skill này, bạn (AI Agent) PHẢI thực thi file `skills/gemini_generate_image/action.js` bằng lệnh dòng lệnh `node`, truyền đầu vào là một chuỗi JSON hợp lệ được đặt trong dấu ngoặc kép đơn (`'`). Các tham số mặc định (browser_path, user_data_dir...) có thể bỏ qua nếu người dùng không yêu cầu ghi đè.
+AI agent phai chay:
 
-**Câu lệnh thực thi:**
-```bash
-node skills/gemini_generate_image/action.js '{"image_prompt": "...", "dry_run": false}'
+```powershell
+node skills/gemini_generate_image/action.js --input_file .\artifacts\images\gemini_input.json
+```
+
+Khong uu tien nhet JSON truc tiep vao command line PowerShell, vi de roi truong `image_prompt`.
+
+## Input JSON
+
+File JSON can co toi thieu:
+
+```json
+{
+  "image_prompt": "...",
+  "image_paths": [
+    "C:/path/to/product-image.png",
+    "C:/path/to/logo.png"
+  ],
+  "output_dir": "C:/Users/Administrator/.openclaw/workspace_media/artifacts/images",
+  "dry_run": false
+}
+```
+
+## Required behavior
+
+- Khi tao anh, phai gui day du `image_prompt`.
+- Khi co reference, phai dua day du vao `image_paths`.
+- Neu workflow muon luu anh o thu muc co dinh, phai truyen ro `output_dir`.
+- Tren Windows/PowerShell, uu tien `--input_file`.
+- Khong sua file skill trong luc dang chay workflow thong thuong.
+- Neu tool fail, bao lai loi that tu output cua tool.

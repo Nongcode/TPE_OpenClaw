@@ -10,6 +10,41 @@ const { spawnSync } = require("child_process");
 
 const REPO_ROOT = path.resolve(__dirname, "..", "..", "..");
 
+function normalizeMediaPaths(mediaPaths) {
+  return (Array.isArray(mediaPaths) ? mediaPaths : [mediaPaths])
+    .filter(Boolean)
+    .map((item) => String(item).trim())
+    .filter(Boolean);
+}
+
+function splitMediaPathsByType(mediaPaths) {
+  const imagePaths = [];
+  const videoPaths = [];
+
+  for (const mediaPath of normalizeMediaPaths(mediaPaths)) {
+    const ext = path.extname(mediaPath).toLowerCase();
+    if ([".mp4", ".mov", ".avi", ".webm", ".mkv"].includes(ext)) {
+      videoPaths.push(mediaPath);
+    } else {
+      imagePaths.push(mediaPath);
+    }
+  }
+
+  return { imagePaths, videoPaths };
+}
+
+function buildSplitPublishResult(mode, imageResult, videoResult) {
+  return {
+    success: true,
+    data: {
+      mode,
+      post_ids: [extractPostId(imageResult), extractPostId(videoResult)].filter(Boolean),
+      image_publish_result: imageResult,
+      video_publish_result: videoResult,
+    },
+  };
+}
+
 /**
  * Chạy một skill local (subprocess).
  */
@@ -27,8 +62,12 @@ function runLocalSkill(skillName, payload) {
 
   const parsed = parseJsonFromOutput(run.stdout);
   if (!parsed?.success) {
+    const hintLogs = Array.isArray(parsed?.logs)
+      ? parsed.logs.filter((entry) => String(entry || "").toLowerCase().startsWith("[hint]"))
+      : [];
+    const hintText = hintLogs.length > 0 ? ` ${hintLogs.join(" ")}` : "";
     throw new Error(
-      parsed?.error?.details || parsed?.message || run.stderr || `${skillName} failed`,
+      `${parsed?.error?.details || parsed?.message || run.stderr || `${skillName} failed`}${hintText}`,
     );
   }
 
@@ -68,11 +107,121 @@ function parseJsonFromOutput(raw) {
  */
 function publishNow(params) {
   const { content, mediaPaths } = params;
+  const { imagePaths, videoPaths } = splitMediaPathsByType(mediaPaths);
+
+  if (imagePaths.length > 0 && videoPaths.length > 0) {
+    const imageResult = runLocalSkill("facebook_publish_post", {
+      caption_long: content,
+      media_paths: imagePaths,
+    });
+    const videoResult = runLocalSkill("facebook_publish_post", {
+      caption_long: content,
+      media_paths: videoPaths,
+    });
+    return buildSplitPublishResult("split_image_video", imageResult, videoResult);
+  }
 
   return runLocalSkill("facebook_publish_post", {
     caption_long: content,
-    media_paths: Array.isArray(mediaPaths) ? mediaPaths : [mediaPaths].filter(Boolean),
+    media_paths: normalizeMediaPaths(mediaPaths),
   });
+}
+
+function normalizeCanonicalPostId(candidatePostId, pageId) {
+  const rawPostId = String(candidatePostId || "").trim();
+  const normalizedPageId = String(pageId || "").trim();
+  if (!rawPostId) {
+    return "";
+  }
+  if (rawPostId.includes("_") || !normalizedPageId) {
+    return rawPostId;
+  }
+  return `${normalizedPageId}_${rawPostId}`;
+}
+
+function collectPublishEntries(publishResult) {
+  if (!publishResult || typeof publishResult !== "object") {
+    return [];
+  }
+
+  const nestedResults = [
+    publishResult?.data?.image_publish_result,
+    publishResult?.data?.video_publish_result,
+  ]
+    .filter(Boolean)
+    .flatMap((entry) => collectPublishEntries(entry));
+  if (nestedResults.length > 0) {
+    return nestedResults;
+  }
+
+  if (Array.isArray(publishResult?.data?.post_ids) && publishResult.data.post_ids.length > 0) {
+    return publishResult.data.post_ids
+      .map((postId) => {
+        const normalizedPostId = String(postId || "").trim();
+        if (!normalizedPostId) {
+          return null;
+        }
+        const pageId = normalizedPostId.includes("_") ? normalizedPostId.split("_")[0] : "";
+        return {
+          pageId,
+          postId: normalizedPostId,
+          permalink: "",
+          rawPostId: normalizedPostId,
+          raw: { post_id: normalizedPostId },
+        };
+      })
+      .filter(Boolean);
+  }
+
+  const directResults = Array.isArray(publishResult?.data?.results)
+    ? publishResult.data.results
+    : [publishResult];
+
+  return directResults
+    .map((entry) => {
+      const payload = entry?.data?.results ? null : entry;
+      if (!payload || typeof payload !== "object") {
+        return null;
+      }
+      const rawResponse = payload.raw_fb_response || publishResult?.data?.raw_fb_response || {};
+      const pageId = String(payload.page_id || publishResult?.data?.page_id || rawResponse.page_id || "").trim();
+      const rawPostId =
+        rawResponse.post_id ||
+        payload.post_id ||
+        publishResult?.data?.post_id ||
+        rawResponse.id ||
+        "";
+      const canonicalPostId = normalizeCanonicalPostId(rawPostId, pageId);
+      const permalink = String(
+        payload.permalink_url || rawResponse.permalink_url || publishResult?.data?.permalink_url || "",
+      ).trim();
+
+      return {
+        pageId,
+        postId: canonicalPostId,
+        permalink,
+        rawPostId: String(rawPostId || "").trim(),
+        raw: payload,
+      };
+    })
+    .filter(Boolean);
+}
+
+function extractCanonicalPublishResult(publishResult) {
+  const entries = collectPublishEntries(publishResult);
+  const pageIds = [...new Set(entries.map((entry) => entry.pageId).filter(Boolean))];
+  const postIds = [...new Set(entries.map((entry) => entry.postId).filter(Boolean))];
+  const permalink = entries.find((entry) => entry.permalink)?.permalink || "";
+
+  return {
+    status: publishResult?.success ? "published" : "error",
+    pageId: pageIds[0] || "",
+    pageIds,
+    postId: postIds[0] || "",
+    postIds,
+    permalink,
+    entries,
+  };
 }
 
 /**
@@ -86,10 +235,25 @@ function publishNow(params) {
  */
 function schedulePost(params) {
   const { content, mediaPaths, scheduleTime } = params;
+  const { imagePaths, videoPaths } = splitMediaPathsByType(mediaPaths);
+
+  if (imagePaths.length > 0 && videoPaths.length > 0) {
+    const imageResult = runLocalSkill("schedule_facebook_post", {
+      caption_long: content,
+      media_paths: imagePaths,
+      scheduled_publish_time: scheduleTime,
+    });
+    const videoResult = runLocalSkill("schedule_facebook_post", {
+      caption_long: content,
+      media_paths: videoPaths,
+      scheduled_publish_time: scheduleTime,
+    });
+    return buildSplitPublishResult("split_image_video", imageResult, videoResult);
+  }
 
   return runLocalSkill("schedule_facebook_post", {
     caption_long: content,
-    media_paths: Array.isArray(mediaPaths) ? mediaPaths : [mediaPaths].filter(Boolean),
+    media_paths: normalizeMediaPaths(mediaPaths),
     scheduled_publish_time: scheduleTime,
   });
 }
@@ -119,19 +283,21 @@ function editPublishedPost(params) {
  * Trích xuất Post ID từ kết quả publish.
  */
 function extractPostId(publishResult) {
-  return (
-    publishResult?.data?.post_id ||
-    publishResult?.data?.raw_fb_response?.id ||
-    publishResult?.data?.raw_fb_response?.post_id ||
-    ""
-  );
+  return extractCanonicalPublishResult(publishResult).postId;
+}
+
+function extractPostIds(publishResult) {
+  return extractCanonicalPublishResult(publishResult).postIds;
 }
 
 module.exports = {
   editPublishedPost,
+  extractCanonicalPublishResult,
   extractPostId,
+  extractPostIds,
   parseJsonFromOutput,
   publishNow,
   runLocalSkill,
   schedulePost,
+  splitMediaPathsByType,
 };

@@ -225,6 +225,27 @@ describe("OpenAI-compatible HTTP API (e2e)", () => {
         expect((opts as { sessionKey?: string } | undefined)?.sessionKey).toBe(
           "agent:beta:openai:custom",
         );
+        expect((opts as { agentId?: string } | undefined)?.agentId).toBe("beta");
+        await res.text();
+      }
+
+      {
+        mockAgentOnce([{ text: "hello" }]);
+        const res = await postChatCompletions(
+          port,
+          { model: "openclaw/pho_phong", messages: [{ role: "user", content: "hi" }] },
+          {
+            "x-openclaw-agent-id": "pho_phong",
+            "x-openclaw-session-key": "chat:pho_phong:conv_123",
+          },
+        );
+        expect(res.status).toBe(200);
+
+        const opts = (agentCommand.mock.calls[0] as unknown[] | undefined)?.[0];
+        expect((opts as { agentId?: string } | undefined)?.agentId).toBe("pho_phong");
+        expect((opts as { sessionKey?: string } | undefined)?.sessionKey).toBe(
+          "agent:pho_phong:chat:pho_phong:conv_123",
+        );
         await res.text();
       }
 

@@ -5,6 +5,7 @@ export const CONTROL_UI_CHAT_ARTIFACT_PATH = "/__openclaw/chat-artifact";
 export type ControlUiBootstrapAccessPolicy = {
   employeeId?: string;
   employeeName?: string;
+  managerInstanceId?: string;
   lockedAgentId?: string;
   lockedSessionKey?: string;
   canViewAllSessions?: boolean;
@@ -20,6 +21,7 @@ export type ControlUiDemoLoginAccount = {
   label?: string;
   employeeId?: string;
   employeeName?: string;
+  managerInstanceId?: string;
   lockedAgentId?: string;
 };
 

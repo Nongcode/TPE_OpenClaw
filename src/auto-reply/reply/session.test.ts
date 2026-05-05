@@ -1583,6 +1583,35 @@ describe("drainFormattedSystemEvents", () => {
       vi.useRealTimers();
     }
   });
+
+  it("suppresses exec lifecycle system events from queued output", async () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(new Date("2026-01-12T20:19:17Z"));
+
+      enqueueSystemEvent("Exec completed (keen-pra, code 0) :: done", {
+        sessionKey: "agent:main:main",
+      });
+      enqueueSystemEvent("Exec failed (faint-co, code 1) :: boom", {
+        sessionKey: "agent:main:main",
+      });
+      enqueueSystemEvent("Model switched.", { sessionKey: "agent:main:main" });
+
+      const result = await drainFormattedSystemEvents({
+        cfg: {} as OpenClawConfig,
+        sessionKey: "agent:main:main",
+        isMainSession: true,
+        isNewSession: false,
+      });
+
+      expect(result).toContain("Model switched.");
+      expect(result).not.toContain("Exec completed");
+      expect(result).not.toContain("Exec failed");
+    } finally {
+      resetSystemEventsForTest();
+      vi.useRealTimers();
+    }
+  });
 });
 
 describe("persistSessionUsageUpdate", () => {
