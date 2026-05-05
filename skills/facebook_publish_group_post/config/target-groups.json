@@ -1,0 +1,24 @@
+{
+  "delay_between_groups_ms": [25000, 55000],
+  "max_groups_per_run": 9,
+  "groups": [
+    { "id": "412910482507838",  "url": "https://www.facebook.com/groups/412910482507838/",  "enabled": true,  "status": "approved" },
+    { "id": "511947023271334",  "url": "https://www.facebook.com/groups/511947023271334/",  "enabled": true,  "status": "approved", "note": "Admin đã duyệt nhưng group có thể cấm Page — skill sẽ auto-skip nếu phát hiện banner" },
+    { "id": "197269339004985",  "url": "https://www.facebook.com/groups/197269339004985/",  "enabled": true,  "status": "approved" },
+    { "id": "728707047632317",  "url": "https://www.facebook.com/groups/728707047632317/",  "enabled": true,  "status": "approved" },
+    { "id": "2071043389847166", "url": "https://www.facebook.com/groups/2071043389847166/", "enabled": true,  "status": "approved" },
+    { "id": "1762500147338143", "url": "https://www.facebook.com/groups/1762500147338143/", "enabled": true,  "status": "approved" },
+    { "id": "794725172021868",  "url": "https://www.facebook.com/groups/794725172021868/",  "enabled": true,  "status": "approved" },
+    { "id": "190803758136873",  "url": "https://www.facebook.com/groups/190803758136873/",  "enabled": true,  "status": "approved" },
+    { "id": "475662039654576",  "url": "https://www.facebook.com/groups/475662039654576/",  "enabled": true,  "status": "approved" },
+
+    { "id": "natcenter",          "url": "https://www.facebook.com/groups/natcenter/",          "enabled": false, "status": "pending_approval" },
+    { "id": "2639332156177615",   "url": "https://www.facebook.com/groups/2639332156177615/",   "enabled": false, "status": "pending_approval" },
+    { "id": "2049687618602354",   "url": "https://www.facebook.com/groups/2049687618602354/",   "enabled": false, "status": "pending_approval" },
+    { "id": "306083421367869",    "url": "https://www.facebook.com/groups/306083421367869/",    "enabled": false, "status": "pending_approval" },
+    { "id": "376715416526453",    "url": "https://www.facebook.com/groups/376715416526453/",    "enabled": false, "status": "pending_approval" },
+    { "id": "HOILAIXEVIETNAM",    "url": "https://www.facebook.com/groups/HOILAIXEVIETNAM/",    "enabled": false, "status": "pending_approval" },
+    { "id": "1238801552956230",   "url": "https://www.facebook.com/groups/1238801552956230/",   "enabled": false, "status": "pending_approval" },
+    { "id": "356975618852723",    "url": "https://www.facebook.com/groups/356975618852723/",    "enabled": false, "status": "pending_approval" }
+  ]
+}

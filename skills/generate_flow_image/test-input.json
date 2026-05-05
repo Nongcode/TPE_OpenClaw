@@ -1,5 +1,5 @@
 {
-  "target_gemini_url": "https://labs.google/fx/vi/tools/flow/project/a6bfa516-4c6c-4628-a210-561b3337a034",
+  "target_gemini_url": "https://labs.google/fx/vi/tools/flow/project/ca452ad9-8b12-485f-9357-9def62da6ab2",
   "image_prompt": "Create one complete Facebook advertising image for the two-post car lift product. Keep the product shape, blue color, proportions, and structure faithful to the reference image. Use a clean professional auto repair garage background with modern lighting. Do not add people. Do not add text. Do not add any logo except the supplied company logo asset.",
   "image_paths": [
     "C:/Users/Administrator/.openclaw/workspace_content/artifacts/references/search_product_text/ca-u-na-ng-o-to-2-tru-hoa-t-o-ng-thuy-lu-c-co-ng-sua-t-na-ng-3.2-ta-n-model-gl-3.2-2e-1-pha/image_1920.webp",

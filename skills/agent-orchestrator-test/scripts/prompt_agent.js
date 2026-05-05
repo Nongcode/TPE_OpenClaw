@@ -11,6 +11,7 @@
 const fs = require("fs");
 const path = require("path");
 const memory = require("./memory");
+const mediaAgent = require("./media_agent");
 
 const KNOWLEDGE_FILE_CANDIDATES = [
   "prompt-library.md",
@@ -182,6 +183,9 @@ function buildPromptDraftPrompt(params) {
   } = params;
   const includeLogo = logoPaths.length > 0;
   const systemPrompt = buildPromptSystemPrompt("nv_prompt", openClawHome, { includeLogo });
+  const productImagePath = mediaAgent.normalizeAgentReportedPath(
+    state.content?.primaryProductImage || "",
+  );
   const retrievalQuery = [
     state.original_brief || "",
     state.content?.productName || "",
@@ -213,7 +217,7 @@ function buildPromptDraftPrompt(params) {
     `Loai media duoc yeu cau: ${mediaType}`,
     state.content?.productName ? `Ten san pham: ${state.content.productName}` : "",
     state.content?.productUrl ? `URL san pham: ${state.content.productUrl}` : "",
-    state.content?.primaryProductImage ? `Anh san pham goc bat buoc giu dung: ${state.content.primaryProductImage}` : "",
+    productImagePath ? `Anh san pham goc bat buoc giu dung: ${productImagePath}` : "",
     logoPaths.length > 0 ? `Logo bat buoc dung lam reference: ${logoPaths.join(" ; ")}` : "",
     "",
     "NOI DUNG DA DUYET:",
@@ -273,6 +277,9 @@ function buildPromptRevisePrompt(params) {
   } = params;
   const includeLogo = logoPaths.length > 0;
   const systemPrompt = buildPromptSystemPrompt("nv_prompt", openClawHome, { includeLogo });
+  const productImagePath = mediaAgent.normalizeAgentReportedPath(
+    state.content?.primaryProductImage || "",
+  );
   const retrievalQuery = [
     state.original_brief || "",
     state.content?.productName || "",
@@ -304,7 +311,7 @@ function buildPromptRevisePrompt(params) {
     `Loai media duoc yeu cau: ${mediaType}`,
     `Brief goc: ${state.original_brief || ""}`,
     state.content?.productName ? `Ten san pham: ${state.content.productName}` : "",
-    state.content?.primaryProductImage ? `Anh san pham goc bat buoc giu dung: ${state.content.primaryProductImage}` : "",
+    productImagePath ? `Anh san pham goc bat buoc giu dung: ${productImagePath}` : "",
     logoPaths.length > 0 ? `Logo bat buoc dung lam reference: ${logoPaths.join(" ; ")}` : "",
     "",
     "NOI DUNG DA DUYET:",

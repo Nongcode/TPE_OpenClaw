@@ -46,7 +46,7 @@ Workflow hien tai:
 - Khi `pho_phong` goi entry point orchestrator, phai cho lenh chay xong va lay ket qua cuoi cung roi moi tra loi user.
 - Khong duoc dung o trang thai `Process still running` trong luc dang cho `nv_content`; buoc nay bat buoc phai doi den khi co ban content de trinh duyet.
 - `pho_phong` khong duoc gui thong bao kieu "da nhan brief", "dang giao viec", "dang kiem tra", "dang render" truoc khi da chay entry point orchestrator cho tin nhan hien tai va da xac minh state that.
-- Chi duoc gui thong bao tien do tam thoi khi da xac minh worker van dang chay, chua co checkpoint duyet, va da poll du lau; thong bao tam thoi khong duoc thay the ket qua workflow cuoi cung.
+- Khong gui thong bao tien do tam thoi cho buoc content/media/video trong chat root; phai tiep tuc cho/poll cho toi khi co checkpoint that hoac loi that tu orchestrator.
 - Neu `current-workflow.json` da sang `awaiting_content_approval`, `awaiting_media_approval`, `awaiting_video_approval`, hoac `awaiting_publish_decision`, `pho_phong` phai trinh ngay checkpoint do, khong duoc tiep tuc noi "dang xu ly".
 - Neu `nv_content` dang research web hoac `nv_media` / `media_video` dang render, `pho_phong` phai tiep tuc theo doi dung state that; khong duoc tu y bao loi neu chua co bang chung loi ro rang tu orchestrator hoac artifact.
 - Summary media approval phai co:
@@ -61,7 +61,7 @@ Workflow hien tai:
 - Neu `human_message` co cac dong `MEDIA: "..."`, phai giu nguyen de gateway chat render anh; khong duoc doi sang duong dan text thuong.
 - O buoc tao media, neu lenh chay tra ve `Command still running`, `pho_phong` phai tiep tuc `process poll` thay vi dung lai sau lan poll dau.
 - Truoc khi gui thong bao tien do tam thoi, can kiem tra `workspace_phophong/agent-orchestrator-test/current-workflow.json`; neu da sang `awaiting_media_approval` thi phai trinh ngay media cho user duyet.
-- Chi cho phep thong bao tam thoi khi da doi lau ma tien trinh van chua ket thuc; khong dung thong bao tam thoi lam ket qua cuoi cung cua workflow.
+- Khong dung thong bao tam thoi lam ket qua cua workflow; neu tien trinh con chay, agent phai tiep tuc poll va chi tra checkpoint hoac loi that.
 
 ## Progress protocol
 
@@ -70,7 +70,7 @@ Workflow hien tai:
   - phai tiep tuc `process poll`;
   - phai kiem tra `agent-orchestrator-test/current-workflow.json`;
   - neu state da doi sang checkpoint duyet thi trinh ngay checkpoint do.
-- Chi duoc gui toi da 1 thong bao tam thoi khi da poll lau ma van chua co checkpoint; thong bao phai noi ro he thong van dang chay, khong duoc noi workflow loi, va khong duoc ket thuc turn tai do.
+- Khong gui thong bao tam thoi trong chat root; tiep tuc poll cho toi khi co checkpoint hoac loi that.
 - Khong duoc rerun entry point chi vi PowerShell in ra log giua chung hoac `NativeCommandError` neu state file va checkpoint cho thay workflow van dang tien trien.
 
 ## Learning
@@ -107,10 +107,7 @@ node D:/CodeAiTanPhat/TPE_OpenClaw/skills/agent-orchestrator-test/scripts/orches
 - Neu user vua gui lenh duyet/sua ma `current-workflow.json` van o stage cu, van phai goi orchestrator lai voi chinh tin nhan vua gui; khong duoc tu nhay sang suy doan la workflow dang render hay dang loi.
 - Neu buoc `nv_content` dang chay, khong duoc ket thuc turn bang mot cau tam thoi nhu "workflow thoat som" neu chua xac minh loi that tu orchestrator.
 - Neu entry point da chay ma tra ve `status=error`, phai bam dung `summary`/`human_message` cua orchestrator; khong tu doi nghia sang mot loi khac.
-- Neu entry point chua xong va process con dang chay:
-  - duoc phep gui 1 thong bao tien do ngan;
-  - nhung van phai tiep tuc poll cho toi khi co ket qua that;
-  - khong duoc coi thong bao tam thoi la cau tra loi cuoi cung.
+- Neu entry point chua xong va process con dang chay, tiep tuc poll cho toi khi co ket qua that; khong ket thuc turn bang thong bao tien do.
 - Neu orchestrator tra ve `stage = awaiting_content_approval`, `awaiting_media_approval`, `awaiting_video_approval`, hoac `awaiting_publish_decision`, `pho_phong` phai trinh dung checkpoint do; khong duoc tu y noi da sang buoc tiep theo.
 - Neu state file hoac ket qua recover da cho thay worker lam xong, `pho_phong` phai trinh ngay checkpoint duyet; khong duoc doi den khi user hoi lai "den dau roi".
 

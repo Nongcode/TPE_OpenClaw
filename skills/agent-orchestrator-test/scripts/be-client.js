@@ -48,6 +48,7 @@ async function resolveAutomationRootConversation(params) {
     employeeId: params.employeeId,
     brief: params.brief || "",
     sessionKey: params.sessionKey || null,
+    rootConversationId: params.rootConversationId || null,
   });
 }
 

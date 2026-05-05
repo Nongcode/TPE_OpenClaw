@@ -56,6 +56,14 @@ function isPlaceholderGeneratedPath(value) {
     .some((normalized) => normalized && placeholderValues.includes(normalized));
 }
 
+function isPathInsideDir(filePath, dirPath) {
+  if (!filePath || !dirPath) return false;
+  const resolvedFile = path.resolve(filePath);
+  const resolvedDir = path.resolve(dirPath);
+  const relative = path.relative(resolvedDir, resolvedFile);
+  return relative === "" || (relative && !relative.startsWith("..") && !path.isAbsolute(relative));
+}
+
 function resolveVideoOutputDir(openClawHome, workflowId = "") {
   const baseDir = path.join(
     openClawHome || "C:/Users/Administrator/.openclaw",
@@ -72,7 +80,7 @@ function resolveVideoOutputDir(openClawHome, workflowId = "") {
 }
 
 function assertVideoInputs(state, logoPaths = []) {
-  const productImage = state?.content?.primaryProductImage;
+  const productImage = mediaAgent.normalizeAgentReportedPath(state?.content?.primaryProductImage);
   if (!productImage || !String(productImage).trim()) {
     throw new Error("Thieu primaryProductImage. Dung workflow video_generate/video_revise.");
   }
@@ -89,6 +97,7 @@ function assertVideoInputs(state, logoPaths = []) {
       throw new Error(`Logo khong ton tai: ${logoPath}`);
     }
   }
+  return resolvedProductImage;
 }
 
 function normalizePathForCompare(value) {
@@ -156,7 +165,7 @@ function buildVideoPromptRequestPrompt(params) {
     openClawHome,
     logoPaths = mediaAgent.resolveLogoAssetPaths(openClawHome),
   } = params;
-  assertVideoInputs(state, logoPaths);
+  const productImagePath = assertVideoInputs(state, logoPaths);
   const guidelineSection = memory.buildWorkflowGuidelinesPromptSection(state.global_guidelines || []);
   const includeLogo = logoPaths.length > 0;
 
@@ -173,7 +182,7 @@ function buildVideoPromptRequestPrompt(params) {
     `Brief goc: ${state.original_brief}`,
     state.content?.productName ? `Ten san pham: ${state.content.productName}` : "",
     state.content?.productUrl ? `URL san pham: ${state.content.productUrl}` : "",
-    state.content?.primaryProductImage ? `Anh san pham goc bat buoc giu dung: ${state.content.primaryProductImage}` : "",
+    productImagePath ? `Anh san pham goc bat buoc giu dung: ${productImagePath}` : "",
     logoPaths.length > 0 ? `Logo cong ty bat buoc dung: ${logoPaths.join(" ; ")}` : "",
     "",
     "NOI DUNG DA DUYET:",
@@ -210,7 +219,7 @@ function buildVideoPromptReviseRequestPrompt(params) {
     openClawHome,
     logoPaths = mediaAgent.resolveLogoAssetPaths(openClawHome),
   } = params;
-  assertVideoInputs(state, logoPaths);
+  const productImagePath = assertVideoInputs(state, logoPaths);
   const guidelineSection = memory.buildWorkflowGuidelinesPromptSection(state.global_guidelines || []);
   const includeLogo = logoPaths.length > 0;
 
@@ -227,7 +236,7 @@ function buildVideoPromptReviseRequestPrompt(params) {
     `Brief goc: ${state.original_brief}`,
     `Nhan xet moi tu sep: ${feedback}`,
     state.content?.productName ? `Ten san pham: ${state.content.productName}` : "",
-    state.content?.primaryProductImage ? `Anh san pham goc bat buoc giu dung: ${state.content.primaryProductImage}` : "",
+    productImagePath ? `Anh san pham goc bat buoc giu dung: ${productImagePath}` : "",
     state.media?.generatedVideoPath ? `Video cu: ${state.media.generatedVideoPath}` : "",
     state.prompt_package?.videoPrompt ? `VIDEO_PROMPT_CU:\n${state.prompt_package.videoPrompt}` : "",
     logoPaths.length > 0 ? `Logo cong ty bat buoc dung: ${logoPaths.join(" ; ")}` : "",
@@ -266,7 +275,7 @@ function buildVideoGeneratePrompt(params) {
     promptPackage = {},
     logoPaths = mediaAgent.resolveLogoAssetPaths(openClawHome),
   } = params;
-  assertVideoInputs(state, logoPaths);
+  const productImagePath = assertVideoInputs(state, logoPaths);
   const guidelineSection = memory.buildWorkflowGuidelinesPromptSection(state.global_guidelines || []);
   const includeLogo = logoPaths.length > 0;
   const videoOutputDir = resolveVideoOutputDir(openClawHome, workflowId);
@@ -285,7 +294,7 @@ function buildVideoGeneratePrompt(params) {
     `Brief goc: ${state.original_brief}`,
     state.content?.productName ? `Ten san pham: ${state.content.productName}` : "",
     state.content?.productUrl ? `URL san pham: ${state.content.productUrl}` : "",
-    state.content?.primaryProductImage ? `Anh san pham goc bat buoc gui cho skill: ${state.content.primaryProductImage}` : "",
+    productImagePath ? `Anh san pham goc bat buoc gui cho skill: ${productImagePath}` : "",
     logoPaths.length > 0 ? `Logo cong ty bat buoc gui cho skill va prompt: ${logoPaths.join(" ; ")}` : "",
     `Thu muc output video bat buoc: ${videoOutputDir}`,
     "",
@@ -299,7 +308,7 @@ function buildVideoGeneratePrompt(params) {
     "- Goi skill generate_veo_video trong lane cua ban.",
     `- Tren Windows/PowerShell, tao 1 file JSON tam chua prompt + reference_image + logo_paths + output_dir roi goi: node ${videoActionPath} --input_file <duong_dan_file_json>.`,
     "- Dung DUNG VIDEO_PROMPT_DUOC_GIAO, khong tu y doi nghia.",
-    `- reference_image BAT BUOC la: ${state.content?.primaryProductImage || ""}`,
+    `- reference_image BAT BUOC la: ${productImagePath || ""}`,
     includeLogo
       ? `- logo_paths BAT BUOC la: ${logoPaths.join(" ; ")}`
       : "- logo_paths BAT BUOC la mang rong [] va no_company_logo=true de chi upload anh san pham goc.",
@@ -345,7 +354,7 @@ function buildVideoRevisePrompt(params) {
     promptPackage = state.prompt_package || {},
     logoPaths = mediaAgent.resolveLogoAssetPaths(openClawHome),
   } = params;
-  assertVideoInputs(state, logoPaths);
+  const productImagePath = assertVideoInputs(state, logoPaths);
   const guidelineSection = memory.buildWorkflowGuidelinesPromptSection(state.global_guidelines || []);
   const includeLogo = logoPaths.length > 0;
   const videoOutputDir = resolveVideoOutputDir(openClawHome, workflowId);
@@ -364,7 +373,7 @@ function buildVideoRevisePrompt(params) {
     `Brief goc: ${state.original_brief}`,
     `Nhan xet tu sep: ${feedback}`,
     state.content?.productName ? `Ten san pham: ${state.content.productName}` : "",
-    state.content?.primaryProductImage ? `Anh san pham goc bat buoc gui cho skill: ${state.content.primaryProductImage}` : "",
+    productImagePath ? `Anh san pham goc bat buoc gui cho skill: ${productImagePath}` : "",
     state.media?.generatedVideoPath ? `Video cu: ${state.media.generatedVideoPath}` : "",
     logoPaths.length > 0 ? `Logo cong ty bat buoc gui cho skill va prompt: ${logoPaths.join(" ; ")}` : "",
     `Thu muc output video bat buoc: ${videoOutputDir}`,
@@ -473,6 +482,9 @@ function parseVideoResult(reply, expected = {}) {
 
   if (!generatedVideoPath) {
     throw new Error("media_video reply bi thieu duong dan video that.");
+  }
+  if (expected.outputDir && !isPathInsideDir(generatedVideoPath, expected.outputDir)) {
+    throw new Error(`Sai thu muc video workflow. expected_dir=${expected.outputDir} actual=${generatedVideoPath}`);
   }
   if (!usedProductImage) {
     throw new Error("media_video reply bi thieu USED_PRODUCT_IMAGE.");

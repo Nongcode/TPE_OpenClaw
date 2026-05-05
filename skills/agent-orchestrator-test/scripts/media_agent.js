@@ -16,7 +16,19 @@ const REPO_ROOT = path.resolve(__dirname, "..", "..", "..");
 const DEFAULT_LOGO_DIR = "C:/Users/Administrator/.openclaw/assets/logos";
 const DEFAULT_LOGO_PATH = `${DEFAULT_LOGO_DIR}/logo.png`;
 const FLOW_IMAGE_PROJECT_URL =
-  "https://labs.google/fx/vi/tools/flow/project/a6bfa516-4c6c-4628-a210-561b3337a034";
+  "https://labs.google/fx/vi/tools/flow/project/4679cf5a-d618-444b-86ba-2210e96c6a69";
+const GENERATED_IMAGE_EXTENSIONS = [".png", ".jpg", ".jpeg", ".webp"];
+
+function normalizePlaceholderText(value) {
+  return String(value || "")
+    .trim()
+    .replace(/^[`'"]+|[`'"]+$/g, "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[_-]+/g, " ")
+    .replace(/\s+/g, " ")
+    .toLowerCase();
+}
 
 function extractBlock(source, startMarker, endMarker) {
   const text = String(source || "");
@@ -28,19 +40,43 @@ function extractBlock(source, startMarker, endMarker) {
 }
 
 function isPlaceholderGeneratedPath(value) {
-  const normalized = String(value || "").trim().toUpperCase();
+  const normalized = normalizeAgentReportedPath(value);
   if (!normalized) return false;
-  return [
-    "KHONG_CO_DO_SKILL_TRA_VE_LOI",
-    "KHONG_CO",
-    "NONE",
-    "NULL",
-    "N/A",
-  ].includes(normalized);
+
+  const slashNormalized = normalized.replace(/\\/g, "/");
+  const basename = path.posix.basename(slashNormalized);
+  const parsedBase = path.posix.parse(basename).name;
+  const candidates = [normalized, basename, parsedBase]
+    .map((item) => normalizePlaceholderText(item))
+    .filter(Boolean);
+  const placeholderTokens = new Set([
+    "khong co do skill tra ve loi",
+    "khong co",
+    "chua co",
+    "chua tao duoc",
+    "chua tao duoc anh",
+    "chua tao duoc video",
+    "khong tao duoc",
+    "khong tao duoc anh",
+    "khong tao duoc video",
+    "flow failed",
+    "failed",
+    "error",
+    "loi",
+    "none",
+    "null",
+    "n/a",
+    "n a",
+  ]);
+
+  return candidates.some((item) => placeholderTokens.has(item));
 }
 
 function isTransientGeneratedImagePath(value) {
-  const normalized = String(value || "").trim().replace(/\\/g, "/").toLowerCase();
+  const normalized = String(value || "")
+    .trim()
+    .replace(/\\/g, "/")
+    .toLowerCase();
   if (!normalized) return false;
   return /(?:^|\/)gemini-image-screenshot-[^/]+\.(png|jpg|jpeg|webp)$/.test(normalized);
 }
@@ -51,15 +87,117 @@ function normalizeAgentReportedPath(value) {
     .replace(/^[`'"]+|[`'"]+$/g, "");
   if (!trimmed) return "";
 
-  return trimmed
+  const repaired = trimmed
     .replace(/([A-Za-z]:\\Users\\Administrator)\.openclaw(?=\\|$)/gi, "$1\\.openclaw")
     .replace(/([A-Za-z]:\/Users\/Administrator)\.openclaw(?=\/|$)/gi, "$1/.openclaw");
+  return resolveExistingReferencePath(repaired);
+}
+
+function normalizeReferenceSlug(value) {
+  return String(value || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+}
+
+function resolveExistingReferencePath(filePath) {
+  const candidate = String(filePath || "").trim();
+  if (!candidate) return "";
+  try {
+    if (fs.existsSync(candidate)) {
+      return candidate;
+    }
+  } catch {
+    return candidate;
+  }
+
+  const slashPath = candidate.replace(/\\/g, "/");
+  const match = slashPath.match(
+    /^([A-Za-z]:\/Users\/Administrator\/\.openclaw\/workspace_content\/artifacts\/references\/search_product_text)\/([^/]+)\/([^/]+)$/i,
+  );
+  if (!match) return candidate;
+
+  const [, rootSlashPath, reportedSlug, fileName] = match;
+  const rootDir = rootSlashPath.replace(/\//g, path.sep);
+  const expectedSlug = normalizeReferenceSlug(reportedSlug);
+  if (!expectedSlug) return candidate;
+
+  try {
+    const entries = fs.readdirSync(rootDir, { withFileTypes: true });
+    for (const entry of entries) {
+      if (!entry.isDirectory()) continue;
+      if (normalizeReferenceSlug(entry.name) !== expectedSlug) continue;
+      const resolved = path.join(rootDir, entry.name, fileName);
+      if (fs.existsSync(resolved) && fs.statSync(resolved).isFile()) {
+        return resolved;
+      }
+    }
+  } catch {
+    return candidate;
+  }
+  return candidate;
 }
 
 function normalizeAgentReportedPaths(values) {
-  return (values || [])
-    .map((item) => normalizeAgentReportedPath(item))
-    .filter(Boolean);
+  return (values || []).map((item) => normalizeAgentReportedPath(item)).filter(Boolean);
+}
+
+function normalizePathForCompare(value) {
+  const normalized = normalizeAgentReportedPath(value);
+  if (!normalized) return "";
+  try {
+    return path.resolve(normalized).replace(/\\/g, "/").toLowerCase();
+  } catch {
+    return normalized.replace(/\\/g, "/").toLowerCase();
+  }
+}
+
+function isReferenceGeneratedImagePath(candidate, referencePaths = []) {
+  const normalizedCandidate = normalizePathForCompare(candidate);
+  if (!normalizedCandidate) return false;
+  if (normalizedCandidate.includes("/workspace_content/artifacts/references/")) return true;
+  if (normalizedCandidate.includes("/.openclaw/assets/logos/")) return true;
+
+  return (referencePaths || [])
+    .map((item) => normalizePathForCompare(item))
+    .filter(Boolean)
+    .some((referencePath) => referencePath === normalizedCandidate);
+}
+
+// Generated image checkpoints must point to a real image file, not a reference or status marker.
+function resolveGeneratedImageCandidatePath(value) {
+  const normalized = normalizeAgentReportedPath(value);
+  if (!normalized) return "";
+  const slashNormalized = normalized.replace(/\\/g, "/");
+  if (slashNormalized.startsWith("artifacts/")) {
+    return path.join(REPO_ROOT, slashNormalized.replace(/\//g, path.sep));
+  }
+  return path.resolve(normalized);
+}
+
+function resolveUsableGeneratedImagePath(value, referencePaths = []) {
+  const normalized = normalizeAgentReportedPath(value);
+  if (!normalized) return "";
+  if (isPlaceholderGeneratedPath(normalized) || isTransientGeneratedImagePath(normalized)) {
+    return "";
+  }
+
+  const resolved = resolveGeneratedImageCandidatePath(normalized);
+  const ext = path.extname(resolved).toLowerCase();
+  if (!GENERATED_IMAGE_EXTENSIONS.includes(ext)) {
+    return "";
+  }
+  if (isReferenceGeneratedImagePath(resolved, referencePaths)) {
+    return "";
+  }
+  try {
+    const stats = fs.statSync(resolved);
+    return stats.isFile() ? resolved : "";
+  } catch {
+    return "";
+  }
 }
 
 /**
@@ -83,7 +221,8 @@ function resolveLogoAssetPaths(openClawHome, limit = 8) {
   }
 
   try {
-    return fs.readdirSync(baseDir)
+    return fs
+      .readdirSync(baseDir)
       .filter((name) => /\.(png|jpe?g|webp|svg)$/i.test(name))
       .sort()
       .slice(0, limit)
@@ -93,9 +232,25 @@ function resolveLogoAssetPaths(openClawHome, limit = 8) {
   }
 }
 
-function resolveMediaOutputDir(openClawHome) {
-  const baseDir = path.join(openClawHome || "C:/Users/Administrator/.openclaw", "workspace_media", "artifacts", "images");
-  return path.normalize(baseDir);
+function safeOutputSegment(value) {
+  return String(value || "")
+    .trim()
+    .replace(/[^a-zA-Z0-9_.-]+/g, "_")
+    .replace(/^_+|_+$/g, "")
+    .slice(0, 120);
+}
+
+function resolveMediaOutputDir(openClawHome, workflowId = "", stepId = "") {
+  const baseDir = path.join(
+    openClawHome || "C:/Users/Administrator/.openclaw",
+    "workspace_media",
+    "artifacts",
+    "images",
+  );
+  const workflowSegment = safeOutputSegment(workflowId);
+  const stepSegment = safeOutputSegment(stepId);
+  if (!workflowSegment) return path.normalize(baseDir);
+  return path.normalize(path.join(baseDir, workflowSegment, stepSegment || "media"));
 }
 
 /**
@@ -143,7 +298,10 @@ function buildMediaPromptRequestPrompt(params) {
     logoPaths = resolveLogoAssetPaths(openClawHome),
   } = params;
   const systemPrompt = buildMediaSystemPrompt("nv_media", openClawHome);
-  const guidelineSection = memory.buildWorkflowGuidelinesPromptSection(state.global_guidelines || []);
+  const guidelineSection = memory.buildWorkflowGuidelinesPromptSection(
+    state.global_guidelines || [],
+  );
+  const productImagePath = normalizeAgentReportedPath(state.content?.primaryProductImage || "");
 
   const lines = [
     systemPrompt,
@@ -159,7 +317,7 @@ function buildMediaPromptRequestPrompt(params) {
     `Loai media can tao: ${mediaType}`,
     state.content?.productName ? `Ten san pham: ${state.content.productName}` : "",
     state.content?.productUrl ? `URL san pham: ${state.content.productUrl}` : "",
-    state.content?.primaryProductImage ? `Anh san pham goc bat buoc giu dung: ${state.content.primaryProductImage}` : "",
+    productImagePath ? `Anh san pham goc bat buoc giu dung: ${productImagePath}` : "",
     logoPaths.length > 0 ? `Logo cong ty se gui cho skill tao media: ${logoPaths.join(" ; ")}` : "",
     "",
     "NOI DUNG DA DUYET:",
@@ -197,7 +355,10 @@ function buildMediaPromptReviseRequestPrompt(params) {
     logoPaths = resolveLogoAssetPaths(openClawHome),
   } = params;
   const systemPrompt = buildMediaSystemPrompt("nv_media", openClawHome);
-  const guidelineSection = memory.buildWorkflowGuidelinesPromptSection(state.global_guidelines || []);
+  const guidelineSection = memory.buildWorkflowGuidelinesPromptSection(
+    state.global_guidelines || [],
+  );
+  const productImagePath = normalizeAgentReportedPath(state.content?.primaryProductImage || "");
 
   const lines = [
     systemPrompt,
@@ -213,14 +374,16 @@ function buildMediaPromptReviseRequestPrompt(params) {
     `Loai media can tao: ${mediaType}`,
     `Nhan xet moi tu sep: ${feedback}`,
     state.content?.productName ? `Ten san pham: ${state.content.productName}` : "",
-    state.content?.primaryProductImage ? `Anh san pham goc bat buoc giu dung: ${state.content.primaryProductImage}` : "",
+    productImagePath ? `Anh san pham goc bat buoc giu dung: ${productImagePath}` : "",
     logoPaths.length > 0 ? `Logo cong ty se gui cho skill tao media: ${logoPaths.join(" ; ")}` : "",
     "",
     "NOI DUNG DA DUYET:",
     state.content?.approvedContent || "",
     "",
     state.prompt_package?.imagePrompt ? `PROMPT ANH CU:\n${state.prompt_package.imagePrompt}` : "",
-    state.prompt_package?.videoPrompt ? `PROMPT VIDEO CU:\n${state.prompt_package.videoPrompt}` : "",
+    state.prompt_package?.videoPrompt
+      ? `PROMPT VIDEO CU:\n${state.prompt_package.videoPrompt}`
+      : "",
     state.media?.generatedImagePath ? `ANH CU: ${state.media.generatedImagePath}` : "",
     state.media?.generatedVideoPath ? `VIDEO CU: ${state.media.generatedVideoPath}` : "",
     "",
@@ -260,15 +423,21 @@ function buildMediaGeneratePrompt(params) {
   } = params;
   const agentId = "nv_media";
   const systemPrompt = buildMediaSystemPrompt(agentId, openClawHome);
-  const guidelineSection = memory.buildWorkflowGuidelinesPromptSection(state.global_guidelines || []);
-  const imageActionPath = path.join(REPO_ROOT, "skills", "generate_flow_image", "action.js").replace(/\\/g, "/");
+  const guidelineSection = memory.buildWorkflowGuidelinesPromptSection(
+    state.global_guidelines || [],
+  );
+  const imageActionPath = path
+    .join(REPO_ROOT, "skills", "generate_flow_image", "action.js")
+    .replace(/\\/g, "/");
 
-  const productImagePath = state.content?.primaryProductImage || "";
-  const mediaOutputDir = resolveMediaOutputDir(openClawHome);
+  const productImagePath = normalizeAgentReportedPath(state.content?.primaryProductImage || "");
+  const mediaOutputDir = resolveMediaOutputDir(openClawHome, workflowId, stepId);
   const promptContext = [
     promptPackage.imagePrompt ? `IMAGE_PROMPT_DUOC_GIAO:\n${promptPackage.imagePrompt}` : "",
     promptPackage.videoPrompt ? `VIDEO_PROMPT_DUOC_GIAO:\n${promptPackage.videoPrompt}` : "",
-  ].filter(Boolean).join("\n\n");
+  ]
+    .filter(Boolean)
+    .join("\n\n");
 
   const context = [
     `Brief goc: ${state.original_brief}`,
@@ -283,14 +452,17 @@ function buildMediaGeneratePrompt(params) {
     state.content?.approvedContent || "",
     "",
     promptContext,
-  ].filter(Boolean).join("\n");
+  ]
+    .filter(Boolean)
+    .join("\n");
 
   const imageInstruction = [
     "NEU CAN TAO ANH:",
     "- Goi skill generate_flow_image trong lane cua ban. Khong dung gemini_generate_image nua.",
     `- Tren Windows/PowerShell, tao 1 file JSON tam chua target_gemini_url=\"${FLOW_IMAGE_PROJECT_URL}\" + image_prompt + image_paths + output_dir + download_resolution=\"2k\" roi goi: node ${imageActionPath} --input_file <duong_dan_file_json>.`,
     "- Dung DUNG IMAGE_PROMPT_DUOC_GIAO, khong tu y doi nghia.",
-    "- image_paths BAT BUOC gom: [anh san pham goc, ...tat ca logo cong ty].",
+    `- image_paths BAT BUOC gom dung cac file that nay: [${[productImagePath, ...logoPaths].filter(Boolean).join(" ; ")}].`,
+    "- Neu IMAGE_PROMPT_DUOC_GIAO co duong dan cu/sai, van phai uu tien danh sach image_paths bat buoc o dong tren.",
     `- output_dir BAT BUOC la: ${mediaOutputDir}. Khong duoc de tool tu suy ra theo cwd.`,
     "- Muc tieu la tao ra anh quang cao cuoi cung tu reference that, khong phai background-only.",
     "- Khong doc lai SKILL.md ra chat. Khong thu lenh sai truoc roi moi sua. Khong tua thich sua file skill trong luc dang lam media.",
@@ -326,21 +498,10 @@ function buildMediaGeneratePrompt(params) {
 
   const mediaInstruction =
     mediaType === "both"
-      ? [
-          "LOAI MEDIA: BOTH",
-          imageInstruction,
-          "",
-          videoInstruction,
-        ].join("\n\n")
+      ? ["LOAI MEDIA: BOTH", imageInstruction, "", videoInstruction].join("\n\n")
       : mediaType === "video"
-        ? [
-            "LOAI MEDIA: VIDEO",
-            videoInstruction,
-          ].join("\n\n")
-        : [
-            "LOAI MEDIA: IMAGE",
-            imageInstruction,
-          ].join("\n\n");
+        ? ["LOAI MEDIA: VIDEO", videoInstruction].join("\n\n")
+        : ["LOAI MEDIA: IMAGE", imageInstruction].join("\n\n");
 
   const lines = [
     systemPrompt,
@@ -383,12 +544,15 @@ function buildMediaRevisePrompt(params) {
   } = params;
   const agentId = "nv_media";
   const systemPrompt = buildMediaSystemPrompt(agentId, openClawHome);
-  const guidelineSection = memory.buildWorkflowGuidelinesPromptSection(state.global_guidelines || []);
+  const guidelineSection = memory.buildWorkflowGuidelinesPromptSection(
+    state.global_guidelines || [],
+  );
 
-  const productImageInfo = state.content?.primaryProductImage
-    ? `Anh san pham goc bat buoc gui cho skill: ${state.content.primaryProductImage}`
+  const productImagePath = normalizeAgentReportedPath(state.content?.primaryProductImage || "");
+  const productImageInfo = productImagePath
+    ? `Anh san pham goc bat buoc gui cho skill: ${productImagePath}`
     : "";
-  const mediaOutputDir = resolveMediaOutputDir(openClawHome);
+  const mediaOutputDir = resolveMediaOutputDir(openClawHome, workflowId, stepId);
 
   const context = [
     `Brief goc: ${state.original_brief}`,
@@ -406,7 +570,9 @@ function buildMediaRevisePrompt(params) {
     state.media?.generatedImagePath ? `Anh cu: ${state.media.generatedImagePath}` : "",
     promptPackage.videoPrompt ? `Prompt video duoc giao:\n${promptPackage.videoPrompt}` : "",
     state.media?.generatedVideoPath ? `Video cu: ${state.media.generatedVideoPath}` : "",
-  ].filter(Boolean).join("\n");
+  ]
+    .filter(Boolean)
+    .join("\n");
 
   const isVideo = mediaType === "video";
   const isBoth = mediaType === "both";
@@ -425,24 +591,24 @@ function buildMediaRevisePrompt(params) {
         "USED_LOGO_PATHS: <danh sach logo, ngan cach boi ;>",
       ].join("\n")
     : isVideo
-    ? [
-        "Tra ve lai dung cac marker:",
-        "VIDEO_PROMPT_BEGIN",
-        "<prompt video da dung>",
-        "VIDEO_PROMPT_END",
-        "GENERATED_VIDEO_PATH: <duong dan video moi>",
-        "USED_PRODUCT_IMAGE: <duong dan anh san pham goc>",
-        "USED_LOGO_PATHS: <danh sach logo, ngan cach boi ;>",
-      ].join("\n")
-    : [
-        "Tra ve lai dung cac marker:",
-        "IMAGE_PROMPT_BEGIN",
-        "<prompt anh da dung>",
-        "IMAGE_PROMPT_END",
-        "GENERATED_IMAGE_PATH: <duong dan anh moi>",
-        "USED_PRODUCT_IMAGE: <duong dan anh san pham goc>",
-        "USED_LOGO_PATHS: <danh sach logo, ngan cach boi ;>",
-      ].join("\n");
+      ? [
+          "Tra ve lai dung cac marker:",
+          "VIDEO_PROMPT_BEGIN",
+          "<prompt video da dung>",
+          "VIDEO_PROMPT_END",
+          "GENERATED_VIDEO_PATH: <duong dan video moi>",
+          "USED_PRODUCT_IMAGE: <duong dan anh san pham goc>",
+          "USED_LOGO_PATHS: <danh sach logo, ngan cach boi ;>",
+        ].join("\n")
+      : [
+          "Tra ve lai dung cac marker:",
+          "IMAGE_PROMPT_BEGIN",
+          "<prompt anh da dung>",
+          "IMAGE_PROMPT_END",
+          "GENERATED_IMAGE_PATH: <duong dan anh moi>",
+          "USED_PRODUCT_IMAGE: <duong dan anh san pham goc>",
+          "USED_LOGO_PATHS: <danh sach logo, ngan cach boi ;>",
+        ].join("\n");
 
   const lines = [
     systemPrompt,
@@ -459,7 +625,9 @@ function buildMediaRevisePrompt(params) {
     "NHIEM VU:",
     `User yeu cau sua lai ${isBoth ? "anh va video" : isVideo ? "video" : "anh"}.`,
     "Hay thuc thi lai media theo dung prompt package da duoc giao va sua theo nhan xet cua sep.",
+    `Khi tao anh, image_paths BAT BUOC gom dung cac file that nay: [${[productImagePath, ...logoPaths].filter(Boolean).join(" ; ")}].`,
     "Khong duoc bo qua reference product image. Khi tao anh, khong duoc bo qua logo paths.",
+    "- Neu prompt cu co duong dan cu/sai, van phai uu tien danh sach image_paths bat buoc o dong tren.",
     "Khi tao anh, bat buoc goi skill generate_flow_image. Khong dung gemini_generate_image nua.",
     `Khi tao anh, output_dir BAT BUOC la: ${mediaOutputDir}.`,
     "",
@@ -485,6 +653,39 @@ function parseMediaPromptRequest(reply) {
     request,
     reply: text,
   };
+}
+
+function extractReportedToolFailureText(source) {
+  const lines = String(source || "")
+    .split(/\r?\n/g)
+    .map((line) =>
+      line
+        .trim()
+        .replace(/^[*-]\s*/, "")
+        .replace(/`/g, ""),
+    )
+    .filter(Boolean);
+  const picked = lines.filter((line) => {
+    const normalized = normalizePlaceholderText(line);
+    const isFailureDetail =
+      normalized.startsWith("chi tiet") &&
+      (normalized.includes("loi") ||
+        normalized.includes("flow") ||
+        normalized.includes("target page") ||
+        normalized.includes("disabled") ||
+        normalized.includes("timeout") ||
+        normalized.includes("composer"));
+    return (
+      normalized.includes("loi that tu tool") ||
+      normalized.includes("chi tiet loi") ||
+      isFailureDetail ||
+      normalized.includes("flow failed") ||
+      normalized.includes("flow submit failed") ||
+      normalized.includes("target page") ||
+      normalized.includes("disabled=true")
+    );
+  });
+  return picked.join("; ").slice(0, 800);
 }
 
 /**
@@ -537,22 +738,15 @@ function parseImageResult(reply) {
     for (const candidate of candidates) {
       const ext = path.extname(candidate).toLowerCase();
       if (extensions.length > 0 && !extensions.includes(ext)) continue;
-      const resolved = candidate.startsWith("artifacts/")
-        ? path.join(REPO_ROOT, candidate.replace(/\//g, path.sep))
-        : path.resolve(candidate);
-      // Thử kiểm tra file, nhưng nếu không check được thì vẫn chấp nhận
-      try {
-        if (fs.existsSync(resolved)) return resolved;
-      } catch {
-        // permission error hoặc race condition — vẫn trả path
-        return resolved;
-      }
+      const resolved = resolveUsableGeneratedImagePath(candidate, excludedPaths);
+      if (resolved) return resolved;
     }
-    // Fallback: trả candidate đầu tiên có extension đúng dù chưa verify trên disk
+    // Fallback scan still requires a verified generated image file.
     for (const candidate of candidates) {
       const ext = path.extname(candidate).toLowerCase();
       if (extensions.length > 0 && !extensions.includes(ext)) continue;
-      return path.resolve(candidate);
+      const resolved = resolveUsableGeneratedImagePath(candidate, excludedPaths);
+      if (resolved) return resolved;
     }
     return "";
   };
@@ -561,9 +755,9 @@ function parseImageResult(reply) {
   const usedProductImage = normalizeAgentReportedPath(extractField(text, "USED_PRODUCT_IMAGE"));
   const usedLogoPaths = normalizeAgentReportedPaths(
     extractField(text, "USED_LOGO_PATHS")
-    .split(/\s*;\s*/g)
-    .map((item) => item.trim())
-    .filter(Boolean),
+      .split(/\s*;\s*/g)
+      .map((item) => item.trim())
+      .filter(Boolean),
   );
   const companyGallerySynced = extractBooleanField(text, "COMPANY_GALLERY_SYNCED");
   const companyGalleryPath = normalizeAgentReportedPath(extractField(text, "COMPANY_GALLERY_PATH"));
@@ -578,16 +772,21 @@ function parseImageResult(reply) {
   let generatedImagePath = extractField(text, "GENERATED_IMAGE_PATH");
   generatedImagePath = normalizeAgentReportedPath(generatedImagePath);
   // Normalize forward/backslash
-  if (isPlaceholderGeneratedPath(generatedImagePath) || isTransientGeneratedImagePath(generatedImagePath)) {
-    generatedImagePath = "";
-  } else if (generatedImagePath) {
-    generatedImagePath = path.resolve(generatedImagePath);
-  } else {
-    generatedImagePath = extractFirstExistingPath(text, [".png", ".jpg", ".jpeg", ".webp"], [
+  if (generatedImagePath) {
+    generatedImagePath = resolveUsableGeneratedImagePath(generatedImagePath, [
       usedProductImage,
       ...usedLogoPaths,
     ]);
-    if (isTransientGeneratedImagePath(generatedImagePath)) {
+  } else {
+    generatedImagePath = extractFirstExistingPath(
+      text,
+      [".png", ".jpg", ".jpeg", ".webp"],
+      [usedProductImage, ...usedLogoPaths],
+    );
+    if (
+      isTransientGeneratedImagePath(generatedImagePath) ||
+      isReferenceGeneratedImagePath(generatedImagePath, [usedProductImage, ...usedLogoPaths])
+    ) {
       generatedImagePath = "";
     }
   }
@@ -597,7 +796,13 @@ function parseImageResult(reply) {
     process.stderr.write("[media_agent] WARN: Reply thiếu IMAGE_PROMPT block.\n");
   }
   if (!generatedImagePath) {
-    throw new Error("nv_media reply bi thieu duong dan anh that. Kiem tra lai output cua nv_media.");
+    const reportedFailure = extractReportedToolFailureText(text);
+    if (reportedFailure) {
+      throw new Error(`nv_media bao tao anh that bai: ${reportedFailure}`);
+    }
+    throw new Error(
+      "nv_media reply bi thieu duong dan anh that. Kiem tra lai output cua nv_media.",
+    );
   }
 
   return {
@@ -646,9 +851,9 @@ function parseVideoResult(reply) {
   const usedProductImage = normalizeAgentReportedPath(extractField(text, "USED_PRODUCT_IMAGE"));
   const usedLogoPaths = normalizeAgentReportedPaths(
     extractField(text, "USED_LOGO_PATHS")
-    .split(/\s*;\s*/g)
-    .map((item) => item.trim())
-    .filter(Boolean),
+      .split(/\s*;\s*/g)
+      .map((item) => item.trim())
+      .filter(Boolean),
   );
 
   return {
@@ -675,7 +880,9 @@ function parseMediaResult(reply, mediaType) {
       generatedVideoPath: videoResult.generatedVideoPath,
       mediaType: "both",
       usedProductImage: imageResult.usedProductImage || videoResult.usedProductImage,
-      usedLogoPaths: [...new Set([...(imageResult.usedLogoPaths || []), ...(videoResult.usedLogoPaths || [])])],
+      usedLogoPaths: [
+        ...new Set([...(imageResult.usedLogoPaths || []), ...(videoResult.usedLogoPaths || [])]),
+      ],
       companyGallerySynced: imageResult.companyGallerySynced,
       companyGalleryPath: imageResult.companyGalleryPath,
       companyGalleryCompanyId: imageResult.companyGalleryCompanyId,
@@ -736,7 +943,8 @@ function trackPromptVersion(workflowDir, workflowId, promptData) {
   const versionsDir = path.join(workflowDir, "prompt-versions");
   fs.mkdirSync(versionsDir, { recursive: true });
 
-  const existingFiles = fs.readdirSync(versionsDir)
+  const existingFiles = fs
+    .readdirSync(versionsDir)
     .filter((f) => f.startsWith(`${workflowId}_`) && f.endsWith(".json"))
     .sort();
 
@@ -774,9 +982,7 @@ function trackPromptVersion(workflowDir, workflowId, promptData) {
 async function compositeImage3Layers(params) {
   const sharp = tryLoadSharp();
   if (!sharp) {
-    throw new Error(
-      "Thu vien 'sharp' chua duoc cai dat. Chay: npm install sharp",
-    );
+    throw new Error("Thu vien 'sharp' chua duoc cai dat. Chay: npm install sharp");
   }
 
   const {
@@ -810,9 +1016,7 @@ async function compositeImage3Layers(params) {
   const targetProductHeight = Math.round(bgHeight * productHeightRatio);
 
   // B1: Đảm bảo có kênh alpha
-  const productWithAlpha = await sharp(productBuffer)
-    .ensureAlpha()
-    .toBuffer();
+  const productWithAlpha = await sharp(productBuffer).ensureAlpha().toBuffer();
 
   // B2: Đọc raw RGBA và xóa pixel gần trắng
   // QUAN TRỌNG: phải .ensureAlpha() lại TRƯỚC .raw() để đảm bảo 4 channels
@@ -821,7 +1025,7 @@ async function compositeImage3Layers(params) {
   const rawHeight = productWithAlphaMeta.height;
 
   const { data: rawPixels } = await sharp(productWithAlpha)
-    .ensureAlpha()   // force RGBA channels=4 trong raw output
+    .ensureAlpha() // force RGBA channels=4 trong raw output
     .raw()
     .toBuffer({ resolveWithObject: true });
 
@@ -910,21 +1114,13 @@ async function compositeImage3Layers(params) {
       left: bgWidth - logoWidth - logoMargin,
     });
   } else {
-    process.stderr.write(
-      `[media_agent] WARN: Logo khong ton tai tai ${logoPath}, bo qua lop 3.\n`,
-    );
+    process.stderr.write(`[media_agent] WARN: Logo khong ton tai tai ${logoPath}, bo qua lop 3.\n`);
   }
 
   // ─── COMPOSITE ──────────────────────────────────────────────────
-  const outFile = outputPath || backgroundPath.replace(
-    /(\.[a-z]+)$/i,
-    "_composite$1",
-  );
+  const outFile = outputPath || backgroundPath.replace(/(\.[a-z]+)$/i, "_composite$1");
 
-  await sharp(bgBuffer)
-    .composite(composites)
-    .png({ quality: 95 })
-    .toFile(outFile);
+  await sharp(bgBuffer).composite(composites).png({ quality: 95 }).toFile(outFile);
 
   return outFile;
 }
@@ -943,8 +1139,13 @@ module.exports = {
   parseImageResult,
   parseMediaResult,
   parseVideoResult,
+  isPlaceholderGeneratedPath,
+  isReferenceGeneratedImagePath,
+  isTransientGeneratedImagePath,
   normalizeAgentReportedPath,
+  resolveUsableGeneratedImagePath,
   resolveLogoAssetPaths,
+  resolveMediaOutputDir,
   routeMediaType,
   trackPromptVersion,
 };

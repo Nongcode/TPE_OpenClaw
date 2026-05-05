@@ -5,6 +5,7 @@ import { access, mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { chromium } from "playwright-core";
 import { buildChatVideoReplyPayload } from "../shared/chat-video-result.js";
+import { withBrowserProfileLock } from "../shared/browser-profile-lock.js";
 
 const DEFAULTS = {
   browser_path: "C:/Program Files/CocCoc/Browser/Application/browser.exe",
@@ -26,6 +27,9 @@ const DEFAULTS = {
 
 const UPLOAD_SETTLE_MS = 3000;
 const PRE_SUBMIT_SETTLE_MS = 3000;
+const MIN_GENERATED_VIDEO_BYTES = 64 * 1024;
+const VIDEO_PROGRESS_SETTLE_MS = 12000;
+const FALLBACK_FRESH_VIDEO_DELAY_MS = 90000;
 
 function buildResult({ success, message, data = {}, artifacts = [], logs = [], error = null }) {
   return { success, message, data, artifacts, logs, error };
@@ -634,6 +638,81 @@ async function isGenerationInFlight(page) {
   if (progressVisible) return true;
 
   return false;
+}
+
+async function collectGenerationProgressRegions(page) {
+  return page
+    .evaluate(() => {
+      const isVisible = (element) => {
+        if (!(element instanceof HTMLElement)) return false;
+        const style = window.getComputedStyle(element);
+        const rect = element.getBoundingClientRect();
+        return (
+          style.display !== "none" &&
+          style.visibility !== "hidden" &&
+          Number(style.opacity || "1") > 0 &&
+          rect.width >= 8 &&
+          rect.height >= 8
+        );
+      };
+
+      const normalize = (value) =>
+        String(value || "")
+          .normalize("NFKD")
+          .replace(/[\u0300-\u036f]/g, "")
+          .toLowerCase();
+
+      const percentNodes = Array.from(document.querySelectorAll("*")).filter((node) => {
+        if (!(node instanceof HTMLElement) || !isVisible(node)) return false;
+        const text = (node.textContent || "").trim();
+        return /^(?:100|[1-9]?\d)%$/.test(text);
+      });
+
+      const regions = [];
+      for (const node of percentNodes) {
+        let root = node;
+        let best = null;
+        for (
+          let current = node.parentElement;
+          current && current !== document.body;
+          current = current.parentElement
+        ) {
+          if (!(current instanceof HTMLElement) || !isVisible(current)) continue;
+          const rect = current.getBoundingClientRect();
+          const text = normalize(current.textContent || "");
+          const plausibleCard =
+            rect.width >= 180 &&
+            rect.height >= 120 &&
+            rect.width <= window.innerWidth * 0.9 &&
+            rect.height <= window.innerHeight * 0.9;
+          const hasMediaHint =
+            current.querySelector("video,img,canvas,svg") ||
+            text.includes("veo") ||
+            text.includes("video") ||
+            text.includes("tao") ||
+            text.includes("dang");
+          if (plausibleCard && hasMediaHint) {
+            const area = rect.width * rect.height;
+            if (!best || area < best.area) {
+              best = { element: current, area };
+            }
+          }
+        }
+        root = best?.element || root;
+        const rect = root.getBoundingClientRect();
+        const percent = Number((node.textContent || "").replace("%", ""));
+        regions.push({
+          x: rect.x,
+          y: rect.y,
+          width: rect.width,
+          height: rect.height,
+          percent: Number.isFinite(percent) ? percent : null,
+        });
+      }
+
+      return regions.sort((left, right) => left.y - right.y || left.x - right.x);
+    })
+    .catch(() => []);
 }
 
 async function clickComposerPlus(page, logs) {
@@ -1452,11 +1531,60 @@ async function waitForNewVideoSource(page, beforeVideoSources, timeoutMs, logs) 
   const startedAt = Date.now();
   let candidateSource = "";
   let stablePasses = 0;
+  let trackedProgressRegion = null;
+  let lastProgressAt = 0;
+  let lastProgressPercent = null;
+  let lastLogAt = 0;
 
   while (Date.now() - startedAt < timeoutMs) {
-    const currentSources = await collectVideoSources(page);
-    const freshSources = currentSources.filter((src) => src && !beforeSet.has(src));
-    const freshSource = freshSources[0] || "";
+    const progressRegions = await collectGenerationProgressRegions(page);
+    if (progressRegions.length > 0) {
+      const currentRegion = progressRegions[0];
+      trackedProgressRegion = trackedProgressRegion || currentRegion;
+      lastProgressAt = Date.now();
+      lastProgressPercent = currentRegion.percent;
+      candidateSource = "";
+      stablePasses = 0;
+      if (Date.now() - lastLogAt > 10000) {
+        lastLogAt = Date.now();
+        logs.push(
+          `[step6] Flow video generation still in progress percent=${currentRegion.percent}, region=${Math.round(
+            currentRegion.x,
+          )},${Math.round(currentRegion.y)},${Math.round(currentRegion.width)}x${Math.round(
+            currentRegion.height,
+          )}`,
+        );
+      }
+      await page.waitForTimeout(3000);
+      continue;
+    }
+
+    if (
+      trackedProgressRegion &&
+      lastProgressAt > 0 &&
+      Date.now() - lastProgressAt < VIDEO_PROGRESS_SETTLE_MS
+    ) {
+      await page.waitForTimeout(1500);
+      continue;
+    }
+
+    const currentRecords = await collectVideoRecords(page);
+    const freshRecords = currentRecords
+      .filter((record) => {
+        const inTrackedGenerationRegion = trackedProgressRegion
+          ? videoRecordOverlapsRegion(record, trackedProgressRegion)
+          : Date.now() - startedAt >= FALLBACK_FRESH_VIDEO_DELAY_MS;
+        return (
+          record.src &&
+          !beforeSet.has(record.src) &&
+          inTrackedGenerationRegion &&
+          record.readyState >= 2 &&
+          record.width >= 160 &&
+          record.height >= 90
+        );
+      })
+      .sort((left, right) => right.area - left.area);
+    const freshSource = freshRecords[0]?.src || "";
     const generationInFlight = await isGenerationInFlight(page).catch(() => false);
 
     if (freshSource) {
@@ -1469,12 +1597,21 @@ async function waitForNewVideoSource(page, beforeVideoSources, timeoutMs, logs) 
       }
 
       if (stablePasses >= 3 && !generationInFlight) {
-        logs.push(`[step6] PASS new video source is stable and generation is idle: ${freshSource}`);
+        const picked = freshRecords[0];
+        logs.push(
+          `[step6] PASS new generated video source is stable and generation is idle: ${freshSource} box=${Math.round(
+            picked.width,
+          )}x${Math.round(picked.height)} trackedProgress=${Boolean(trackedProgressRegion)} lastProgress=${
+            lastProgressPercent ?? "none"
+          }`,
+        );
         return freshSource;
       }
 
       logs.push(
-        `[step6] Waiting video source to settle: stablePasses=${stablePasses}, generationInFlight=${generationInFlight}`,
+        `[step6] Waiting video source to settle: stablePasses=${stablePasses}, generationInFlight=${generationInFlight}, trackedProgress=${Boolean(
+          trackedProgressRegion,
+        )}`,
       );
     }
 
@@ -1644,6 +1781,80 @@ async function findLeftmostVideoCard(page, logs) {
   };
 }
 
+async function findVideoCardBySource(page, sourceUrl, logs) {
+  const expectedSource = String(sourceUrl || "").trim();
+  if (!expectedSource) return null;
+
+  const videoNodes = page.locator("video");
+  const videoCount = await videoNodes.count();
+  const candidates = [];
+
+  for (let i = 0; i < videoCount; i += 1) {
+    const video = videoNodes.nth(i);
+    const src = await video
+      .evaluate((node) => {
+        const element = /** @type {HTMLVideoElement} */ (node);
+        return element.currentSrc || element.src || "";
+      })
+      .catch(() => "");
+    if (src !== expectedSource) continue;
+
+    const box = await video.boundingBox().catch(() => null);
+    if (!box) continue;
+    if (box.width < 80 || box.height < 60) continue;
+    candidates.push({ mediaIndex: i, x: box.x, y: box.y, w: box.width, h: box.height });
+  }
+
+  if (candidates.length === 0) {
+    logs.push("[step7] Could not map expected generated video source to a visible card");
+    return null;
+  }
+
+  candidates.sort((a, b) => {
+    const rowDelta = Math.abs(a.y - b.y);
+    if (rowDelta > 24) return a.y - b.y;
+    return a.x - b.x;
+  });
+
+  const chosenCard = candidates[0];
+  logs.push(
+    `[step7] Mapped expected generated source to card: x=${Math.round(
+      chosenCard.x,
+    )}, y=${Math.round(chosenCard.y)}, w=${Math.round(chosenCard.w)}, h=${Math.round(
+      chosenCard.h,
+    )}`,
+  );
+
+  const menuButtons = page.locator('button[aria-haspopup="menu"]');
+  const menuCount = await menuButtons.count();
+  let bestMenuIndex = -1;
+  let bestDistance = Number.POSITIVE_INFINITY;
+  const targetX = chosenCard.x + chosenCard.w - 24;
+  const targetY = chosenCard.y + 24;
+
+  for (let i = 0; i < menuCount; i += 1) {
+    const menuBtn = menuButtons.nth(i);
+    const box = await menuBtn.boundingBox().catch(() => null);
+    if (!box) continue;
+    if (box.y < chosenCard.y - 20 || box.y > chosenCard.y + 90) continue;
+    if (box.x < chosenCard.x - 40 || box.x > chosenCard.x + chosenCard.w + 60) continue;
+
+    const centerX = box.x + box.width / 2;
+    const centerY = box.y + box.height / 2;
+    const distance = Math.abs(centerX - targetX) + Math.abs(centerY - targetY);
+    if (distance < bestDistance) {
+      bestDistance = distance;
+      bestMenuIndex = i;
+    }
+  }
+
+  return {
+    media: videoNodes.nth(chosenCard.mediaIndex),
+    cardBox: chosenCard,
+    menuButton: bestMenuIndex >= 0 ? menuButtons.nth(bestMenuIndex) : null,
+  };
+}
+
 async function isPreviewOpen(page) {
   return page
     .locator('button:has-text("T\u1ea3i xu\u1ed1ng"), button:has-text("Download")')
@@ -1664,6 +1875,57 @@ async function collectVideoSources(page) {
         .filter(Boolean),
     )
     .catch(() => []);
+}
+
+async function collectVideoRecords(page) {
+  return page
+    .locator("video")
+    .evaluateAll((nodes) =>
+      nodes
+        .map((node) => {
+          const element = /** @type {HTMLVideoElement} */ (node);
+          const rect = element.getBoundingClientRect();
+          const style = window.getComputedStyle(element);
+          const src = element.currentSrc || element.src || "";
+          return {
+            src,
+            x: rect.x,
+            y: rect.y,
+            width: rect.width,
+            height: rect.height,
+            area: Math.max(0, rect.width) * Math.max(0, rect.height),
+            videoWidth: element.videoWidth || 0,
+            videoHeight: element.videoHeight || 0,
+            readyState: element.readyState || 0,
+            visible:
+              style.display !== "none" &&
+              style.visibility !== "hidden" &&
+              Number(style.opacity || "1") > 0 &&
+              rect.width >= 80 &&
+              rect.height >= 60,
+          };
+        })
+        .filter((record) => record.src && record.visible),
+    )
+    .catch(() => []);
+}
+
+function videoRecordOverlapsRegion(record, region) {
+  if (!record || !region) return false;
+  const left = Math.max(record.x, region.x);
+  const top = Math.max(record.y, region.y);
+  const right = Math.min(record.x + record.width, region.x + region.width);
+  const bottom = Math.min(record.y + record.height, region.y + region.height);
+  const overlapArea = Math.max(0, right - left) * Math.max(0, bottom - top);
+  const recordArea = Math.max(1, record.width * record.height);
+  const centerX = record.x + record.width / 2;
+  const centerY = record.y + record.height / 2;
+  const centerInside =
+    centerX >= region.x - 40 &&
+    centerX <= region.x + region.width + 40 &&
+    centerY >= region.y - 40 &&
+    centerY <= region.y + region.height + 40;
+  return overlapArea / recordArea >= 0.35 || centerInside;
 }
 
 async function tryDownloadNewestVideoBySource(
@@ -1981,6 +2243,43 @@ async function tryDownloadLatestVideo(page, outputDir, logs, preferredResolution
   return null;
 }
 
+async function tryDownloadExpectedVideoBySourceCard(
+  page,
+  expectedSource,
+  outputDir,
+  logs,
+  preferredResolution,
+) {
+  const target = await findVideoCardBySource(page, expectedSource, logs);
+  if (!target?.cardBox) {
+    return null;
+  }
+
+  logs.push("[step7] Download flow via the exact generated video card...");
+  const previewOpened = await openLatestCardPreview(page, target, logs);
+  if (previewOpened) {
+    const fromPreview = await tryDownloadFromPreviewTopBar(
+      page,
+      outputDir,
+      logs,
+      preferredResolution,
+    );
+    if (fromPreview) return fromPreview;
+  }
+
+  const fromMenu = await tryDownloadFromCardMenu(
+    page,
+    target,
+    outputDir,
+    logs,
+    preferredResolution,
+  );
+  if (fromMenu) return fromMenu;
+
+  logs.push("[step7] Exact generated video card did not yield a download");
+  return null;
+}
+
 async function tryDownloadLatestVideoWithFallbacks(
   context,
   page,
@@ -1988,7 +2287,24 @@ async function tryDownloadLatestVideoWithFallbacks(
   logs,
   preferredResolution,
   beforeVideoSources,
+  expectedSource = "",
 ) {
+  if (expectedSource) {
+    const byExactCard = await tryDownloadExpectedVideoBySourceCard(
+      page,
+      expectedSource,
+      outputDir,
+      logs,
+      preferredResolution,
+    );
+    if (byExactCard) return byExactCard;
+
+    logs.push(
+      "[step7] Skipping arbitrary latest-card/source fallback after exact generated card download failed to avoid returning an old video",
+    );
+    return null;
+  }
+
   const byUi = await tryDownloadLatestVideo(page, outputDir, logs, preferredResolution);
   if (byUi) return byUi;
 
@@ -2004,6 +2320,21 @@ async function tryDownloadLatestVideoWithFallbacks(
 
 function computeFileSha256(filePath) {
   return createHash("sha256").update(readFileSync(filePath)).digest("hex");
+}
+
+function looksLikeImagePayload(buffer) {
+  if (!buffer || buffer.length < 12) return false;
+  if (buffer[0] === 0x89 && buffer.slice(1, 4).toString("ascii") === "PNG") return true;
+  if (buffer[0] === 0xff && buffer[1] === 0xd8 && buffer[2] === 0xff) return true;
+  if (buffer.slice(0, 4).toString("ascii") === "RIFF" && buffer.slice(8, 12).toString("ascii") === "WEBP") {
+    return true;
+  }
+  return false;
+}
+
+function looksLikeHtmlPayload(buffer) {
+  const prefix = buffer.slice(0, 256).toString("utf8").trimStart().toLowerCase();
+  return prefix.startsWith("<!doctype html") || prefix.startsWith("<html") || prefix.includes("<body");
 }
 
 async function runPostGenerationQc({ videoPath, referenceImage, logs }) {
@@ -2034,8 +2365,14 @@ async function runPostGenerationQc({ videoPath, referenceImage, logs }) {
   }
 
   const videoBuffer = readFileSync(resolvedVideoPath);
-  if (!videoBuffer || videoBuffer.length < 1024) {
+  if (!videoBuffer || videoBuffer.length < MIN_GENERATED_VIDEO_BYTES) {
     return { pass: false, score: 0, reason: "Video QC fail: file video rong hoac qua nho" };
+  }
+  if (looksLikeImagePayload(videoBuffer)) {
+    return { pass: false, score: 0, reason: "Video QC fail: payload tai ve la anh, khong phai video" };
+  }
+  if (looksLikeHtmlPayload(videoBuffer)) {
+    return { pass: false, score: 0, reason: "Video QC fail: payload tai ve la HTML/error page" };
   }
 
   const qcResult = {
@@ -2155,11 +2492,23 @@ async function runPostGenerationQc({ videoPath, referenceImage, logs }) {
     return;
   }
 
-  let context;
-  let page;
-  let generationCompleted = false;
-  let connectedByCdp = false;
   try {
+    await withBrowserProfileLock(
+      {
+        browserPath: browser_path,
+        userDataDir: user_data_dir,
+        profileName: profile_name,
+        cdpUrl: cdp_url,
+        timeoutMs: Number(timeout_ms || 1200000),
+        logs,
+      },
+      async () => {
+        let context;
+        let page;
+        let generationCompleted = false;
+        let connectedByCdp = false;
+        try {
+
     if (cdp_url) {
       logs.push(`[step2] Connecting to existing browser via CDP: ${cdp_url}`);
       try {
@@ -2260,6 +2609,7 @@ async function runPostGenerationQc({ videoPath, referenceImage, logs }) {
         logs,
         download_resolution,
         beforeVideoSources,
+        newVideoSource,
       );
     }
 
@@ -2326,19 +2676,6 @@ async function runPostGenerationQc({ videoPath, referenceImage, logs }) {
         logs,
       }),
     );
-  } catch (error) {
-    logs.push(`[fail] ${error.stack || error.message}`);
-    printResult(
-      buildResult({
-        success: false,
-        message: "Failed during Veo video generation flow",
-        data: { project_url, prompt: effectivePrompt },
-        artifacts,
-        logs,
-        error: { details: error.message },
-      }),
-    );
-    process.exit(1);
   } finally {
     if (context) {
       if (generationCompleted && !connectedByCdp) {
@@ -2363,5 +2700,21 @@ async function runPostGenerationQc({ videoPath, referenceImage, logs }) {
     if (auto_close_browser) {
       await killAllCocCocBrowsers(logs);
     }
+  }
+      },
+    );
+  } catch (error) {
+    logs.push(`[fail] ${error.stack || error.message}`);
+    printResult(
+      buildResult({
+        success: false,
+        message: "Failed during Veo video generation flow",
+        data: { project_url, prompt: effectivePrompt },
+        artifacts,
+        logs,
+        error: { details: error.message },
+      }),
+    );
+    process.exit(1);
   }
 })();

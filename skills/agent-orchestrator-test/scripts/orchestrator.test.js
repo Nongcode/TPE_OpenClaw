@@ -10,6 +10,8 @@ const {
   buildRootSyncPayloadFromResult,
   buildStageHumanMessage,
   buildWorkflowScopedSessionKey,
+  isWorkflowScopedSessionKey,
+  resolveWorkflowScopedSessionKey,
   classifyContentDecision,
   classifyMediaDecision,
   continueWorkflow,
@@ -21,9 +23,11 @@ const {
   parseMediaReply,
   migrateState,
   resolveRootWorkflowBinding,
+  runContentCheckpointStep,
   runAutoNotifyWatcher,
   scanLatestGeneratedMedia,
   shouldSupersedePendingWorkflow,
+  syncRootMessageFromResult,
   validateContentCheckpointReply,
   waitForValidContentCheckpoint,
 } = require("./orchestrator");
@@ -38,8 +42,14 @@ const logger = require("./logger");
 const transport = require("./transport");
 const beClient = require("./be-client");
 
+const orchestratorSource = fs.readFileSync(path.join(__dirname, "orchestrator.js"), "utf8");
+
 test("classifyContentDecision detects approval", () => {
   assert.equal(classifyContentDecision("Duyet content, tao anh"), "approve");
+});
+
+test("classifyContentDecision treats image retry as content-approved media generation", () => {
+  assert.equal(classifyContentDecision("Tạo lại ảnh"), "approve");
 });
 
 test("classifyContentDecision detects rejection", () => {
@@ -71,12 +81,25 @@ test("buildStageHumanMessage builds media approval checkpoint text", () => {
       imagePrompt: "Prompt anh test",
     },
   });
-  assert.ok(text.includes("NV Media da tao xong media"));
+  assert.ok(text.includes("NV Media đã tạo xong media"));
   assert.ok(text.includes('MEDIA: "C:/media/generated.png"'));
-  assert.ok(text.includes("Da dung anh goc san pham lam tham chieu."));
-  assert.ok(text.includes("Da dung 1 logo cong ty."));
-  assert.ok(text.includes('Duyet anh, tao video: "Duyet anh, tao video"'));
+  assert.ok(text.includes("Đã dùng ảnh gốc sản phẩm làm tham chiếu."));
+  assert.ok(text.includes("Đã dùng 1 logo công ty."));
+  assert.ok(text.includes('Duyệt ảnh, tạo video: "Duyệt ảnh, tạo video"'));
   assert.doesNotMatch(text, /Prompt anh test/);
+});
+
+test("auto notify watcher defaults to long media timeout instead of the old short fallback", () => {
+  assert.match(orchestratorSource, /String\(params\.timeoutMs \|\| DEFAULT_MEDIA_TIMEOUT_MS\)/);
+  assert.doesNotMatch(orchestratorSource, /params\.timeoutMs \|\| 900000/);
+});
+
+test("auto notify watcher is detached and covers async media/video stages", () => {
+  assert.match(orchestratorSource, /detached:\s*true/);
+  assert.match(orchestratorSource, /generating_media:\s*"awaiting_media_approval"/);
+  assert.match(orchestratorSource, /revising_media:\s*"awaiting_media_approval"/);
+  assert.match(orchestratorSource, /generating_video:\s*"awaiting_video_approval"/);
+  assert.match(orchestratorSource, /revising_video:\s*"awaiting_video_approval"/);
 });
 
 test("buildRootSyncPayloadFromResult creates approval_request payload for media approval", () => {
@@ -113,6 +136,7 @@ test("buildRootSyncPayloadFromResult creates approval_request payload for media 
     stage: "awaiting_media_approval",
     type: "approval_request",
     eventId: "wf_live_1:awaiting_media_approval:checkpoint",
+    conversationStatus: "awaiting_media_approval",
     content: 'NV Media da tao xong media (image).\nMEDIA: "C:/artifacts/image.png"',
     rootConversationId: "conv_root_1",
   });
@@ -154,6 +178,7 @@ test("buildRootSyncPayloadFromResult creates publish result payload with postId"
     stage: "published",
     type: "regular",
     eventId: "wf_live_2:published:result",
+    conversationStatus: "published",
     content: "Bai viet da dang thanh cong.\nPost ID: 123456789",
     rootConversationId: "conv_root_2",
   });
@@ -180,6 +205,45 @@ test("migrateState clears placeholder video path and reopens publish decision st
   assert.equal(state.stage, "awaiting_publish_decision");
   assert.equal(state.media.generatedVideoPath, "");
   assert.equal(state.notifications.awaiting_video_approval, undefined);
+});
+
+test("buildStageHumanMessage builds publish decision text in Vietnamese", () => {
+  const text = buildStageHumanMessage({
+    stage: "awaiting_publish_decision",
+    media: {
+      generatedImagePath: "C:\\media\\approved-image.png",
+    },
+  });
+
+  assert.match(text, /Sếp đã duyệt content và ảnh/);
+  assert.match(text, /Ảnh sẽ đăng:/);
+  assert.match(text, /Có muốn tạo thêm video quảng cáo/);
+  assert.match(text, /Tạo video: "Tạo video"/);
+  assert.match(text, /Đăng ngay: "Đăng ngay"/);
+  assert.match(text, /Hẹn giờ: "Hẹn giờ 20:00 hôm nay"/);
+  assert.doesNotMatch(text, /Sep da|Anh se|Co muon|Tao video|Dang ngay|Hen gio/);
+});
+
+test("migrateState clears placeholder image path and reopens content approval stage", () => {
+  const state = migrateState({
+    workflow_id: "wf_live_image",
+    stage: "awaiting_media_approval",
+    media: {
+      generatedImagePath: "C:\\Users\\Administrator\\.openclaw\\workspace_phophong\\ch\u01b0a t\u1ea1o \u0111\u01b0\u1ee3c",
+      mediaType: "image",
+    },
+    notifications: {
+      awaiting_media_approval: {
+        at: "2026-04-23T00:00:00.000Z",
+        delivery: "sync",
+      },
+    },
+  });
+
+  assert.equal(state.stage, "awaiting_content_approval");
+  assert.equal(state.media.generatedImagePath, "");
+  assert.equal(state.notifications.awaiting_media_approval, undefined);
+  assert.match(state.last_error, /image output is missing or invalid/i);
 });
 
 test("parseVideoResult rejects placeholder generated video path", () => {
@@ -214,6 +278,48 @@ test("buildRootSyncPayloadFromResult skips transient running placeholders", () =
   );
 
   assert.equal(payload, null);
+});
+
+test("buildRootSyncPayloadFromResult syncs media errors as regular root messages", () => {
+  const tmpRoot = path.join(os.tmpdir(), `orchestrator-error-sync-${Date.now()}`);
+  const paths = {
+    currentFile: path.join(tmpRoot, "current-workflow.json"),
+    historyDir: path.join(tmpRoot, "history"),
+  };
+  fs.mkdirSync(paths.historyDir, { recursive: true });
+  fs.writeFileSync(
+    paths.currentFile,
+    JSON.stringify({
+      workflow_id: "wf_live_error",
+      stage: "awaiting_media_approval",
+      rootConversationId: "conv_root_error",
+    }),
+  );
+
+  const payload = buildRootSyncPayloadFromResult(
+    {
+      paths,
+      parentConversationId: null,
+    },
+    {
+      workflow_id: "wf_live_error",
+      stage: "awaiting_media_approval",
+      status: "error",
+      human_message: "Khong the tao media.\nLoi: GENERATED_IMAGE_PATH la anh tham chieu.",
+    },
+  );
+
+  assert.deepEqual(payload, {
+    workflowId: "wf_live_error",
+    stage: "awaiting_media_approval",
+    type: "regular",
+    eventId: "wf_live_error:awaiting_media_approval:error",
+    conversationStatus: "error",
+    content: "Khong the tao media.\nLoi: GENERATED_IMAGE_PATH la anh tham chieu.",
+    rootConversationId: "conv_root_error",
+  });
+
+  fs.rmSync(tmpRoot, { recursive: true, force: true });
 });
 
 test("CLI JSON mode stays machine-safe without stderr progress logs", () => {
@@ -313,7 +419,225 @@ test("runAutoNotifyWatcher persists root checkpoint through backend sync instead
   assert.equal(pushedEvents[0].conversationId, "conv_root_auto_notify");
   assert.equal(pushedEvents[0].injectToGateway, true);
   assert.equal(pushedEvents[0].type, "approval_request");
-  assert.match(String(pushedEvents[0].content || ""), /NV Media da tao xong media/);
+  assert.match(String(pushedEvents[0].content || ""), /NV Media đã tạo xong media/);
+});
+
+test("runAutoNotifyWatcher recovers completed content checkpoint from generating_content", async () => {
+  const harness = createWorkflowHarness("orchestrator-content-auto-notify");
+  const originalFindLatestWorkflowReplyInHistory = transport.findLatestWorkflowReplyInHistory;
+  const originalCreateSubAgentConversation = beClient.createSubAgentConversation;
+  const originalPushAutomationEvent = beClient.pushAutomationEvent;
+  const originalUpdateWorkflowStatus = beClient.updateWorkflowStatus;
+  const productImage = path.join(harness.tmpRoot, "content-product.png");
+  const pushedEvents = [];
+
+  fs.writeFileSync(productImage, "product");
+  const validReply = `
+WORKFLOW_META
+workflow_id: wf_content_auto_notify
+step_id: step_01_content
+
+TRANG_THAI
+completed
+
+KET_QUA
+PRODUCT_NAME: May nang 2 tru
+PRODUCT_URL: https://example.test/product
+IMAGE_DOWNLOAD_DIR: ${harness.tmpRoot}
+PRIMARY_PRODUCT_IMAGE: ${productImage}
+APPROVED_CONTENT_BEGIN
+Noi dung content tu NV Content.
+APPROVED_CONTENT_END
+`;
+
+  transport.findLatestWorkflowReplyInHistory = async () => validReply;
+  beClient.createSubAgentConversation = async () => ({
+    id: "conv_content_auto_notify",
+    sessionKey: "agent:nv_content:automation:wf_content_auto_notify:step_01_content",
+  });
+  beClient.pushAutomationEvent = async (payload) => {
+    pushedEvents.push(payload);
+    return { success: true };
+  };
+  beClient.updateWorkflowStatus = async () => ({ success: true });
+
+  fs.writeFileSync(
+    harness.paths.currentFile,
+    JSON.stringify({
+      workflow_id: "wf_content_auto_notify",
+      stage: "generating_content",
+      content_started_at: new Date(Date.now() - 10_000).toISOString(),
+      content_step_id: "step_01_content",
+      rootConversationId: "conv_root_content_auto_notify",
+      notifications: {},
+    }),
+  );
+
+  try {
+    await runAutoNotifyWatcher({
+      openClawHome: harness.openClawHome,
+      notifyWorkflowId: "wf_content_auto_notify",
+      notifyStage: "awaiting_content_approval",
+      notifySessionKey: "agent:nv_content:automation:wf_content_auto_notify:step_01_content",
+      timeoutMs: 30_000,
+    });
+  } finally {
+    transport.findLatestWorkflowReplyInHistory = originalFindLatestWorkflowReplyInHistory;
+    beClient.createSubAgentConversation = originalCreateSubAgentConversation;
+    beClient.pushAutomationEvent = originalPushAutomationEvent;
+    beClient.updateWorkflowStatus = originalUpdateWorkflowStatus;
+    harness.cleanup();
+  }
+
+  assert.equal(pushedEvents.length, 1);
+  assert.equal(pushedEvents[0].conversationId, "conv_root_content_auto_notify");
+  assert.equal(pushedEvents[0].type, "approval_request");
+  assert.equal(pushedEvents[0].injectToGateway, true);
+  assert.match(pushedEvents[0].content, /Noi dung content tu NV Content\./);
+});
+
+test("syncRootMessageFromResult marks checkpoint delivered only after backend sync succeeds", async () => {
+  const harness = createWorkflowHarness("orchestrator-root-sync-mark");
+  const originalPushAutomationEvent = beClient.pushAutomationEvent;
+  const originalUpdateWorkflowStatus = beClient.updateWorkflowStatus;
+
+  beClient.pushAutomationEvent = async () => ({ success: true });
+  beClient.updateWorkflowStatus = async () => ({ success: true });
+
+  fs.writeFileSync(
+    harness.paths.currentFile,
+    JSON.stringify({
+      workflow_id: "wf_root_sync_mark",
+      stage: "awaiting_media_approval",
+      rootConversationId: "conv_root_sync_mark",
+      media: {
+        generatedImagePath: "D:\\media\\generated.png",
+      },
+      notifications: {},
+    }),
+  );
+
+  try {
+    const delivered = await syncRootMessageFromResult(
+      {
+        paths: harness.paths,
+        options: { from: "pho_phong" },
+      },
+      {
+        workflow_id: "wf_root_sync_mark",
+        stage: "awaiting_media_approval",
+        status: "ok",
+        human_message: "NV Media da tao xong media.\nMEDIA: D:\\media\\generated.png",
+      },
+    );
+
+    assert.equal(delivered, true);
+    const persisted = JSON.parse(fs.readFileSync(harness.paths.currentFile, "utf8"));
+    assert.equal(persisted.notifications.awaiting_media_approval.delivery, "sync");
+  } finally {
+    beClient.pushAutomationEvent = originalPushAutomationEvent;
+    beClient.updateWorkflowStatus = originalUpdateWorkflowStatus;
+    harness.cleanup();
+  }
+});
+
+test("syncRootMessageFromResult leaves checkpoint unmarked when backend sync fails", async () => {
+  const harness = createWorkflowHarness("orchestrator-root-sync-fail");
+  const originalPushAutomationEvent = beClient.pushAutomationEvent;
+  const originalUpdateWorkflowStatus = beClient.updateWorkflowStatus;
+
+  beClient.pushAutomationEvent = async () => {
+    throw new Error("backend unavailable");
+  };
+  beClient.updateWorkflowStatus = async () => ({ success: true });
+
+  fs.writeFileSync(
+    harness.paths.currentFile,
+    JSON.stringify({
+      workflow_id: "wf_root_sync_fail",
+      stage: "awaiting_media_approval",
+      rootConversationId: "conv_root_sync_fail",
+      media: {
+        generatedImagePath: "D:\\media\\generated.png",
+      },
+      notifications: {},
+    }),
+  );
+
+  try {
+    const delivered = await syncRootMessageFromResult(
+      {
+        paths: harness.paths,
+        options: { from: "pho_phong" },
+      },
+      {
+        workflow_id: "wf_root_sync_fail",
+        stage: "awaiting_media_approval",
+        status: "ok",
+        human_message: "NV Media da tao xong media.\nMEDIA: D:\\media\\generated.png",
+      },
+    );
+
+    assert.equal(delivered, false);
+    const persisted = JSON.parse(fs.readFileSync(harness.paths.currentFile, "utf8"));
+    assert.equal(persisted.notifications.awaiting_media_approval, undefined);
+  } finally {
+    beClient.pushAutomationEvent = originalPushAutomationEvent;
+    beClient.updateWorkflowStatus = originalUpdateWorkflowStatus;
+    harness.cleanup();
+  }
+});
+
+test("syncRootMessageFromResult pushes recoverable errors to root conversation", async () => {
+  const harness = createWorkflowHarness("orchestrator-root-error-sync");
+  const originalPushAutomationEvent = beClient.pushAutomationEvent;
+  const originalUpdateWorkflowStatus = beClient.updateWorkflowStatus;
+  const pushedEvents = [];
+
+  beClient.pushAutomationEvent = async (payload) => {
+    pushedEvents.push(payload);
+    return { success: true };
+  };
+  beClient.updateWorkflowStatus = async () => ({ success: true });
+
+  fs.writeFileSync(
+    harness.paths.currentFile,
+    JSON.stringify({
+      workflow_id: "wf_root_error_sync",
+      stage: "awaiting_video_approval",
+      rootConversationId: "conv_root_error_sync",
+      notifications: {},
+    }),
+  );
+
+  try {
+    const delivered = await syncRootMessageFromResult(
+      {
+        paths: harness.paths,
+        options: { from: "pho_phong" },
+      },
+      {
+        workflow_id: "wf_root_error_sync",
+        stage: "awaiting_video_approval",
+        status: "error",
+        human_message: "Khong the tao video quang cao.\nLoi: file tai ve khong phai video.",
+      },
+    );
+
+    assert.equal(delivered, true);
+    assert.equal(pushedEvents.length, 1);
+    assert.equal(pushedEvents[0].type, "regular");
+    assert.equal(pushedEvents[0].status, "error");
+    assert.equal(pushedEvents[0].eventId, "wf_root_error_sync:awaiting_video_approval:error");
+    assert.match(pushedEvents[0].content, /Khong the tao video/);
+
+    const persisted = JSON.parse(fs.readFileSync(harness.paths.currentFile, "utf8"));
+    assert.equal(persisted.notifications?.awaiting_video_approval, undefined);
+  } finally {
+    beClient.pushAutomationEvent = originalPushAutomationEvent;
+    beClient.updateWorkflowStatus = originalUpdateWorkflowStatus;
+    harness.cleanup();
+  }
 });
 
 test("extract helpers read workflow markers", () => {
@@ -349,7 +673,24 @@ DE_XUAT_BUOC_TIEP:
   assert.equal(parsed.imageDir, "D:\\images");
 });
 
+test("sub-agent conversation creation lets backend inherit root employee scope by default", () => {
+  const source = fs.readFileSync(path.join(__dirname, "orchestrator.js"), "utf8");
+  assert.match(source, /employeeId: params\.employeeId \|\| undefined/);
+  assert.doesNotMatch(source, /employeeId: params\.employeeId \|\| params\.agentId/);
+});
+
+test("sub-agent runtime transcript is mirrored before final completion", () => {
+  assert.match(orchestratorSource, /startSubAgentRuntimeMirror/);
+  assert.match(orchestratorSource, /findLatestAssistantTextInHistory/);
+  assert.match(orchestratorSource, /final:\s*false/);
+  assert.match(orchestratorSource, /final:\s*true/);
+});
+
 test("parseMediaReply reads image prompt and output path", () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "orchestrator-media-reply-"));
+  const generatedPath = path.join(tmpDir, "image.png");
+  fs.writeFileSync(generatedPath, "image");
+
   const reply = `
 WORKFLOW_META:
 - workflow_id: wf_test
@@ -362,7 +703,7 @@ KET_QUA:
 IMAGE_PROMPT_BEGIN
 Prompt tieng Viet
 IMAGE_PROMPT_END
-GENERATED_IMAGE_PATH: D:\\output\\image.png
+GENERATED_IMAGE_PATH: ${generatedPath}
 USED_PRODUCT_IMAGE: D:\\images\\product.png
 USED_LOGO_PATHS: C:\\logos\\logo.png
 
@@ -372,9 +713,13 @@ RUI_RO:
 DE_XUAT_BUOC_TIEP:
 - cho user duyet
 `;
-  const parsed = parseMediaReply(reply);
-  assert.equal(parsed.imagePrompt, "Prompt tieng Viet");
-  assert.equal(parsed.generatedImagePath, "D:\\output\\image.png");
+  try {
+    const parsed = parseMediaReply(reply);
+    assert.equal(parsed.imagePrompt, "Prompt tieng Viet");
+    assert.equal(parsed.generatedImagePath, path.resolve(generatedPath));
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
 });
 
 test("scanLatestGeneratedMedia can recover repo-level generated image artifacts", () => {
@@ -419,29 +764,142 @@ test("scanLatestGeneratedMedia ignores gemini after screenshots when a downloade
   fs.rmSync(tmpRoot, { recursive: true, force: true });
 });
 
+test("scanLatestGeneratedMedia strict image scan ignores shared artifacts", () => {
+  const tmpRoot = path.join(os.tmpdir(), `orchestrator-image-strict-${Date.now()}`);
+  const openClawHome = path.join(tmpRoot, ".openclaw");
+  const workflowImageDir = path.join(
+    openClawHome,
+    "workspace_media",
+    "artifacts",
+    "images",
+    "wf_test",
+    "step_03_media",
+  );
+  const sharedImageDir = path.join(openClawHome, "workspace_media", "artifacts", "images");
+  const startedAtIso = new Date(Date.now() - 10_000).toISOString();
+  const wrongImagePath = path.join(sharedImageDir, "flow-image-2k-other.png");
+
+  fs.mkdirSync(workflowImageDir, { recursive: true });
+  fs.mkdirSync(sharedImageDir, { recursive: true });
+  fs.writeFileSync(wrongImagePath, Buffer.alloc(4096, 1));
+
+  const result = scanLatestGeneratedMedia(openClawHome, startedAtIso, {
+    imageDirs: [workflowImageDir],
+    strictImageDirs: true,
+  });
+  assert.equal(result.imagePath, "");
+
+  fs.rmSync(tmpRoot, { recursive: true, force: true });
+});
+
+test("scanLatestGeneratedMedia rejects recovered images that reuse old media bytes", () => {
+  const tmpRoot = path.join(os.tmpdir(), `orchestrator-image-hash-${Date.now()}`);
+  const openClawHome = path.join(tmpRoot, ".openclaw");
+  const workflowImageDir = path.join(
+    openClawHome,
+    "workspace_media",
+    "artifacts",
+    "images",
+    "wf_test",
+    "step_03b_media_revise",
+  );
+  const startedAtIso = new Date(Date.now() - 10_000).toISOString();
+  const oldImagePath = path.join(workflowImageDir, "old-approved.png");
+  const duplicateNewPath = path.join(workflowImageDir, "flow-image-2k-duplicate.png");
+  const freshNewPath = path.join(workflowImageDir, "flow-image-2k-fresh.png");
+
+  fs.mkdirSync(workflowImageDir, { recursive: true });
+  fs.writeFileSync(oldImagePath, Buffer.alloc(4096, 7));
+  fs.writeFileSync(duplicateNewPath, Buffer.alloc(4096, 7));
+  fs.writeFileSync(freshNewPath, Buffer.alloc(4096, 9));
+
+  const now = Date.now();
+  fs.utimesSync(freshNewPath, new Date(now - 2_000), new Date(now - 2_000));
+  fs.utimesSync(duplicateNewPath, new Date(now), new Date(now));
+
+  const result = scanLatestGeneratedMedia(openClawHome, startedAtIso, {
+    imageDirs: [workflowImageDir],
+    strictImageDirs: true,
+    blockedPaths: [oldImagePath],
+  });
+  assert.equal(result.imagePath, freshNewPath);
+
+  fs.rmSync(tmpRoot, { recursive: true, force: true });
+});
+
+test("resolveMediaOutputDir scopes automatic media outputs by workflow and step", () => {
+  const openClawHome = path.join(os.tmpdir(), "openclaw-home");
+  const outputDir = mediaAgent.resolveMediaOutputDir(
+    openClawHome,
+    "wf_123:unsafe",
+    "step_03 media",
+  );
+  assert.equal(
+    outputDir,
+    path.normalize(
+      path.join(
+        openClawHome,
+        "workspace_media",
+        "artifacts",
+        "images",
+        "wf_123_unsafe",
+        "step_03_media",
+      ),
+    ),
+  );
+});
+
 test("scanLatestGeneratedMedia prefers explicit workflow video dir and ignores non-veo files", () => {
   const tmpRoot = path.join(os.tmpdir(), `orchestrator-video-scan-${Date.now()}`);
   const openClawHome = path.join(tmpRoot, ".openclaw");
   const workflowVideoDir = path.join(openClawHome, "workspace_media_video", "artifacts", "videos", "wf_test");
   const sharedVideoDir = path.join(openClawHome, "workspace_media_video", "artifacts", "videos");
   const startedAtIso = new Date(Date.now() - 10_000).toISOString();
-  const wrongVideoPath = path.join(sharedVideoDir, "other-product.mp4");
+  const wrongVideoPath = path.join(sharedVideoDir, "veo-720p-other-product.mp4");
+  const ignoredVideoPath = path.join(workflowVideoDir, "other-product.mp4");
   const rightVideoPath = path.join(workflowVideoDir, "veo-720p-test.mp4");
 
   fs.mkdirSync(workflowVideoDir, { recursive: true });
   fs.mkdirSync(sharedVideoDir, { recursive: true });
   fs.writeFileSync(wrongVideoPath, Buffer.alloc(4096, 1));
+  fs.writeFileSync(ignoredVideoPath, Buffer.alloc(4096, 3));
   fs.writeFileSync(rightVideoPath, Buffer.alloc(4096, 2));
 
   const now = new Date();
   fs.utimesSync(wrongVideoPath, now, now);
-  fs.utimesSync(rightVideoPath, now, now);
+  fs.utimesSync(ignoredVideoPath, new Date(now.getTime() + 1_000), new Date(now.getTime() + 1_000));
+  fs.utimesSync(rightVideoPath, new Date(now.getTime() - 1_000), new Date(now.getTime() - 1_000));
 
   const result = scanLatestGeneratedMedia(openClawHome, startedAtIso, {
     agentId: "media_video",
     videoDirs: [workflowVideoDir],
   });
   assert.equal(result.videoPath, rightVideoPath);
+
+  fs.rmSync(tmpRoot, { recursive: true, force: true });
+});
+
+test("scanLatestGeneratedMedia strict video scan does not fall back to shared video dir", () => {
+  const tmpRoot = path.join(os.tmpdir(), `orchestrator-video-strict-${Date.now()}`);
+  const openClawHome = path.join(tmpRoot, ".openclaw");
+  const workflowVideoDir = path.join(openClawHome, "workspace_media_video", "artifacts", "videos", "wf_empty");
+  const sharedVideoDir = path.join(openClawHome, "workspace_media_video", "artifacts", "videos");
+  const startedAtIso = new Date(Date.now() - 10_000).toISOString();
+  const wrongVideoPath = path.join(sharedVideoDir, "veo-720p-other-product.mp4");
+
+  fs.mkdirSync(workflowVideoDir, { recursive: true });
+  fs.mkdirSync(sharedVideoDir, { recursive: true });
+  fs.writeFileSync(wrongVideoPath, Buffer.alloc(4096, 1));
+
+  const now = new Date();
+  fs.utimesSync(wrongVideoPath, now, now);
+
+  const result = scanLatestGeneratedMedia(openClawHome, startedAtIso, {
+    agentId: "media_video",
+    videoDirs: [workflowVideoDir],
+    strictVideoDirs: true,
+  });
+  assert.equal(result.videoPath, "");
 
   fs.rmSync(tmpRoot, { recursive: true, force: true });
 });
@@ -464,6 +922,43 @@ function createWorkflowHarness(name) {
     },
   };
 }
+
+test("continueWorkflow blocked response is UTF-8 clean and hints image retry", async () => {
+  const harness = createWorkflowHarness("orchestrator-blocked-utf8");
+  try {
+    const state = {
+      workflow_id: "wf_blocked_utf8",
+      stage: "awaiting_content_approval",
+      intent: { intent: "CREATE_NEW", media_type_requested: "image" },
+      content: {
+        productName: "Sản phẩm demo",
+        approvedContent: "Nội dung đã viết.",
+      },
+      notifications: {},
+      reject_history: [],
+      prompt_versions: [],
+      global_guidelines: [],
+    };
+
+    const result = await continueWorkflow(
+      {
+        message: "abcxyz",
+        openClawHome: harness.openClawHome,
+        paths: harness.paths,
+        registry: { byId: {} },
+        options: { timeoutMs: 120_000 },
+      },
+      state,
+    );
+
+    assert.equal(result.status, "blocked");
+    assert.match(result.summary, /Đang có workflow pending: Đang chờ duyệt content/);
+    assert.match(result.summary, /"Tạo lại ảnh"/);
+    assert.doesNotMatch(result.summary, /�|ï¿½|Ã|áº|Ä/);
+  } finally {
+    harness.cleanup();
+  }
+});
 
 test("hasAsyncStageExceededGrace stays false before timeout", () => {
   assert.equal(hasAsyncStageExceededGrace(new Date(Date.now() - 1_000).toISOString(), 5_000), false);
@@ -520,6 +1015,65 @@ test("continueWorkflow keeps generating_video running while worker is still with
     assert.equal(result.status, "running");
     assert.equal(result.stage, "generating_video");
     assert.match(result.summary, /render video/i);
+
+    const persisted = JSON.parse(fs.readFileSync(harness.paths.currentFile, "utf8"));
+    assert.equal(persisted.stage, "generating_video");
+  } finally {
+    transport.findLatestWorkflowReplyInHistory = originalFindLatestWorkflowReplyInHistory;
+    beClient.createSubAgentConversation = originalCreateSubAgentConversation;
+    harness.cleanup();
+  }
+});
+
+test("continueWorkflow keeps generating_video running after grace instead of downgrading workflow", async () => {
+  const harness = createWorkflowHarness("orchestrator-video-long-running");
+  const originalFindLatestWorkflowReplyInHistory = transport.findLatestWorkflowReplyInHistory;
+  const originalCreateSubAgentConversation = beClient.createSubAgentConversation;
+
+  transport.findLatestWorkflowReplyInHistory = async () => null;
+  beClient.createSubAgentConversation = async () => null;
+
+  try {
+    const state = {
+      workflow_id: "wf_live_video_long_running",
+      stage: "generating_video",
+      intent: { intent: "CREATE_NEW", media_type_requested: "both" },
+      video_generating_started_at: new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString(),
+      content: {
+        primaryProductImage: "D:\\images\\product.png",
+      },
+      media: {
+        usedLogoPaths: ["C:\\logos\\logo.png"],
+      },
+      prompt_package: {
+        videoPrompt: "Prompt video test",
+      },
+      notifications: {},
+      reject_history: [],
+      prompt_versions: [],
+      global_guidelines: [],
+    };
+    fs.writeFileSync(harness.paths.currentFile, JSON.stringify(state, null, 2));
+
+    const result = await continueWorkflow(
+      {
+        message: "Video den dau roi",
+        openClawHome: harness.openClawHome,
+        paths: harness.paths,
+        registry: {
+          byId: {
+            media_video: { transport: { sessionKey: "agent:media_video:main" } },
+          },
+        },
+        options: {
+          timeoutMs: 120_000,
+        },
+      },
+      state,
+    );
+
+    assert.equal(result.status, "running");
+    assert.equal(result.stage, "generating_video");
 
     const persisted = JSON.parse(fs.readFileSync(harness.paths.currentFile, "utf8"));
     assert.equal(persisted.stage, "generating_video");
@@ -601,6 +1155,102 @@ test("continueWorkflow promotes generating_video to awaiting_video_approval when
   } finally {
     transport.findLatestWorkflowReplyInHistory = originalFindLatestWorkflowReplyInHistory;
     beClient.createSubAgentConversation = originalCreateSubAgentConversation;
+    harness.cleanup();
+  }
+});
+
+test("continueWorkflow recovers completed content checkpoint and copies review image", async () => {
+  const harness = createWorkflowHarness("orchestrator-content-recover");
+  const originalFindLatestWorkflowReplyInHistory = transport.findLatestWorkflowReplyInHistory;
+  const originalCreateSubAgentConversation = beClient.createSubAgentConversation;
+  const originalPersistMessages = beClient.persistMessages;
+  const originalUpdateWorkflowStatus = beClient.updateWorkflowStatus;
+  const originalPushAutomationEvent = beClient.pushAutomationEvent;
+  const productImage = path.join(harness.tmpRoot, "product.png");
+  const pushedEvents = [];
+
+  fs.writeFileSync(productImage, "product");
+  const validReply = `
+WORKFLOW_META
+workflow_id: wf_content_recover
+step_id: step_01_content
+
+TRANG_THAI
+completed
+
+KET_QUA
+PRODUCT_NAME: May nang 2 tru
+PRODUCT_URL: https://example.test/product
+IMAGE_DOWNLOAD_DIR: ${harness.tmpRoot}
+PRIMARY_PRODUCT_IMAGE: ${productImage}
+APPROVED_CONTENT_BEGIN
+Noi dung chot.
+APPROVED_CONTENT_END
+`;
+
+  transport.findLatestWorkflowReplyInHistory = async () => validReply;
+  beClient.createSubAgentConversation = async () => ({
+    id: "conv_content_recover",
+    sessionKey: "agent:nv_content:automation:wf_content_recover:step_01_content",
+  });
+  beClient.persistMessages = async () => ({ success: true });
+  beClient.updateWorkflowStatus = async () => ({ success: true });
+  beClient.pushAutomationEvent = async (event) => {
+    pushedEvents.push(event);
+    return { success: true };
+  };
+
+  try {
+    const state = {
+      workflow_id: "wf_content_recover",
+      stage: "generating_content",
+      content_started_at: new Date(Date.now() - 5_000).toISOString(),
+      content_step_id: "step_01_content",
+      rootConversationId: "root_content_recover",
+      intent: { intent: "CREATE_NEW", media_type_requested: "image" },
+      notifications: {},
+      reject_history: [],
+      prompt_versions: [],
+      global_guidelines: [],
+    };
+    fs.writeFileSync(harness.paths.currentFile, JSON.stringify(state, null, 2));
+
+    const result = await continueWorkflow(
+      {
+        message: "Content den dau roi",
+        openClawHome: harness.openClawHome,
+        paths: harness.paths,
+        registry: {
+          byId: {
+            nv_content: { transport: { sessionKey: "agent:nv_content:main" } },
+          },
+        },
+        options: {
+          from: "pho_phong",
+          timeoutMs: 120_000,
+        },
+      },
+      state,
+    );
+
+    assert.equal(result.status, "ok");
+    assert.equal(result.stage, "awaiting_content_approval");
+    assert.match(result.human_message, /Noi dung chot\./);
+    assert.match(result.human_message, /review-assets/);
+    assert.equal(pushedEvents.length, 1);
+    assert.match(pushedEvents[0].content, /review-assets/);
+
+    const persisted = JSON.parse(fs.readFileSync(harness.paths.currentFile, "utf8"));
+    assert.equal(persisted.stage, "awaiting_content_approval");
+    assert.equal(persisted.content.primaryProductImage, productImage);
+    assert.match(persisted.content.primaryProductReviewImage, /review-assets/);
+    assert.equal(fs.existsSync(persisted.content.primaryProductReviewImage), true);
+  } finally {
+    transport.findLatestWorkflowReplyInHistory = originalFindLatestWorkflowReplyInHistory;
+    beClient.createSubAgentConversation = originalCreateSubAgentConversation;
+    beClient.persistMessages = originalPersistMessages;
+    beClient.updateWorkflowStatus = originalUpdateWorkflowStatus;
+    beClient.pushAutomationEvent = originalPushAutomationEvent;
     harness.cleanup();
   }
 });
@@ -1009,6 +1659,10 @@ test("resolveLogoAssetPaths reads logos from .openclaw assets", () => {
 });
 
 test("parseImageResult parses valid reply with references", () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "orchestrator-image-parse-"));
+  const generatedPath = path.join(tmpDir, "test.png");
+  fs.writeFileSync(generatedPath, "image");
+
   const reply = `
 WORKFLOW_META:
 workflow_id: wf_test
@@ -1020,7 +1674,7 @@ KET_QUA:
 IMAGE_PROMPT_BEGIN
 Anh quang cao may nang dien
 IMAGE_PROMPT_END
-GENERATED_IMAGE_PATH: D:\\output\\test.png
+GENERATED_IMAGE_PATH: ${generatedPath}
 USED_PRODUCT_IMAGE: D:\\images\\product.png
 USED_LOGO_PATHS: C:\\logos\\logo-a.png ; C:\\logos\\logo-b.png
 COMPANY_GALLERY_SYNCED: true
@@ -1035,22 +1689,37 @@ COMPANY_GALLERY_MEDIA_FILE_ID: media_1
 RUI_RO: khong
 DE_XUAT_BUOC_TIEP: cho duyet
 `;
-  const result = mediaAgent.parseImageResult(reply);
-  assert.equal(result.imagePrompt, "Anh quang cao may nang dien");
-  assert.equal(result.generatedImagePath, path.resolve("D:\\output\\test.png"));
-  assert.equal(result.mediaType, "image");
-  assert.equal(result.usedProductImage, "D:\\images\\product.png");
-  assert.deepEqual(result.usedLogoPaths, ["C:\\logos\\logo-a.png", "C:\\logos\\logo-b.png"]);
-  assert.equal(result.companyGallerySynced, true);
-  assert.equal(result.companyGalleryCompanyId, "UpTek");
-  assert.equal(result.companyGalleryDepartmentId, "Phong_Marketing");
-  assert.equal(result.companyGalleryProductModel, "GL-3.2-2E");
-  assert.equal(result.companyGalleryUrl, "/storage/images/UpTek/Phong_Marketing/test.png");
-  assert.equal(result.companyGalleryImageId, "img_1");
-  assert.equal(result.companyGalleryMediaFileId, "media_1");
+  try {
+    const result = mediaAgent.parseImageResult(reply);
+    assert.equal(result.imagePrompt, "Anh quang cao may nang dien");
+    assert.equal(result.generatedImagePath, path.resolve(generatedPath));
+    assert.equal(result.mediaType, "image");
+    assert.equal(result.usedProductImage, "D:\\images\\product.png");
+    assert.deepEqual(result.usedLogoPaths, ["C:\\logos\\logo-a.png", "C:\\logos\\logo-b.png"]);
+    assert.equal(result.companyGallerySynced, true);
+    assert.equal(result.companyGalleryCompanyId, "UpTek");
+    assert.equal(result.companyGalleryDepartmentId, "Phong_Marketing");
+    assert.equal(result.companyGalleryProductModel, "GL-3.2-2E");
+    assert.equal(result.companyGalleryUrl, "/storage/images/UpTek/Phong_Marketing/test.png");
+    assert.equal(result.companyGalleryImageId, "img_1");
+    assert.equal(result.companyGalleryMediaFileId, "media_1");
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
 });
 
 test("parseImageResult repairs malformed .openclaw paths from nv_media reply", () => {
+  const fixedGeneratedPath = path.join(
+    "C:\\Users\\Administrator\\.openclaw",
+    "workspace_media",
+    "artifacts",
+    "images",
+    `test-${Date.now()}.png`,
+  );
+  const malformedGeneratedPath = fixedGeneratedPath.replace("\\.openclaw", ".openclaw");
+  fs.mkdirSync(path.dirname(fixedGeneratedPath), { recursive: true });
+  fs.writeFileSync(fixedGeneratedPath, "image");
+
   const reply = `
 WORKFLOW_META:
 workflow_id: wf_test
@@ -1062,25 +1731,54 @@ KET_QUA:
 IMAGE_PROMPT_BEGIN
 Anh quang cao may nang dien
 IMAGE_PROMPT_END
-GENERATED_IMAGE_PATH: C:\\Users\\Administrator.openclaw\\workspace_media\\artifacts\\images\\test.png
+GENERATED_IMAGE_PATH: ${malformedGeneratedPath}
 USED_PRODUCT_IMAGE: C:\\Users\\Administrator.openclaw\\workspace_content\\artifacts\\references\\product.png
 USED_LOGO_PATHS: C:\\Users\\Administrator.openclaw\\assets\\logos\\logo.png
 `;
-  const result = mediaAgent.parseImageResult(reply);
-  assert.equal(
-    result.generatedImagePath,
-    path.resolve("C:\\Users\\Administrator\\.openclaw\\workspace_media\\artifacts\\images\\test.png"),
+  try {
+    const result = mediaAgent.parseImageResult(reply);
+    assert.equal(result.generatedImagePath, path.resolve(fixedGeneratedPath));
+    assert.equal(
+      result.usedProductImage,
+      "C:\\Users\\Administrator\\.openclaw\\workspace_content\\artifacts\\references\\product.png",
+    );
+    assert.deepEqual(result.usedLogoPaths, [
+      "C:\\Users\\Administrator\\.openclaw\\assets\\logos\\logo.png",
+    ]);
+  } finally {
+    fs.rmSync(fixedGeneratedPath, { force: true });
+  }
+});
+
+test("normalizeAgentReportedPath repairs malformed search reference slug", () => {
+  const slug = `test-a-c-quy-${Date.now()}`;
+  const rootDir = path.join(
+    "C:\\Users\\Administrator\\.openclaw",
+    "workspace_content",
+    "artifacts",
+    "references",
+    "search_product_text",
   );
-  assert.equal(
-    result.usedProductImage,
-    "C:\\Users\\Administrator\\.openclaw\\workspace_content\\artifacts\\references\\product.png",
-  );
-  assert.deepEqual(result.usedLogoPaths, [
-    "C:\\Users\\Administrator\\.openclaw\\assets\\logos\\logo.png",
-  ]);
+  const realDir = path.join(rootDir, slug);
+  const realPath = path.join(realDir, "image_1920.png");
+  const reportedPath = realPath
+    .replace("\\.openclaw", ".openclaw")
+    .replace(slug, slug.replace("a-c-quy", "a-c_quy"));
+
+  try {
+    fs.mkdirSync(realDir, { recursive: true });
+    fs.writeFileSync(realPath, "image");
+    assert.equal(mediaAgent.normalizeAgentReportedPath(reportedPath), realPath);
+  } finally {
+    fs.rmSync(realDir, { recursive: true, force: true });
+  }
 });
 
 test("parseImageResult keeps empty gallery markers empty when sync fails", () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "orchestrator-gallery-parse-"));
+  const generatedPath = path.join(tmpDir, "test.png");
+  fs.writeFileSync(generatedPath, "image");
+
   const reply = `
 WORKFLOW_META:
 workflow_id: wf_test
@@ -1090,7 +1788,7 @@ KET_QUA:
 IMAGE_PROMPT_BEGIN
 Anh quang cao may nang dien
 IMAGE_PROMPT_END
-GENERATED_IMAGE_PATH: D:\\output\\test.png
+GENERATED_IMAGE_PATH: ${generatedPath}
 USED_PRODUCT_IMAGE: D:\\images\\product.png
 USED_LOGO_PATHS: C:\\logos\\logo-a.png
 COMPANY_GALLERY_SYNCED: false
@@ -1102,12 +1800,16 @@ COMPANY_GALLERY_MEDIA_FILE_ID:
 RUI_RO:
 Gallery sync failed do PayloadTooLargeError.
 `;
-  const result = mediaAgent.parseImageResult(reply);
-  assert.equal(result.companyGallerySynced, false);
-  assert.equal(result.companyGalleryPath, "");
-  assert.equal(result.companyGalleryUrl, "");
-  assert.equal(result.companyGalleryImageId, "");
-  assert.equal(result.companyGalleryMediaFileId, "");
+  try {
+    const result = mediaAgent.parseImageResult(reply);
+    assert.equal(result.companyGallerySynced, false);
+    assert.equal(result.companyGalleryPath, "");
+    assert.equal(result.companyGalleryUrl, "");
+    assert.equal(result.companyGalleryImageId, "");
+    assert.equal(result.companyGalleryMediaFileId, "");
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
 });
 
 test("parseVideoResult parses valid reply", () => {
@@ -1265,6 +1967,36 @@ USED_LOGO_PATHS: C:\\logos\\logo-a.png
   );
 });
 
+test("parseVideoResult rejects generated video outside expected workflow output dir", () => {
+  const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), "openclaw-video-output-"));
+  const workflowVideoDir = path.join(tmpRoot, "workspace_media_video", "artifacts", "videos", "wf_current");
+  const otherVideoDir = path.join(tmpRoot, "workspace_media_video", "artifacts", "videos", "wf_other");
+  const wrongVideoPath = path.join(otherVideoDir, "veo-720p-other-product.mp4");
+
+  fs.mkdirSync(workflowVideoDir, { recursive: true });
+  fs.mkdirSync(otherVideoDir, { recursive: true });
+  fs.writeFileSync(wrongVideoPath, Buffer.alloc(4096, 1));
+
+  const reply = `
+VIDEO_PROMPT_BEGIN
+Video quang cao san pham
+VIDEO_PROMPT_END
+GENERATED_VIDEO_PATH: ${wrongVideoPath}
+USED_PRODUCT_IMAGE: ${path.join(tmpRoot, "product.png")}
+USED_LOGO_PATHS:
+`;
+
+  assert.throws(
+    () =>
+      videoAgent.parseVideoResult(reply, {
+        outputDir: workflowVideoDir,
+      }),
+    /Sai thu muc video workflow/,
+  );
+
+  fs.rmSync(tmpRoot, { recursive: true, force: true });
+});
+
 test("buildMediaRevisePrompt includes revised prompt package", () => {
   const prompt = mediaAgent.buildMediaRevisePrompt({
     workflowId: "wf_test",
@@ -1341,6 +2073,73 @@ USED_LOGO_PATHS: C:\\logo.png
   );
 });
 
+test("parseImageResult rejects Vietnamese missing generated image marker", () => {
+  const missingImageMarker = "ch\u01b0a t\u1ea1o \u0111\u01b0\u1ee3c";
+  assert.throws(
+    () =>
+      mediaAgent.parseImageResult(`
+WORKFLOW_META
+workflow_id: wf_test
+step_id: step_03_media
+
+KET_QUA
+IMAGE_PROMPT_BEGIN
+Prompt anh
+IMAGE_PROMPT_END
+GENERATED_IMAGE_PATH: ${missingImageMarker}
+USED_PRODUCT_IMAGE: C:\\product.png
+USED_LOGO_PATHS: C:\\logo.png
+`),
+    /thieu duong dan anh that/i,
+  );
+});
+
+test("parseImageResult preserves reported Flow tool failure when image path is missing", () => {
+  assert.throws(
+    () =>
+      mediaAgent.parseImageResult(`
+WORKFLOW_META
+workflow_id: wf_test
+step_id: step_03_media
+
+KET_QUA
+IMAGE_PROMPT_BEGIN
+Prompt anh
+IMAGE_PROMPT_END
+GENERATED_IMAGE_PATH: chua tao duoc do skill tra ve loi
+USED_PRODUCT_IMAGE: C:\\product.png
+USED_LOGO_PATHS: C:\\logo.png
+
+RUI_RO
+- Loi that tu tool: FLOW_SUBMIT_FAILED
+- Chi tiet loi cot loi: Flow composer did not accept the prompt after submit click
+`),
+    /nv_media bao tao anh that bai:.*FLOW_SUBMIT_FAILED.*Flow composer did not accept/i,
+  );
+});
+
+test("parseImageResult rejects explicit non-existing generated image path", () => {
+  const missingPath = path.join(os.tmpdir(), `missing-generated-${Date.now()}.png`);
+  assert.equal(fs.existsSync(missingPath), false);
+  assert.throws(
+    () =>
+      mediaAgent.parseImageResult(`
+WORKFLOW_META
+workflow_id: wf_test
+step_id: step_03_media
+
+KET_QUA
+IMAGE_PROMPT_BEGIN
+Prompt anh
+IMAGE_PROMPT_END
+GENERATED_IMAGE_PATH: ${missingPath}
+USED_PRODUCT_IMAGE: C:\\product.png
+USED_LOGO_PATHS: C:\\logo.png
+`),
+    /thieu duong dan anh that/i,
+  );
+});
+
 test("parseImageResult rejects screenshot fallback generated image path", () => {
   assert.throws(
     () =>
@@ -1356,6 +2155,46 @@ IMAGE_PROMPT_END
 GENERATED_IMAGE_PATH: C:\\Users\\Administrator\\.openclaw\\workspace_media\\artifacts\\images\\gemini-image-screenshot-2026-04-14T09-08-28-808Z.png
 USED_PRODUCT_IMAGE: C:\\product.png
 USED_LOGO_PATHS: C:\\logo.png
+`),
+    /thieu duong dan anh that/i,
+  );
+});
+
+test("parseImageResult rejects product reference as generated image path", () => {
+  assert.throws(
+    () =>
+      mediaAgent.parseImageResult(`
+WORKFLOW_META
+workflow_id: wf_test
+step_id: step_03_media
+
+KET_QUA
+IMAGE_PROMPT_BEGIN
+Prompt anh
+IMAGE_PROMPT_END
+GENERATED_IMAGE_PATH: C:\\Users\\Administrator\\.openclaw\\workspace_content\\artifacts\\references\\product.png
+USED_PRODUCT_IMAGE: C:\\Users\\Administrator\\.openclaw\\workspace_content\\artifacts\\references\\product.png
+USED_LOGO_PATHS: C:\\logo.png
+`),
+    /thieu duong dan anh that/i,
+  );
+});
+
+test("parseImageResult rejects logo reference as generated image path", () => {
+  assert.throws(
+    () =>
+      mediaAgent.parseImageResult(`
+WORKFLOW_META
+workflow_id: wf_test
+step_id: step_03_media
+
+KET_QUA
+IMAGE_PROMPT_BEGIN
+Prompt anh
+IMAGE_PROMPT_END
+GENERATED_IMAGE_PATH: C:\\Users\\Administrator\\.openclaw\\assets\\logos\\logo.png
+USED_PRODUCT_IMAGE: C:\\product.png
+USED_LOGO_PATHS: C:\\Users\\Administrator\\.openclaw\\assets\\logos\\logo.png
 `),
     /thieu duong dan anh that/i,
   );
@@ -1476,6 +2315,42 @@ APPROVED_CONTENT_END
   assert.equal(result.primaryProductImage, "D:\\images\\may-nang-heli.png");
 });
 
+test("parseContentResult repairs malformed PRIMARY_PRODUCT_IMAGE reference path", () => {
+  const slug = `test-bt900-a-c-quy-${Date.now()}`;
+  const rootDir = path.join(
+    "C:\\Users\\Administrator\\.openclaw",
+    "workspace_content",
+    "artifacts",
+    "references",
+    "search_product_text",
+  );
+  const realDir = path.join(rootDir, slug);
+  const realPath = path.join(realDir, "image_1920.png");
+  const reportedPath = realPath
+    .replace("\\.openclaw", ".openclaw")
+    .replace(slug, slug.replace("a-c-quy", "a-c_quy"));
+
+  const reply = `
+KET_QUA:
+PRODUCT_NAME: Test
+PRODUCT_URL: https://example.test/product
+IMAGE_DOWNLOAD_DIR: ${path.dirname(reportedPath)}
+PRIMARY_PRODUCT_IMAGE: ${reportedPath}
+APPROVED_CONTENT_BEGIN
+Noi dung.
+APPROVED_CONTENT_END
+`;
+
+  try {
+    fs.mkdirSync(realDir, { recursive: true });
+    fs.writeFileSync(realPath, "image");
+    const result = contentAgent.parseContentResult(reply);
+    assert.equal(result.primaryProductImage, realPath);
+  } finally {
+    fs.rmSync(realDir, { recursive: true, force: true });
+  }
+});
+
 test("parseContentResult resolves null primaryProductImage when marker missing", () => {
   const reply = `
 KET_QUA:
@@ -1498,6 +2373,31 @@ test("buildWorkflowScopedSessionKey isolates workflow runtime from agent main la
   assert.equal(
     buildWorkflowScopedSessionKey("nv_content", "wf_test_live", "step_01_content"),
     "agent:nv_content:automation:wf_test_live:step_01_content",
+  );
+});
+
+test("workflow-scoped session resolver never falls back to an agent main lane", () => {
+  assert.equal(
+    resolveWorkflowScopedSessionKey({
+      agentId: "nv_content",
+      workflowId: "wf_parallel_a",
+      stepId: "step_01_content",
+      sessionKey: "agent:nv_content:main",
+    }),
+    "agent:nv_content:automation:wf_parallel_a:step_01_content",
+  );
+  assert.equal(
+    resolveWorkflowScopedSessionKey({
+      agentId: "nv_content",
+      workflowId: "wf_parallel_a",
+      stepId: "step_01_content",
+      sessionKey: "agent:nv_content:automation:wf_parallel_a:conv_sub",
+    }),
+    "agent:nv_content:automation:wf_parallel_a:conv_sub",
+  );
+  assert.equal(
+    isWorkflowScopedSessionKey("agent:nv_content:main", "nv_content", "wf_parallel_a"),
+    false,
   );
 });
 
@@ -1638,6 +2538,251 @@ APPROVED_CONTENT_END
   }
 });
 
+test("runContentCheckpointStep persists late valid NV Content checkpoint into sub-agent conversation", async () => {
+  const invalidReply = `
+WORKFLOW_META
+workflow_id: wf_test_live
+step_id: step_01_content
+
+TRANG_THAI
+completed
+
+KET_QUA
+PRODUCT_NAME: May nang 2 tru
+APPROVED_CONTENT_BEGIN
+Noi dung tam.
+APPROVED_CONTENT_END
+`;
+  const validReply = `
+WORKFLOW_META
+workflow_id: wf_test_live
+step_id: step_01_content
+
+TRANG_THAI
+completed
+
+KET_QUA
+PRODUCT_NAME: May nang 2 tru
+PRODUCT_URL: https://example.test/product
+IMAGE_DOWNLOAD_DIR: D:\\images
+PRIMARY_PRODUCT_IMAGE: D:\\images\\product.png
+APPROVED_CONTENT_BEGIN
+Noi dung chot.
+APPROVED_CONTENT_END
+`;
+
+  const originalCreateSubAgentConversation = beClient.createSubAgentConversation;
+  const originalPersistMessages = beClient.persistMessages;
+  const originalSendTaskToAgentLane = transport.sendTaskToAgentLane;
+  const originalWaitForAgentResponse = transport.waitForAgentResponse;
+  const originalFindLatestWorkflowReplyInHistory = transport.findLatestWorkflowReplyInHistory;
+  const persistedBatches = [];
+
+  beClient.createSubAgentConversation = async () => ({
+    id: "conv_nv_content",
+    sessionKey: "agent:nv_content:automation:wf_test_live:step_01_content",
+  });
+  beClient.persistMessages = async (messages) => {
+    persistedBatches.push(messages);
+    return { success: true };
+  };
+  transport.sendTaskToAgentLane = () => ({ id: "task_content" });
+  transport.waitForAgentResponse = async () => ({ text: invalidReply });
+  transport.findLatestWorkflowReplyInHistory = async () => validReply;
+
+  try {
+    const result = await runContentCheckpointStep({
+      agentId: "nv_content",
+      openClawHome: "/tmp/openclaw",
+      workflowId: "wf_test_live",
+      stepId: "step_01_content",
+      sessionKey: "agent:nv_content:main",
+      prompt: "Viet content",
+      timeoutMs: 1000,
+      graceMs: 3100,
+    });
+
+    assert.equal(result.content.approvedContent, "Noi dung chot.");
+    assert.equal(persistedBatches.length, 3);
+    assert.equal(persistedBatches[0][0].conversationId, "conv_nv_content");
+    assert.equal(persistedBatches[0][0].role, "user");
+    assert.equal(persistedBatches[0][0].final, true);
+    assert.equal(persistedBatches[2][0].conversationId, "conv_nv_content");
+    assert.equal(persistedBatches[2][0].role, "assistant");
+    assert.match(persistedBatches[2][0].content, /Noi dung chot\./);
+  } finally {
+    beClient.createSubAgentConversation = originalCreateSubAgentConversation;
+    beClient.persistMessages = originalPersistMessages;
+    transport.sendTaskToAgentLane = originalSendTaskToAgentLane;
+    transport.waitForAgentResponse = originalWaitForAgentResponse;
+    transport.findLatestWorkflowReplyInHistory = originalFindLatestWorkflowReplyInHistory;
+  }
+});
+
+test("runContentCheckpointStep keeps waiting past short content validation grace", async () => {
+  const invalidReply = `
+WORKFLOW_META
+workflow_id: wf_test_live
+step_id: step_01_content
+
+TRANG_THAI
+completed
+
+KET_QUA
+PRODUCT_NAME: May nang 2 tru
+APPROVED_CONTENT_BEGIN
+Noi dung tam.
+APPROVED_CONTENT_END
+`;
+  const validReply = `
+WORKFLOW_META
+workflow_id: wf_test_live
+step_id: step_01_content
+
+TRANG_THAI
+completed
+
+KET_QUA
+PRODUCT_NAME: May nang 2 tru
+PRODUCT_URL: https://example.test/product
+IMAGE_DOWNLOAD_DIR: D:\\images
+PRIMARY_PRODUCT_IMAGE: D:\\images\\product.png
+APPROVED_CONTENT_BEGIN
+Noi dung chot sau khi research xong.
+APPROVED_CONTENT_END
+`;
+
+  const originalCreateSubAgentConversation = beClient.createSubAgentConversation;
+  const originalPersistMessages = beClient.persistMessages;
+  const originalSendTaskToAgentLane = transport.sendTaskToAgentLane;
+  const originalWaitForAgentResponse = transport.waitForAgentResponse;
+  const originalFindLatestWorkflowReplyInHistory = transport.findLatestWorkflowReplyInHistory;
+  let historyPolls = 0;
+
+  beClient.createSubAgentConversation = async () => ({
+    id: "conv_nv_content_slow",
+    sessionKey: "agent:nv_content:automation:wf_test_live:step_01_content",
+  });
+  beClient.persistMessages = async () => ({ success: true });
+  transport.sendTaskToAgentLane = () => ({ id: "task_content_slow" });
+  transport.waitForAgentResponse = async () => ({ text: invalidReply });
+  transport.findLatestWorkflowReplyInHistory = async () => {
+    historyPolls += 1;
+    return historyPolls >= 2 ? validReply : "";
+  };
+
+  try {
+    const result = await runContentCheckpointStep({
+      agentId: "nv_content",
+      openClawHome: "/tmp/openclaw",
+      workflowId: "wf_test_live",
+      stepId: "step_01_content",
+      sessionKey: "agent:nv_content:main",
+      prompt: "Viet content cham",
+      timeoutMs: 7000,
+      graceMs: 3100,
+    });
+
+    assert.equal(result.content.approvedContent, "Noi dung chot sau khi research xong.");
+    assert.equal(historyPolls, 2);
+  } finally {
+    beClient.createSubAgentConversation = originalCreateSubAgentConversation;
+    beClient.persistMessages = originalPersistMessages;
+    transport.sendTaskToAgentLane = originalSendTaskToAgentLane;
+    transport.waitForAgentResponse = originalWaitForAgentResponse;
+    transport.findLatestWorkflowReplyInHistory = originalFindLatestWorkflowReplyInHistory;
+  }
+});
+
+test("runContentCheckpointStep isolates two concurrent NV Content workflows by workflow session", async () => {
+  const originalCreateSubAgentConversation = beClient.createSubAgentConversation;
+  const originalPersistMessages = beClient.persistMessages;
+  const originalSendTaskToAgentLane = transport.sendTaskToAgentLane;
+  const originalWaitForAgentResponse = transport.waitForAgentResponse;
+  const sentTasks = [];
+  const persistedBatches = [];
+
+  const buildReply = (workflowId, content) => `
+WORKFLOW_META
+workflow_id: ${workflowId}
+step_id: step_01_content
+
+TRANG_THAI
+completed
+
+KET_QUA
+PRODUCT_NAME: San pham ${workflowId}
+PRODUCT_URL: https://example.test/${workflowId}
+IMAGE_DOWNLOAD_DIR: D:\\images\\${workflowId}
+PRIMARY_PRODUCT_IMAGE: D:\\images\\${workflowId}\\product.png
+APPROVED_CONTENT_BEGIN
+${content}
+APPROVED_CONTENT_END
+`;
+
+  beClient.createSubAgentConversation = async (params) => ({
+    id: `conv_${params.workflowId}`,
+    sessionKey: `agent:nv_content:automation:${params.workflowId}:conv_${params.workflowId}`,
+  });
+  beClient.persistMessages = async (messages) => {
+    persistedBatches.push(messages);
+    return { success: true };
+  };
+  transport.sendTaskToAgentLane = (task) => {
+    sentTasks.push(task);
+    return task;
+  };
+  transport.waitForAgentResponse = async (task) => ({
+    text: buildReply(task.workflowId, `Noi dung rieng cho ${task.workflowId}.`),
+  });
+
+  try {
+    const [first, second] = await Promise.all([
+      runContentCheckpointStep({
+        agentId: "nv_content",
+        openClawHome: "/tmp/openclaw",
+        workflowId: "wf_parallel_a",
+        stepId: "step_01_content",
+        sessionKey: "agent:nv_content:main",
+        prompt: "Viet content A",
+        timeoutMs: 1000,
+      }),
+      runContentCheckpointStep({
+        agentId: "nv_content",
+        openClawHome: "/tmp/openclaw",
+        workflowId: "wf_parallel_b",
+        stepId: "step_01_content",
+        sessionKey: "agent:nv_content:main",
+        prompt: "Viet content B",
+        timeoutMs: 1000,
+      }),
+    ]);
+
+    assert.equal(first.content.approvedContent, "Noi dung rieng cho wf_parallel_a.");
+    assert.equal(second.content.approvedContent, "Noi dung rieng cho wf_parallel_b.");
+    assert.deepEqual(
+      sentTasks.map((task) => task.sessionKey).sort(),
+      [
+        "agent:nv_content:automation:wf_parallel_a:conv_wf_parallel_a",
+        "agent:nv_content:automation:wf_parallel_b:conv_wf_parallel_b",
+      ],
+    );
+    assert.equal(
+      sentTasks.some((task) => task.sessionKey === "agent:nv_content:main"),
+      false,
+    );
+    assert.deepEqual(
+      persistedBatches.flat().filter((message) => message.role === "assistant").map((message) => message.conversationId).sort(),
+      ["conv_wf_parallel_a", "conv_wf_parallel_b"],
+    );
+  } finally {
+    beClient.createSubAgentConversation = originalCreateSubAgentConversation;
+    beClient.persistMessages = originalPersistMessages;
+    transport.sendTaskToAgentLane = originalSendTaskToAgentLane;
+    transport.waitForAgentResponse = originalWaitForAgentResponse;
+  }
+});
+
 test("buildStageHumanMessage returns sanitized content checkpoint for awaiting_content_approval", () => {
   const rawReply = `
 WORKFLOW_META
@@ -1669,11 +2814,28 @@ APPROVED_CONTENT_END
   });
 
   assert.match(text, /Noi dung chot\./);
-  assert.match(text, /Anh goc san pham de doi chieu:/);
+  assert.match(text, /Ảnh gốc sản phẩm để đối chiếu:/);
   assert.match(text, /MEDIA: "D:\/images\/product\.png"/);
   assert.doesNotMatch(text, /PRODUCT_URL:/);
   assert.doesNotMatch(text, /PRIMARY_PRODUCT_IMAGE:/);
   assert.doesNotMatch(text, /APPROVED_CONTENT_BEGIN/);
+});
+
+test("buildStageHumanMessage uses copied review image when present", () => {
+  const text = buildStageHumanMessage({
+    stage: "awaiting_content_approval",
+    content: {
+      productName: "May nang 2 tru",
+      approvedContent: "Noi dung chot.",
+      primaryProductImage: "D:\\images\\product.png",
+      primaryProductReviewImage: "D:\\review-assets\\wf_test\\primary-product.png",
+      reply: "",
+    },
+    reject_history: [],
+  });
+
+  assert.match(text, /MEDIA: "D:\/review-assets\/wf_test\/primary-product\.png"/);
+  assert.doesNotMatch(text, /MEDIA: "D:\/images\/product\.png"/);
 });
 
 test("buildContentApprovalCheckpointMessage defaults to sanitized root approval message", () => {
@@ -1681,6 +2843,7 @@ test("buildContentApprovalCheckpointMessage defaults to sanitized root approval 
     productName: "May nang 2 tru",
     approvedContent: "Noi dung chot.",
     primaryProductImage: "D:\\images\\product.png",
+    primaryProductReviewImage: "D:\\review-assets\\wf_test\\primary-product.png",
     rawReply: `
 WORKFLOW_META
 workflow_id: wf_test_live
@@ -1694,9 +2857,10 @@ APPROVED_CONTENT_END
     revised: false,
   });
 
-  assert.match(text, /San pham: May nang 2 tru/);
-  assert.match(text, /Anh goc san pham de doi chieu:/);
-  assert.match(text, /MEDIA: "D:\/images\/product\.png"/);
+  assert.match(text, /Sản phẩm: May nang 2 tru/);
+  assert.match(text, /Ảnh gốc sản phẩm để đối chiếu:/);
+  assert.match(text, /MEDIA: "D:\/review-assets\/wf_test\/primary-product\.png"/);
+  assert.doesNotMatch(text, /MEDIA: "D:\/images\/product\.png"/);
   assert.doesNotMatch(text, /CHECKPOINT_GOC_TU_NV_CONTENT/);
   assert.doesNotMatch(text, /PRODUCT_URL: https:\/\/example\.test\/product/);
   assert.doesNotMatch(text, /APPROVED_CONTENT_END/);

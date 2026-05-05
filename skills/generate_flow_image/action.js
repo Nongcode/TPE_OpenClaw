@@ -3,16 +3,17 @@ import { existsSync, readFileSync } from "node:fs";
 import { access, mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { chromium } from "playwright-core";
+import { withBrowserProfileLock } from "../shared/browser-profile-lock.js";
 import { buildChatImageReplyPayload } from "../shared/chat-image-result.js";
 import { publishGeneratedImageToUpTekGallery } from "../shared/uptek-gallery-publisher.js";
 
 const FLOW_PROJECT_URL =
-  "https://labs.google/fx/vi/tools/flow/project/a6bfa516-4c6c-4628-a210-561b3337a034";
+  "https://labs.google/fx/tools/flow/project/86643437-621b-4f69-9ac4-2f0b193586eb";
 
 const DEFAULTS = {
   browser_path: "C:/Program Files/CocCoc/Browser/Application/browser.exe",
   user_data_dir: "C:/Users/Administrator/AppData/Local/CocCoc/Browser/User Data",
-  profile_name: "Default",
+  profile_name: "Profile 3",
   project_url: FLOW_PROJECT_URL,
   target_gemini_url: FLOW_PROJECT_URL,
   image_prompt: "",
@@ -29,7 +30,9 @@ const DEFAULTS = {
 const MIN_GENERATED_IMAGE_BYTES = 50 * 1024;
 const UPLOAD_SETTLE_MS = 3000;
 const PRE_SUBMIT_SETTLE_MS = 3000;
-const AUTOMATION_REVISION = "flow-rewrite-stepwise-20260503-upload-settle-before-submit";
+const GENERATION_PROGRESS_SETTLE_MS = 8000;
+const FALLBACK_FRESH_IMAGE_DELAY_MS = 45000;
+const AUTOMATION_REVISION = "flow-rewrite-stepwise-20260505-submit-guard";
 
 function buildResult({ success, message, data = {}, artifacts = [], logs = [], error = null }) {
   return { success, message, data, artifacts, logs, error };
@@ -186,6 +189,19 @@ async function ensureReadableFiles(filePaths) {
 
 function computeFileSha256(filePath) {
   return createHash("sha256").update(readFileSync(filePath)).digest("hex");
+}
+
+function computeReadableFileHashes(filePaths, logs) {
+  const hashes = new Set();
+  for (const filePath of filePaths) {
+    try {
+      if (!filePath || !existsSync(filePath)) continue;
+      hashes.add(computeFileSha256(filePath));
+    } catch (error) {
+      logs?.push?.(`[qc] Could not hash reference file ${filePath}: ${error.message}`);
+    }
+  }
+  return hashes;
 }
 
 async function dismissPopupsIfAny(page, logs) {
@@ -822,11 +838,21 @@ async function typePrompt(page, prompt, logs, promptBox = null) {
 
   await pastePromptIntoFocusedComposer(page, locator, normalizedPrompt, logs);
 
-  if (tagName === "textarea" || tagName === "input") {
-    await locator.evaluate((element) =>
-      element.dispatchEvent(new Event("input", { bubbles: true })),
-    );
-  }
+  await locator.evaluate((element) => {
+    try {
+      element.dispatchEvent(
+        new InputEvent("input", {
+          bubbles: true,
+          cancelable: true,
+          inputType: "insertText",
+        }),
+      );
+    } catch {
+      element.dispatchEvent(new Event("input", { bubbles: true }));
+    }
+    element.dispatchEvent(new Event("change", { bubbles: true }));
+  });
+  logs.push(`[step4] Dispatched input/change events for ${tagName} composer`);
 
   if (!(await waitForPromptText(locator, normalizedPrompt, 7000))) {
     const current = normalizePromptForComposer(await readPromptText(locator).catch(() => ""));
@@ -842,71 +868,138 @@ async function typePrompt(page, prompt, logs, promptBox = null) {
   return { promptBox: activePromptBox, promptLocator: locator, normalizedPrompt };
 }
 
-async function findComposerSubmitButtonBox(page, promptBox = null) {
-  return page.evaluate((box) => {
-    const isVisible = (element) => {
-      if (!(element instanceof HTMLElement)) return false;
-      const rect = element.getBoundingClientRect();
-      const style = window.getComputedStyle(element);
-      return (
-        style.display !== "none" &&
-        style.visibility !== "hidden" &&
-        Number(style.opacity || "1") > 0 &&
-        rect.width >= 16 &&
-        rect.height >= 16
-      );
-    };
-    const buttons = Array.from(document.querySelectorAll("button"))
-      .filter(isVisible)
-      .map((button) => {
-        const rect = button.getBoundingClientRect();
-        const text = (button.textContent || "").toLowerCase();
-        const disabled =
-          button.disabled ||
-          button.getAttribute("aria-disabled") === "true" ||
-          button.getAttribute("disabled") !== null;
-        const inComposer = box
-          ? rect.x >= box.x - 120 &&
-            rect.x <= box.x + box.width + 140 &&
-            rect.y >= box.y - 140 &&
-            rect.y <= box.y + box.height + 240
-          : rect.y > window.innerHeight * 0.45;
-        const isArrow = text.includes("arrow_forward");
-        const isModelSelector =
-          text.includes("nano banana") ||
-          text.includes("crop_16_9") ||
-          text.includes("pro") ||
-          text.includes("1x");
-        const squareish = rect.width <= 72 && rect.height <= 72;
-        let score = 0;
-        if (isArrow) score += 500;
-        if (inComposer) score += 400;
-        if (squareish) score += 180;
-        if (isModelSelector) score -= 500;
-        score += rect.x / 6 + rect.y / 40;
-        return {
-          x: rect.x,
-          y: rect.y,
-          width: rect.width,
-          height: rect.height,
-          text,
-          score,
-          disabled,
-        };
-      })
-      .filter((item) => item.score > 300)
-      .sort((left, right) => right.score - left.score);
-    return buttons[0] || null;
-  }, promptBox);
+async function findComposerSubmitButtonBox(page, promptBox = null, rootBox = null) {
+  return page.evaluate(
+    (boxes) => {
+      const { promptBox: box, rootBox: root } = boxes || {};
+      const isVisible = (element) => {
+        if (!(element instanceof HTMLElement)) return false;
+        const rect = element.getBoundingClientRect();
+        const style = window.getComputedStyle(element);
+        return (
+          style.display !== "none" &&
+          style.visibility !== "hidden" &&
+          Number(style.opacity || "1") > 0 &&
+          rect.width >= 16 &&
+          rect.height >= 16
+        );
+      };
+      const normalize = (value) =>
+        String(value || "")
+          .normalize("NFKD")
+          .replace(/[\u0300-\u036f]/g, "")
+          .toLowerCase()
+          .replace(/\s+/g, " ")
+          .trim();
+      const textFor = (element) =>
+        normalize(
+          [
+            element.textContent,
+            element.getAttribute("aria-label"),
+            element.getAttribute("title"),
+            element.getAttribute("data-testid"),
+            element.getAttribute("data-test-id"),
+            element.getAttribute("jsname"),
+          ].join(" "),
+        );
+      const area = root || box;
+      const buttons = Array.from(document.querySelectorAll('button, [role="button"]'))
+        .filter(isVisible)
+        .map((button) => {
+          const rect = button.getBoundingClientRect();
+          const text = textFor(button);
+          const disabled =
+            button.disabled ||
+            button.getAttribute("aria-disabled") === "true" ||
+            button.getAttribute("disabled") !== null;
+          const inComposer = area
+            ? rect.x >= area.x - 80 &&
+              rect.x <= area.x + area.width + 80 &&
+              rect.y >= area.y - 80 &&
+              rect.y <= area.y + area.height + 90
+            : rect.y > window.innerHeight * 0.45;
+          const centerX = rect.x + rect.width / 2;
+          const centerY = rect.y + rect.height / 2;
+          const bottomRight = area
+            ? centerX >= area.x + area.width * 0.55 && centerY >= area.y + area.height * 0.45
+            : centerX >= window.innerWidth * 0.55 && centerY >= window.innerHeight * 0.55;
+          const isSubmitIntent =
+            text.includes("arrow_forward") ||
+            text.includes("arrow_upward") ||
+            text.includes("send") ||
+            text.includes("submit") ||
+            text.includes("generate") ||
+            text.includes("create") ||
+            text.includes("gui") ||
+            text.includes("tao");
+          const isDangerousNonSubmit =
+            text.includes("close") ||
+            text.includes("dong") ||
+            text.includes("cancel") ||
+            text.includes("clear") ||
+            text.includes("remove") ||
+            text.includes("delete") ||
+            text.includes("xoa") ||
+            text.includes("upload") ||
+            text.includes("tai hinh") ||
+            text.includes("add") ||
+            text.includes("plus") ||
+            text.includes("settings") ||
+            text.includes("help") ||
+            text.includes("filter") ||
+            text.includes("menu") ||
+            text.includes("more") ||
+            text.includes("search") ||
+            text.includes("download") ||
+            text.includes("share");
+          const isModelSelector =
+            text.includes("nano banana") ||
+            text.includes("banana") ||
+            text.includes("crop_16_9") ||
+            text.includes("pro") ||
+            text.includes("1x");
+          const squareish = rect.width <= 72 && rect.height <= 72;
+          const plausibleIconSubmit = !text && squareish && bottomRight;
+          let score = 0;
+          if (isSubmitIntent) score += 800;
+          if (plausibleIconSubmit) score += 420;
+          if (inComposer) score += 500;
+          if (bottomRight) score += 280;
+          if (squareish) score += 180;
+          if (disabled) score -= 120;
+          if (isDangerousNonSubmit) score -= 1200;
+          if (isModelSelector) score -= 1200;
+          if (area) score -= Math.max(0, area.y + area.height * 0.35 - centerY) / 2;
+          score += rect.x / 12 + rect.y / 80;
+          return {
+            x: rect.x,
+            y: rect.y,
+            width: rect.width,
+            height: rect.height,
+            text,
+            score,
+            disabled,
+          };
+        })
+        .filter((item) => item.score > 500)
+        .sort((left, right) => right.score - left.score);
+      return buttons[0] || null;
+    },
+    { promptBox, rootBox },
+  );
 }
 
 async function findComposerSubmitTarget(page, promptBox = null) {
-  const buttonBox = await findComposerSubmitButtonBox(page, promptBox).catch(() => null);
+  const state = promptBox ? await readComposerRootState(page, promptBox).catch(() => null) : null;
+  const buttonBox = await findComposerSubmitButtonBox(
+    page,
+    promptBox,
+    state?.rootBox || null,
+  ).catch(() => null);
   if (buttonBox) {
     return { ...buttonBox, source: "button" };
   }
 
-  const state = promptBox ? await readComposerRootState(page, promptBox).catch(() => null) : null;
   if (state?.rootBox) {
     return {
       x: state.rootBox.x + state.rootBox.width - 28,
@@ -942,7 +1035,8 @@ async function waitForComposerReadyToSubmit(page, promptBox, logs, timeoutMs = 6
     const submitButton = await findComposerSubmitTarget(page, promptBox).catch(() => null);
     const loading = Boolean(state?.loading);
     const failed = Boolean(state?.failed);
-    if (submitButton && !loading && !failed) {
+    const blockedByDisabledButton = submitButton?.source === "button" && submitButton.disabled;
+    if (submitButton && !blockedByDisabledButton && !loading && !failed) {
       logs.push(
         `[step5] PASS composer submit target is visible and upload loading is complete source=${submitButton.source} disabled=${submitButton.disabled}`,
       );
@@ -977,6 +1071,34 @@ async function composerStillHasPrompt(promptLocator, expectedPrompt) {
   return Boolean(expected && (current === expected || current.includes(expected)));
 }
 
+async function waitForPromptSubmitAccepted(page, promptBox, promptLocator, expectedPrompt, logs) {
+  const startedAt = Date.now();
+  while (Date.now() - startedAt < 15000) {
+    const stillHasPrompt =
+      promptLocator && expectedPrompt
+        ? await composerStillHasPrompt(promptLocator, expectedPrompt).catch(() => false)
+        : false;
+    const state = promptBox ? await readComposerRootState(page, promptBox).catch(() => null) : null;
+    const button = await findComposerSubmitButtonBox(page, promptBox, state?.rootBox || null).catch(
+      () => null,
+    );
+    if (!stillHasPrompt) {
+      logs.push("[step5] PASS Flow accepted submit: prompt composer changed");
+      return true;
+    }
+    if (state?.loading || button?.disabled) {
+      logs.push(
+        `[step5] PASS Flow accepted submit: composer busy loading=${Boolean(
+          state?.loading,
+        )}, submitDisabled=${Boolean(button?.disabled)}`,
+      );
+      return true;
+    }
+    await page.waitForTimeout(750);
+  }
+  return false;
+}
+
 async function submitPrompt(
   page,
   logs,
@@ -989,6 +1111,10 @@ async function submitPrompt(
   const clickSubmit = async (label) => {
     const buttonBox = await findComposerSubmitTarget(page, promptBox);
     if (buttonBox) {
+      if (buttonBox.source === "button" && buttonBox.disabled) {
+        logs.push(`[step5] Skip disabled composer submit ${label}`);
+        return false;
+      }
       const x = buttonBox.width > 1 ? buttonBox.x + buttonBox.width / 2 : buttonBox.x;
       const y = buttonBox.height > 1 ? buttonBox.y + buttonBox.height / 2 : buttonBox.y;
       logs.push(
@@ -1002,19 +1128,27 @@ async function submitPrompt(
   };
 
   if (await clickSubmit("primary")) {
-    if (
-      promptLocator &&
-      expectedPrompt &&
-      (await composerStillHasPrompt(promptLocator, expectedPrompt))
-    ) {
+    if (await waitForPromptSubmitAccepted(page, promptBox, promptLocator, expectedPrompt, logs)) {
+      return;
+    }
+    if (promptLocator && expectedPrompt) {
       logs.push("[step5] Prompt still visible after submit click; retrying composer submit once");
       await clickSubmit("retry");
-      if (await composerStillHasPrompt(promptLocator, expectedPrompt)) {
-        logs.push("[step5] Prompt still visible after retry; sending Control+Enter fallback");
-        await promptLocator.click({ force: true, timeout: 2000 }).catch(() => {});
-        await page.keyboard.press("Control+Enter").catch(() => {});
-        await page.waitForTimeout(1500);
+      if (await waitForPromptSubmitAccepted(page, promptBox, promptLocator, expectedPrompt, logs)) {
+        return;
       }
+      logs.push("[step5] Prompt still visible after retry; sending keyboard fallback");
+      await promptLocator.click({ force: true, timeout: 2000 }).catch(() => {});
+      await page.keyboard.press("Control+Enter").catch(() => {});
+      await page.waitForTimeout(500);
+      await page.keyboard.press("Enter").catch(() => {});
+      await page.waitForTimeout(1500);
+      if (await waitForPromptSubmitAccepted(page, promptBox, promptLocator, expectedPrompt, logs)) {
+        return;
+      }
+      throw new Error(
+        "FLOW_SUBMIT_FAILED: Flow composer did not accept the prompt after submit click, retry, and keyboard fallback",
+      );
     }
     return;
   }
@@ -1025,6 +1159,9 @@ async function submitPrompt(
   await page.waitForTimeout(250);
   await page.keyboard.press("Enter").catch(() => {});
   logs.push("[step5] Submitted via keyboard fallback");
+  if (!(await waitForPromptSubmitAccepted(page, promptBox, promptLocator, expectedPrompt, logs))) {
+    throw new Error("FLOW_SUBMIT_FAILED: Flow composer did not accept keyboard submit fallback");
+  }
 }
 
 async function collectImageSources(page) {
@@ -1098,6 +1235,75 @@ async function collectRenderableImageRecords(page, promptBox = null) {
     .catch(() => []);
 }
 
+async function collectGenerationProgressRegions(page) {
+  return page
+    .locator("body")
+    .evaluate(() => {
+      const regions = [];
+      const seen = new Set();
+      const nodes = Array.from(document.querySelectorAll("body *"));
+      for (const node of nodes) {
+        const text = String(node.textContent || "").trim();
+        const match = text.match(/\b([1-9]\d?)%\b/);
+        if (!match) continue;
+        let current = node;
+        let picked = null;
+        for (let depth = 0; current && depth < 8; depth += 1, current = current.parentElement) {
+          const rect = current.getBoundingClientRect();
+          const style = window.getComputedStyle(current);
+          const visible =
+            style.display !== "none" &&
+            style.visibility !== "hidden" &&
+            Number(style.opacity || "1") > 0 &&
+            rect.width >= 160 &&
+            rect.height >= 90 &&
+            rect.y >= 60;
+          if (!visible) continue;
+          picked = rect;
+          if (rect.width >= 240 && rect.height >= 140) break;
+        }
+        if (!picked) continue;
+        const key = [
+          Math.round(picked.x / 10) * 10,
+          Math.round(picked.y / 10) * 10,
+          Math.round(picked.width / 10) * 10,
+          Math.round(picked.height / 10) * 10,
+        ].join(":");
+        if (seen.has(key)) continue;
+        seen.add(key);
+        regions.push({
+          x: picked.x,
+          y: picked.y,
+          width: picked.width,
+          height: picked.height,
+          percent: Number(match[1]),
+        });
+      }
+      return regions
+        .filter((item) => item.width >= 160 && item.height >= 90)
+        .sort((left, right) => left.y - right.y || left.x - right.x);
+    })
+    .catch(() => []);
+}
+
+function imageRecordOverlapsRegion(record, region) {
+  if (!record || !region) return false;
+  const left = Math.max(record.x, region.x);
+  const top = Math.max(record.y, region.y);
+  const right = Math.min(record.x + record.width, region.x + region.width);
+  const bottom = Math.min(record.y + record.height, region.y + region.height);
+  const overlapArea = Math.max(0, right - left) * Math.max(0, bottom - top);
+  const recordArea = Math.max(1, record.width * record.height);
+  const centerX = record.x + record.width / 2;
+  const centerY = record.y + record.height / 2;
+  const centerInside =
+    centerX >= region.x - 40 &&
+    centerX <= region.x + region.width + 40 &&
+    centerY >= region.y - 40 &&
+    centerY <= region.y + region.height + 40;
+  return overlapArea / recordArea >= 0.35 || centerInside;
+}
+
 async function waitForNewImageSource(
   page,
   beforeSources,
@@ -1114,15 +1320,51 @@ async function waitForNewImageSource(
 
   const startedAt = Date.now();
   let lastLogAt = 0;
+  let trackedProgressRegion = null;
+  let lastProgressAt = 0;
+  let lastProgressPercent = null;
   while (Date.now() - startedAt < timeoutMs) {
     const records = await collectRenderableImageRecords(page, promptBox);
+    const progressRegions = await collectGenerationProgressRegions(page);
+    if (progressRegions.length > 0) {
+      const currentRegion = progressRegions[0];
+      trackedProgressRegion = trackedProgressRegion || currentRegion;
+      lastProgressAt = Date.now();
+      lastProgressPercent = currentRegion.percent;
+      if (Date.now() - lastLogAt > 10000) {
+        lastLogAt = Date.now();
+        logs.push(
+          `[step6] Flow generation still in progress percent=${currentRegion.percent}, region=${Math.round(
+            currentRegion.x,
+          )},${Math.round(currentRegion.y)},${Math.round(currentRegion.width)}x${Math.round(
+            currentRegion.height,
+          )}`,
+        );
+      }
+      await page.waitForTimeout(2500);
+      continue;
+    }
+
+    if (
+      trackedProgressRegion &&
+      lastProgressAt > 0 &&
+      Date.now() - lastProgressAt < GENERATION_PROGRESS_SETTLE_MS
+    ) {
+      await page.waitForTimeout(1500);
+      continue;
+    }
+
     const fresh = records
       .filter((record) => {
         const name = mediaNameFromSource(record.src);
+        const inTrackedGenerationRegion = trackedProgressRegion
+          ? imageRecordOverlapsRegion(record, trackedProgressRegion)
+          : Date.now() - startedAt >= FALLBACK_FRESH_IMAGE_DELAY_MS;
         return (
           !beforeSet.has(record.src) &&
           !excludedSet.has(name) &&
           !record.inComposer &&
+          inTrackedGenerationRegion &&
           record.complete &&
           record.naturalWidth >= 512 &&
           record.naturalHeight >= 256
@@ -1133,14 +1375,18 @@ async function waitForNewImageSource(
     if (fresh.length > 0) {
       const picked = fresh[0];
       logs.push(
-        `[step6] PASS detected generated image source: ${picked.src} natural=${picked.naturalWidth}x${picked.naturalHeight} box=${Math.round(picked.width)}x${Math.round(picked.height)}`,
+        `[step6] PASS detected generated image source: ${picked.src} natural=${picked.naturalWidth}x${picked.naturalHeight} box=${Math.round(picked.width)}x${Math.round(picked.height)} trackedProgress=${Boolean(trackedProgressRegion)} lastProgress=${lastProgressPercent ?? "none"}`,
       );
       return picked.src;
     }
 
     if (Date.now() - lastLogAt > 10000) {
       lastLogAt = Date.now();
-      logs.push(`[step6] Waiting generated renderable image; visible candidates=${records.length}`);
+      logs.push(
+        `[step6] Waiting generated renderable image; visible candidates=${records.length}, trackedProgress=${Boolean(
+          trackedProgressRegion,
+        )}, fallbackReady=${Date.now() - startedAt >= FALLBACK_FRESH_IMAGE_DELAY_MS}`,
+      );
     }
     await page.waitForTimeout(2500);
   }
@@ -1219,13 +1465,20 @@ async function saveImageFromSource(context, page, sourceUrl, outputDir, resoluti
   throw new Error("Generated image detected but could not be saved");
 }
 
-async function runPostGenerationQc(imagePath) {
+async function runPostGenerationQc(imagePath, referenceImageHashes = new Set()) {
   if (!imagePath || !existsSync(imagePath)) {
     return { pass: false, reason: "generated image file does not exist" };
   }
   const size = readFileSync(imagePath).length;
   if (size < MIN_GENERATED_IMAGE_BYTES) {
     return { pass: false, reason: `generated image too small: ${size} bytes` };
+  }
+  const generatedHash = computeFileSha256(imagePath);
+  if (referenceImageHashes.has(generatedHash)) {
+    return {
+      pass: false,
+      reason: "generated image matches an input reference image byte-for-byte",
+    };
   }
   return { pass: true, reason: `generated image saved, size=${size} bytes` };
 }
@@ -1279,6 +1532,10 @@ async function runPostGenerationQc(imagePath) {
     );
     process.exit(1);
   }
+  const referenceImageHashes = computeReadableFileHashes(imagePaths, logs);
+  if (referenceImageHashes.size > 0) {
+    logs.push(`[step0] Reference image hashes registered for QC: ${referenceImageHashes.size}`);
+  }
 
   if (parsed.dry_run) {
     logs.push("[dry-run] Exiting early.");
@@ -1297,119 +1554,158 @@ async function runPostGenerationQc(imagePath) {
     return;
   }
 
-  let context = null;
   try {
-    const opened = await openFlowPage(parsed, logs);
-    context = opened.context;
-    const page = opened.page;
-
-    const screenshotBefore = path.join(outputDir, `flow-before-${nowStamp()}.png`);
-    await page.screenshot({ path: screenshotBefore, fullPage: true });
-    artifacts.push({ type: "screenshot_before", path: relativePath(screenshotBefore) });
-
-    let promptBox = null;
-    if (imagePaths.length > 0) {
-      promptBox = await uploadImages(page, imagePaths, logs);
-    }
-    const uploadedMediaNames = promptBox ? await collectComposerMediaNames(page, promptBox) : [];
-    if (uploadedMediaNames.length) {
-      logs.push(`[step3] Composer uploaded media names excluded: ${uploadedMediaNames.join(", ")}`);
-    }
-
-    const promptState = await typePrompt(page, imagePrompt, logs, promptBox);
-    const beforeGenerationSources = await collectImageSources(page);
-    logs.push(
-      `[step5] Baseline after upload/prompt before submit, visible image sources=${beforeGenerationSources.length}`,
-    );
-    await submitPrompt(
-      page,
-      logs,
-      promptState.promptBox || promptBox,
-      promptState.promptLocator,
-      promptState.normalizedPrompt,
-    );
-    await page.waitForTimeout(5000);
-
-    const generatedSource = await waitForNewImageSource(
-      page,
-      beforeGenerationSources,
-      Number(parsed.timeout_ms || 1200000),
-      logs,
-      uploadedMediaNames,
-      promptBox,
-    );
-    const downloadedImagePath = await saveImageFromSource(
-      context,
-      page,
-      generatedSource,
-      outputDir,
-      parsed.download_resolution,
-      logs,
-    );
-    const qcResult = await runPostGenerationQc(downloadedImagePath);
-    if (!qcResult.pass) throw new Error(`QC failed: ${qcResult.reason}`);
-    logs.push(`[qc] PASS ${qcResult.reason}`);
-
-    const screenshotAfter = path.join(outputDir, `flow-after-${nowStamp()}.png`);
-    await page.screenshot({ path: screenshotAfter, fullPage: true });
-    artifacts.push({ type: "screenshot_after", path: relativePath(screenshotAfter) });
-
-    const relativeDownloadedImagePath = relativePath(downloadedImagePath);
-    artifacts.push({ type: "generated_image", path: relativeDownloadedImagePath });
-
-    let gallerySync = null;
-    try {
-      gallerySync = await publishGeneratedImageToUpTekGallery(downloadedImagePath, {
-        imagePaths,
-        imagePrompt,
-        workspaceRoot: process.cwd(),
-        productModel: typeof parsed.product_model === "string" ? parsed.product_model.trim() : "",
-      });
-      logs.push(
-        `[step7] Synced generated image to UpTek gallery ${gallerySync.companyId}/${gallerySync.departmentId} with productModel=${gallerySync.productModel}: ${gallerySync.copiedPath}`,
-      );
-    } catch (error) {
-      logs.push(
-        `[step7] Warning: generated image sync to UpTek gallery failed: ${
-          error instanceof Error ? error.message : String(error)
-        }`,
-      );
-    }
-
-    const data = {
-      target_gemini_url: targetGeminiUrl,
-      image_prompt: imagePrompt,
-      downloaded_image_path: relativeDownloadedImagePath,
-      used_image_paths: imagePaths,
-      reference_image_sha256: imagePaths[0] ? computeFileSha256(imagePaths[0]) : null,
-      image_qc_status: "PASS",
-      image_qc_reason: qcResult.reason,
-      company_gallery_synced: Boolean(gallerySync),
-      company_gallery_path: gallerySync?.copiedPath || null,
-      company_gallery_company_id: gallerySync?.companyId || "UpTek",
-      company_gallery_department_id: gallerySync?.departmentId || "Phong_Marketing",
-      company_gallery_product_model: gallerySync?.productModel || null,
-      company_gallery_url: gallerySync?.galleryUrl || null,
-      company_gallery_image_id: gallerySync?.imageId || null,
-      company_gallery_media_file_id: gallerySync?.mediaFileId || null,
-    };
-    const chatReply = buildChatImageReplyPayload({
-      imagePath: downloadedImagePath,
-      data,
-      artifacts,
-    });
-
-    printResult(
-      buildResult({
-        success: true,
-        message: chatReply?.assistantText || "Đây là ảnh vừa tạo cho bạn:",
-        data: { ...data, ...(chatReply?.data || {}) },
-        artifacts: chatReply?.artifacts || artifacts,
+    await withBrowserProfileLock(
+      {
+        browserPath: parsed.browser_path,
+        userDataDir: parsed.user_data_dir,
+        profileName: parsed.profile_name,
+        timeoutMs: Number(parsed.timeout_ms || 1200000),
         logs,
-      }),
+      },
+      async () => {
+        let context = null;
+        let generationCompleted = false;
+        try {
+          const opened = await openFlowPage(parsed, logs);
+          context = opened.context;
+          const page = opened.page;
+
+          const screenshotBefore = path.join(outputDir, `flow-before-${nowStamp()}.png`);
+          await page.screenshot({ path: screenshotBefore, fullPage: true });
+          artifacts.push({ type: "screenshot_before", path: relativePath(screenshotBefore) });
+
+          let promptBox = null;
+          if (imagePaths.length > 0) {
+            promptBox = await uploadImages(page, imagePaths, logs);
+          }
+          const uploadedMediaNames = promptBox
+            ? await collectComposerMediaNames(page, promptBox)
+            : [];
+          if (uploadedMediaNames.length) {
+            logs.push(
+              `[step3] Composer uploaded media names excluded: ${uploadedMediaNames.join(", ")}`,
+            );
+          }
+
+          const promptState = await typePrompt(page, imagePrompt, logs, promptBox);
+          const beforeGenerationSources = await collectImageSources(page);
+          logs.push(
+            `[step5] Baseline after upload/prompt before submit, visible image sources=${beforeGenerationSources.length}`,
+          );
+          await submitPrompt(
+            page,
+            logs,
+            promptState.promptBox || promptBox,
+            promptState.promptLocator,
+            promptState.normalizedPrompt,
+          );
+          await page.waitForTimeout(5000);
+
+          const generatedSource = await waitForNewImageSource(
+            page,
+            beforeGenerationSources,
+            Number(parsed.timeout_ms || 1200000),
+            logs,
+            uploadedMediaNames,
+            promptBox,
+          );
+          const downloadedImagePath = await saveImageFromSource(
+            context,
+            page,
+            generatedSource,
+            outputDir,
+            parsed.download_resolution,
+            logs,
+          );
+          const qcResult = await runPostGenerationQc(downloadedImagePath, referenceImageHashes);
+          if (!qcResult.pass) throw new Error(`QC failed: ${qcResult.reason}`);
+          logs.push(`[qc] PASS ${qcResult.reason}`);
+          generationCompleted = true;
+
+          const screenshotAfter = path.join(outputDir, `flow-after-${nowStamp()}.png`);
+          await page.screenshot({ path: screenshotAfter, fullPage: true });
+          artifacts.push({ type: "screenshot_after", path: relativePath(screenshotAfter) });
+
+          const relativeDownloadedImagePath = relativePath(downloadedImagePath);
+          artifacts.push({ type: "generated_image", path: relativeDownloadedImagePath });
+
+          let gallerySync = null;
+          try {
+            gallerySync = await publishGeneratedImageToUpTekGallery(downloadedImagePath, {
+              imagePaths,
+              imagePrompt,
+              workspaceRoot: process.cwd(),
+              productModel:
+                typeof parsed.product_model === "string" ? parsed.product_model.trim() : "",
+            });
+            logs.push(
+              `[step7] Synced generated image to UpTek gallery ${gallerySync.companyId}/${gallerySync.departmentId} with productModel=${gallerySync.productModel}: ${gallerySync.copiedPath}`,
+            );
+          } catch (error) {
+            logs.push(
+              `[step7] Warning: generated image sync to UpTek gallery failed: ${
+                error instanceof Error ? error.message : String(error)
+              }`,
+            );
+          }
+
+          const data = {
+            target_gemini_url: targetGeminiUrl,
+            image_prompt: imagePrompt,
+            downloaded_image_path: relativeDownloadedImagePath,
+            used_image_paths: imagePaths,
+            reference_image_sha256: imagePaths[0] ? computeFileSha256(imagePaths[0]) : null,
+            image_qc_status: "PASS",
+            image_qc_reason: qcResult.reason,
+            company_gallery_synced: Boolean(gallerySync),
+            company_gallery_path: gallerySync?.copiedPath || null,
+            company_gallery_company_id: gallerySync?.companyId || "UpTek",
+            company_gallery_department_id: gallerySync?.departmentId || "Phong_Marketing",
+            company_gallery_product_model: gallerySync?.productModel || null,
+            company_gallery_url: gallerySync?.galleryUrl || null,
+            company_gallery_image_id: gallerySync?.imageId || null,
+            company_gallery_media_file_id: gallerySync?.mediaFileId || null,
+          };
+          const chatReply = buildChatImageReplyPayload({
+            imagePath: downloadedImagePath,
+            data,
+            artifacts,
+          });
+
+          printResult(
+            buildResult({
+              success: true,
+              message: chatReply?.assistantText || "Đây là ảnh vừa tạo cho bạn:",
+              data: { ...data, ...(chatReply?.data || {}) },
+              artifacts: chatReply?.artifacts || artifacts,
+              logs,
+            }),
+          );
+        } finally {
+          if (context) {
+            if (parsed.auto_close_browser || generationCompleted) {
+              await context.close().catch(() => {});
+            } else {
+              const browser = context.browser?.();
+              if (browser?.disconnect) {
+                browser.disconnect();
+                logs.push(
+                  "[cleanup] Auto close browser is disabled; disconnected Playwright and kept browser open",
+                );
+              } else {
+                logs.push("[cleanup] Auto close browser is disabled; leaving browser context open");
+              }
+            }
+          }
+        }
+      },
     );
   } catch (error) {
     logs.push(`[fail] ${error.stack || error.message}`);
+    const errorCode = String(error.message || "").startsWith("FLOW_SUBMIT_FAILED")
+      ? "FLOW_SUBMIT_FAILED"
+      : "FLOW_FAILED";
     printResult(
       buildResult({
         success: false,
@@ -1417,11 +1713,9 @@ async function runPostGenerationQc(imagePath) {
         data: { target_gemini_url: targetGeminiUrl, image_prompt: imagePrompt },
         artifacts,
         logs,
-        error: { code: "FLOW_FAILED", details: error.message },
+        error: { code: errorCode, details: error.message },
       }),
     );
     process.exit(1);
-  } finally {
-    if (context) await context.close().catch(() => {});
   }
 })();
