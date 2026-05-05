@@ -60,6 +60,7 @@ function parseArgs(argv) {
     notifySessionKey: "",
     notifyWorkflowId: "",
     notifyStage: "",
+    managerInstanceId: null,
   };
 
   const positional = [];
@@ -125,6 +126,11 @@ function parseArgs(argv) {
     }
     if (token === "--notify-stage") {
       options.notifyStage = argv[index + 1] || "";
+      index += 1;
+      continue;
+    }
+    if (token === "--manager-instance-id") {
+      options.managerInstanceId = argv[index + 1] || null;
       index += 1;
       continue;
     }
@@ -482,13 +488,24 @@ function buildFrontendApprovalMessage(params) {
   return lines.filter(Boolean).join("\n");
 }
 
-function buildPaths(workspaceDir) {
-  const baseDir = path.join(workspaceDir, "agent-orchestrator-test");
+function sanitizePathSegment(value) {
+  return String(value || "")
+    .trim()
+    .replace(/[^a-zA-Z0-9._-]+/g, "_")
+    .replace(/^_+|_+$/g, "")
+    .slice(0, 120);
+}
+
+function buildPaths(workspaceDir, managerInstanceId = null) {
+  const managerSegment = sanitizePathSegment(managerInstanceId);
+  const baseDir = managerSegment
+    ? path.join(workspaceDir, "agent-orchestrator-test", "managers", managerSegment)
+    : path.join(workspaceDir, "agent-orchestrator-test");
   const historyDir = path.join(baseDir, "history");
   const currentFile = path.join(baseDir, "current-workflow.json");
   ensureDir(baseDir);
   ensureDir(historyDir);
-  return { baseDir, historyDir, currentFile };
+  return { baseDir, historyDir, currentFile, managerInstanceId: managerSegment || null };
 }
 
 // â�?€â�?€â�?€ Result Builders â�?€â�?€â�?€â�?€â�?€â�?€â�?€â�?€â�?€â�?€â�?€â�?€â�?€â�?€â�?€â�?€â�?€â�?€â�?€â�?€â�?€â�?€â�?€â�?€â�?€â�?€â�?€â�?€â�?€â�?€â�?€â�?€â�?€â�?€â�?€â�?€â�?€â�?€â�?€â�?€â�?€â�?€â�?€â�?€â�?€â�?€â�?€â�?€â�?€
@@ -647,6 +664,7 @@ function buildWorkflowScopedSessionKey(agentId, workflowId, stepId = "lane") {
   return `agent:${safeAgentId}:automation:${safeWorkflowId}:${safeStepId}`;
 }
 
+
 function isWorkflowScopedSessionKey(sessionKey, agentId, workflowId) {
   const value = String(sessionKey || "").trim();
   const safeAgentId = String(agentId || "").trim();
@@ -663,10 +681,12 @@ function resolveWorkflowScopedSessionKey(params) {
     return provided;
   }
   return buildWorkflowScopedSessionKey(params.agentId, params.workflowId, params.stepId);
+
 }
 
 async function resolveRootWorkflowBinding(context) {
   const managerId = String(context?.options?.from || "pho_phong").trim() || "pho_phong";
+  const explicitManagerInstanceId = String(context?.options?.managerInstanceId || "").trim() || null;
   const brief = normalizeText(context?.message || "");
   const fallbackWorkflowId = `wf_test_${randomUUID()}`;
 
@@ -676,7 +696,9 @@ async function resolveRootWorkflowBinding(context) {
       employeeId: managerId,
       brief,
       sessionKey: context?.registry?.byId?.pho_phong?.transport?.sessionKey || null,
+
       rootConversationId: context?.rootConversationId || context?.parentConversationId || null,
+
     });
 
     const workflowId =
@@ -686,6 +708,13 @@ async function resolveRootWorkflowBinding(context) {
       String(resolved?.rootConversationId || resolved?.rootConversation?.id || "").trim() || null;
     const rootSessionKey =
       String(resolved?.sessionKey || resolved?.rootConversation?.sessionKey || "").trim() || null;
+    const managerInstanceId =
+      String(
+        resolved?.managerInstanceId ||
+          resolved?.rootConversation?.managerInstanceId ||
+          explicitManagerInstanceId ||
+          "",
+      ).trim() || null;
 
     if (rootConversationId) {
       logger.log(
@@ -696,6 +725,7 @@ async function resolveRootWorkflowBinding(context) {
         workflowId,
         rootConversationId,
         rootSessionKey,
+        managerInstanceId,
         adoptedExistingRoot: true,
       };
     }
@@ -714,19 +744,27 @@ async function resolveRootWorkflowBinding(context) {
     workflowId: fallbackWorkflowId,
     rootConversationId: null,
     rootSessionKey: null,
+    managerInstanceId: explicitManagerInstanceId,
     adoptedExistingRoot: false,
   };
 }
 
 async function resolveWorkflowSessionContext(params) {
+
   let actualSessionKey = resolveWorkflowScopedSessionKey(params);
+
   let subConv = null;
 
   try {
     subConv = await beClient.createSubAgentConversation({
       workflowId: params.workflowId,
+      taskId,
+      stepId: params.stepId,
+      managerInstanceId: params.managerInstanceId || null,
       agentId: params.agentId,
+
       employeeId: params.employeeId || undefined,
+
       parentConversationId: params.rootConversationId || null,
       title: `[AUTO] ${params.agentId} • ${params.stepId}`,
     });
@@ -743,6 +781,7 @@ async function resolveWorkflowSessionContext(params) {
   return {
     sessionKey: actualSessionKey,
     subConv,
+    taskId,
   };
 }
 
@@ -1005,6 +1044,7 @@ function startSubAgentRuntimeMirror(params) {
 }
 
 async function runAgentStepDetailed(params) {
+
   const { sessionKey: actualSessionKey, subConv } = await resolveWorkflowSessionContext(params);
   const promptMessageId = buildSubAgentRuntimeMessageId(params, "prompt");
   const replyMessageId = buildSubAgentRuntimeMessageId(params, "reply");
@@ -1018,13 +1058,17 @@ async function runAgentStepDetailed(params) {
       timestamp: Date.now(),
     });
   }
+
   const task = transport.sendTaskToAgentLane({
     agentId: params.agentId,
+    workerAgentId: params.workerAgentId || params.agentId,
+    managerInstanceId: params.managerInstanceId || null,
     openClawHome: params.openClawHome,
     sessionKey: actualSessionKey,
     prompt: params.prompt,
     workflowId: params.workflowId,
     stepId: params.stepId,
+    taskId,
     timeoutMs: params.timeoutMs,
   });
   if (typeof params.onTaskStarted === "function") {
@@ -1050,6 +1094,7 @@ async function runAgentStepDetailed(params) {
   const finalReply = validateCommonReply(response.text, params.workflowId, params.stepId);
 
   if (subConv) {
+
     await persistSubAgentRuntimeMessage({
       subConv,
       id: replyMessageId,
@@ -1058,6 +1103,7 @@ async function runAgentStepDetailed(params) {
       final: true,
       timestamp: Date.now(),
     });
+
   }
 
 
@@ -1065,18 +1111,25 @@ async function runAgentStepDetailed(params) {
     reply: finalReply,
     sessionKey: actualSessionKey,
     subConv,
+    taskId,
   };
 }
 
 async function runAgentStep(params) {
+
   let actualSessionKey = resolveWorkflowScopedSessionKey(params);
+
   let subConv;
 
   try {
     // 1. Táº¡o/Reuse conversation qua BE Ä‘á»ƒ láº¥y sessionKey chuáº©n (cÃ´ láº­p tiáº¿n trÃ¬nh)
     subConv = await beClient.createSubAgentConversation({
       workflowId: params.workflowId,
+      taskId,
+      stepId: params.stepId,
+      managerInstanceId: params.managerInstanceId || null,
       agentId: params.agentId,
+      workerAgentId: params.workerAgentId || params.agentId,
       parentConversationId: params.rootConversationId || null,
       title: `[AUTO] ${params.agentId} - ${params.stepId}`,
     });
@@ -1103,11 +1156,14 @@ async function runAgentStep(params) {
   // 2. Gá»i cho Gateway bÃ¬nh thÆ°á» ng
   const task = transport.sendTaskToAgentLane({
     agentId: params.agentId,
+    workerAgentId: params.workerAgentId || params.agentId,
+    managerInstanceId: params.managerInstanceId || null,
     openClawHome: params.openClawHome,
     sessionKey: actualSessionKey,
     prompt: params.prompt,
     workflowId: params.workflowId,
     stepId: params.stepId,
+    taskId,
     timeoutMs: params.timeoutMs,
   });
   const stopRuntimeMirror = startSubAgentRuntimeMirror({
@@ -1159,8 +1215,10 @@ async function runContentCheckpointStep(params) {
       const now = Date.now();
       await beClient.persistMessages([
         {
+
           id: `msg_${now}_${params.stepId}_validated_checkpoint`,
           conversationId: result.subConv.id,
+
           role: "assistant",
           content: validation.reply,
           timestamp: now,
@@ -1255,8 +1313,12 @@ async function syncApprovalCheckpoint(params) {
   try {
     await beClient.pushAutomationEvent({
       workflowId: params.workflowId,
+      taskId: params.taskId || buildWorkflowTaskId(params.workflowId, params.stage || "approval"),
+      stepId: params.stepId || params.stage || "approval",
+      managerInstanceId: params.managerInstanceId || null,
       employeeId: managerId,
       agentId: managerId,
+      workerAgentId: params.workerAgentId || managerId,
       conversationId: params.rootConversationId || null,
       title: params.title || `[AUTO] ${managerId} • ${params.workflowId}`,
       role: "assistant",
@@ -1302,8 +1364,12 @@ async function syncRootConversationMessage(params) {
   try {
     await beClient.pushAutomationEvent({
       workflowId,
+      taskId: params.taskId || buildWorkflowTaskId(workflowId, params.stage || "root"),
+      stepId: params.stepId || params.stage || "root",
+      managerInstanceId: params.managerInstanceId || null,
       employeeId: managerId,
       agentId: managerId,
+      workerAgentId: params.workerAgentId || managerId,
       conversationId: params.rootConversationId || null,
       title: params.title || `[AUTO] ${managerId} • ${workflowId}`,
       role: "assistant",
@@ -1406,6 +1472,11 @@ function buildRootSyncPayloadFromResult(context, result) {
     conversationStatus: stageSpec.conversationStatus || stage,
     content,
     rootConversationId: workflowState?.rootConversationId || context.parentConversationId || null,
+    ...(
+      workflowState?.managerInstanceId || context.managerInstanceId
+        ? { managerInstanceId: workflowState?.managerInstanceId || context.managerInstanceId }
+        : {}
+    ),
   };
 }
 
@@ -1416,6 +1487,7 @@ async function syncRootMessageFromResult(context, result) {
   }
   const delivered = await syncRootConversationMessage({
     ...payload,
+    managerInstanceId: payload.managerInstanceId || context.managerInstanceId || null,
     managerId: context.options?.from || "pho_phong",
     title: `[AUTO] ${context.options?.from || "pho_phong"} • ${payload.workflowId}`,
   });
@@ -1907,6 +1979,7 @@ async function tryRecoverAsyncStageState(params) {
     return null;
   }
 
+
   let workerSessionKey = resolveWorkflowScopedSessionKey({
     agentId: spec.agentId,
     workflowId: state.workflow_id,
@@ -1914,11 +1987,16 @@ async function tryRecoverAsyncStageState(params) {
     sessionKey: registry?.byId?.[spec.agentId]?.transport?.sessionKey || "",
   });
 
+
   // Ưu tiên session key do BE sinh (per-workflow) thay vì fixed registry key
   try {
     const subConv = await beClient.createSubAgentConversation({
       workflowId: state.workflow_id,
+      taskId: buildWorkflowTaskId(state.workflow_id, spec.stepId),
+      stepId: spec.stepId,
+      managerInstanceId: state.managerInstanceId || null,
       agentId: spec.agentId,
+      workerAgentId: spec.agentId,
     });
     if (subConv?.sessionKey) {
       workerSessionKey = subConv.sessionKey;
@@ -2157,7 +2235,7 @@ async function runAutoNotifyWatcher(options) {
   const openClawHome = resolveOpenClawHome(options.openClawHome);
   const config = loadOpenClawConfig(openClawHome);
   const workspaceDir = getPhoPhongWorkspace(config, openClawHome);
-  const paths = buildPaths(workspaceDir);
+  const paths = buildPaths(workspaceDir, options.managerInstanceId);
   const registry = discoverRegistry({ openClawHome });
   const targetWorkflowId = String(options.notifyWorkflowId || "").trim();
   const targetStage = String(options.notifyStage || "").trim();
@@ -2419,6 +2497,7 @@ async function startNewWorkflow(context) {
     await beClient.createWorkflow({
       id: workflowId,
       rootConversationId: rootBinding.rootConversationId || context.parentConversationId || null,
+      managerInstanceId: rootBinding.managerInstanceId || undefined,
       initiatorAgentId: context.options.from || "pho_phong",
       initiatorEmployeeId: context.options.from || "pho_phong",
       title: `[AUTO] Workflow (từ ${context.options.from})`,
@@ -2471,9 +2550,11 @@ async function startNewWorkflow(context) {
 
   let contentCheckpoint = await recoverContentCheckpointFromHistory({
     agentId: "nv_content",
+    managerInstanceId: rootBinding.managerInstanceId || null,
     sessionKey: context.registry.byId.nv_content.transport.sessionKey,
     openClawHome: context.openClawHome,
     rootConversationId: rootBinding.rootConversationId || null,
+    taskId: buildWorkflowTaskId(workflowId, stepId),
     workflowId,
     stepId,
   });
@@ -2500,7 +2581,9 @@ async function startNewWorkflow(context) {
   }
 
   const state = saveWorkflow(context.paths, {
+
     ...baseState,
+
     status: "pending",
     stage: "awaiting_content_approval",
     content_started_at: null,
@@ -2534,6 +2617,9 @@ async function startNewWorkflow(context) {
     workflowId,
     paths: context.paths,
     rootConversationId: rootBinding.rootConversationId || null,
+    managerInstanceId: rootBinding.managerInstanceId || null,
+    taskId: buildWorkflowTaskId(workflowId, state.stage),
+    stepId: state.stage,
     managerId: context.options.from || "pho_phong",
     stage: state.stage,
     title: `[AUTO] ${context.options.from || "pho_phong"} • ${workflowId}`,
@@ -4662,9 +4748,30 @@ function schedulePostAction(context, state) {
  * Sá»­a bÃ i Ä‘Ã£ Ä‘Äƒng (EDIT_PUBLISHED intent).
  */
 async function editPublishedFlow(context) {
-  const workflowId = `wf_edit_${randomUUID()}`;
+  let workflowId = `wf_edit_${randomUUID()}`;
+  
+  // Try to find the latest frontend automation conversation so events sync back
+  try {
+    const res = await fetch("http://localhost:3001/api/conversations/pho_phong?includeAutomation=1");
+    if (res.ok) {
+      const convs = await res.json();
+      const latestAuto = convs.find(c => c.id && c.id.startsWith("auto_wf_"));
+      if (latestAuto) {
+        workflowId = latestAuto.id;
+      }
+    }
+  } catch (e) {
+    // fallback
+  }
+
   const stepId = "step_edit_content";
   const postId = context.intent?.post_id;
+  logger.setSyncContext({
+    workflowId,
+    employeeId: context.options?.from || "pho_phong",
+    agentId: context.options?.from || "pho_phong",
+    title: `[AUTO] ${context.options?.from || "pho_phong"} • ${workflowId}`,
+  });
 
   if (!postId) {
     return buildResult({
@@ -5523,7 +5630,7 @@ async function runCli(argv = process.argv.slice(2)) {
   const openClawHome = resolveOpenClawHome(options.openClawHome);
   const config = loadOpenClawConfig(openClawHome);
   const workspaceDir = getPhoPhongWorkspace(config, openClawHome);
-  const paths = buildPaths(workspaceDir);
+  const paths = buildPaths(workspaceDir, options.managerInstanceId);
 
   // Reset command
   if (options.reset) {
@@ -5583,6 +5690,7 @@ async function runCli(argv = process.argv.slice(2)) {
     registry,
     paths,
     intent,
+    managerInstanceId: currentState?.managerInstanceId || options.managerInstanceId || null,
   };
 
   let result;
@@ -5747,11 +5855,14 @@ function parseMediaReply(reply) {
 
 module.exports = {
   buildContentApprovalCheckpointMessage,
+  buildPaths,
   continueWorkflow,
   buildStageHumanMessage,
   buildWorkflowScopedSessionKey,
+
   isWorkflowScopedSessionKey,
   resolveWorkflowScopedSessionKey,
+
   classifyContentDecision,
   classifyMediaDecision,
   extractBlock,

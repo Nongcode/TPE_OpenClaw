@@ -3,7 +3,11 @@
     "list": [
       {
         "id": "pho_phong",
-        "workspace": "C:\\Users\\Administrator\\.openclaw\\workspace_phophong",
+        "workspace": "C:\\Users\\PHAMDUCLONG\\.openclaw\\workspace_phophong",
+        "managerInstances": [
+          "mgr_pho_phong_A",
+          "mgr_pho_phong_B"
+        ],
         "model": "openai-codex/gpt-5.4",
         "skills": [
           "agent-orchestrator-test",
@@ -22,7 +26,7 @@
       },
       {
         "id": "nv_content",
-        "workspace": "C:\\Users\\Administrator\\.openclaw\\workspace_content",
+        "workspace": "C:\\Users\\PHAMDUCLONG\\.openclaw\\workspace_content",
         "model": "openai-codex/gpt-5.4",
         "skills": [
           "search-product-text",
@@ -36,7 +40,7 @@
       },
       {
         "id": "nv_prompt",
-        "workspace": "C:\\Users\\Administrator\\.openclaw\\workspace_prompt",
+        "workspace": "C:\\Users\\PHAMDUCLONG\\.openclaw\\workspace_prompt",
         "model": "openai-codex/gpt-5.4",
         "skills": [],
         "subagents": {
@@ -47,7 +51,7 @@
       },
       {
         "id": "nv_media",
-        "workspace": "C:\\Users\\Administrator\\.openclaw\\workspace_media",
+        "workspace": "C:\\Users\\PHAMDUCLONG\\.openclaw\\workspace_media",
         "model": "openai-codex/gpt-5.4",
         "skills": [
           "gemini-generate-image",
@@ -61,7 +65,7 @@
       },
       {
         "id": "media_video",
-        "workspace": "C:\\Users\\Administrator\\.openclaw\\workspace_media_video",
+        "workspace": "C:\\Users\\PHAMDUCLONG\\.openclaw\\workspace_media_video",
         "model": "openai-codex/gpt-5.4",
         "skills": [
           "generate-veo-video"
@@ -73,5 +77,58 @@
         }
       }
     ]
+  },
+  "gateway": {
+    "controlUi": {
+      "employeeDirectory": [
+        {
+          "employeeId": "pho_phong_a",
+          "employeeName": "Pho phong A",
+          "managerInstanceId": "mgr_pho_phong_A",
+          "lockedAgentId": "pho_phong",
+          "visibleAgentIds": [
+            "pho_phong",
+            "nv_content",
+            "nv_prompt",
+            "nv_media",
+            "media_video"
+          ],
+          "lockAgent": true,
+          "autoConnect": true
+        },
+        {
+          "employeeId": "pho_phong_b",
+          "employeeName": "Pho phong B",
+          "managerInstanceId": "mgr_pho_phong_B",
+          "lockedAgentId": "pho_phong",
+          "visibleAgentIds": [
+            "pho_phong",
+            "nv_content",
+            "nv_prompt",
+            "nv_media",
+            "media_video"
+          ],
+          "lockAgent": true,
+          "autoConnect": true
+        }
+      ],
+      "demoLogin": {
+        "enabled": true,
+        "accounts": [
+          {
+            "email": "pho_phong_a@local.test",
+            "password": "PhoPhongA@123",
+            "employeeId": "pho_phong_a",
+            "label": "Pho phong A"
+          },
+          {
+            "email": "pho_phong_b@local.test",
+            "password": "PhoPhongB@123",
+            "employeeId": "pho_phong_b",
+            "label": "Pho phong B"
+          }
+        ]
+      }
+    }
   }
 }

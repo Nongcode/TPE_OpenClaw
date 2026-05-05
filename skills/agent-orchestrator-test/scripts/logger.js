@@ -24,6 +24,7 @@ const ICONS = {
 };
 
 let loggingEnabled = true;
+let syncContext = null;
 
 function timestamp() {
   return new Date().toLocaleString("vi-VN", { timeZone: "Asia/Ho_Chi_Minh" });
@@ -88,6 +89,7 @@ function logRejected(stage, feedback) {
   if (feedback) {
     write(`   Nhan xet: "${feedback}"\n`);
   }
+  postAutomationEvent(`Bị từ chối giai đoạn: ${stage}. Nhận xét: ${feedback || ""}`, "assistant", "regular");
 }
 
 function logLearning(agentId, rule) {
@@ -185,10 +187,31 @@ function isEnabled() {
   return loggingEnabled;
 }
 
+function setSyncContext(context) {
+  syncContext = context && typeof context === "object" ? { ...context } : null;
+}
+
+function postAutomationEvent(content, role = "assistant", type = "regular") {
+  if (!syncContext) {
+    return;
+  }
+  const beClient = require("./be-client");
+  void beClient.pushAutomationEvent({
+    ...syncContext,
+    role,
+    type,
+    content,
+    timestamp: Date.now(),
+  }).catch(() => {
+    // Logging must not break orchestration.
+  });
+}
+
 module.exports = {
   buildHumanMessage,
   isEnabled,
   log,
+  setSyncContext,
   logApprovalWait,
   logApproved,
   logEdited,

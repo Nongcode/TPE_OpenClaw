@@ -68,6 +68,7 @@ export const ConnectParamsSchema = Type.Object(
         {
           employeeId: Type.Optional(NonEmptyString),
           employeeName: Type.Optional(NonEmptyString),
+          managerInstanceId: Type.Optional(NonEmptyString),
           lockedAgentId: Type.Optional(NonEmptyString),
           lockedSessionKey: Type.Optional(NonEmptyString),
           canViewAllSessions: Type.Optional(Type.Boolean()),

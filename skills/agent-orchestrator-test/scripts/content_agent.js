@@ -159,7 +159,7 @@ function buildContentDraftPrompt(params) {
     "LUU Y QUAN TRONG VE PRIMARY_PRODUCT_IMAGE:",
     "- Sau khi goi search_product_text, skill se tu dong tai anh san pham ve may.",
     "- Ban BAT BUOC phai ghi lai duong dan file anh chinh (primary_image.file_path) vao marker PRIMARY_PRODUCT_IMAGE.",
-    "- Duong dan phai la file that tren may (vi du: D:/CodeAiTanPhat/TPE_OpenClaw/artifacts/references/search_product_text/...).",
+    "- Duong dan phai la file that tren may (vi du: D:/openclaw/artifacts/references/search_product_text/...).",
     "",
     "Marker content phai chinh xac:",
     "APPROVED_CONTENT_BEGIN",

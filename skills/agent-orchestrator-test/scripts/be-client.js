@@ -43,29 +43,45 @@ async function createWorkflow(params) {
 }
 
 async function resolveAutomationRootConversation(params) {
-  return callInternal("POST", "/internal/workflows/resolve-root", {
+  const body = {
     agentId: params.agentId,
     employeeId: params.employeeId,
     brief: params.brief || "",
     sessionKey: params.sessionKey || null,
+
     rootConversationId: params.rootConversationId || null,
   });
+
 }
 
 async function createSubAgentConversation(params) {
-  return callInternal("POST", "/internal/conversations", {
+  const body = {
     workflowId: params.workflowId,
+    taskId: params.taskId,
+    stepId: params.stepId,
     agentId: params.agentId,
+    workerAgentId: params.workerAgentId || params.agentId,
     employeeId: params.employeeId,
     parentConversationId: params.parentConversationId || null,
     title: params.title || `[AUTO] ${params.agentId}`,
     lane: "automation",
-  });
+  };
+  if (params.managerInstanceId) {
+    body.managerInstanceId = params.managerInstanceId;
+  }
+  return callInternal("POST", "/internal/conversations", body);
 }
 
 async function persistMessages(messages) {
   if (!Array.isArray(messages) || messages.length === 0) return { success: true };
-  return callInternal("POST", "/internal/messages", { messages });
+  const normalizedMessages = messages.map((message) => {
+    const copy = { ...message };
+    if (!copy.managerInstanceId) {
+      delete copy.managerInstanceId;
+    }
+    return copy;
+  });
+  return callInternal("POST", "/internal/messages", { messages: normalizedMessages });
 }
 
 async function updateWorkflowStatus(workflowId, status) {
@@ -73,10 +89,13 @@ async function updateWorkflowStatus(workflowId, status) {
 }
 
 async function pushAutomationEvent(params) {
-  return callInternal("POST", "/api/automation/agent-event", {
+  const body = {
     workflowId: params.workflowId,
+    taskId: params.taskId,
+    stepId: params.stepId,
     employeeId: params.employeeId,
     agentId: params.agentId,
+    workerAgentId: params.workerAgentId || params.agentId,
     conversationId: params.conversationId || null,
     conversationRole: params.conversationRole,
     parentConversationId: params.parentConversationId || null,
@@ -89,7 +108,11 @@ async function pushAutomationEvent(params) {
     sessionKey: params.sessionKey || null,
     eventId: params.eventId,
     injectToGateway: params.injectToGateway,
-  });
+  };
+  if (params.managerInstanceId) {
+    body.managerInstanceId = params.managerInstanceId;
+  }
+  return callInternal("POST", "/api/automation/agent-event", body);
 }
 
 module.exports = {

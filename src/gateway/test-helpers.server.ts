@@ -537,6 +537,7 @@ export async function connectReq(
     controlUiAccess?: {
       employeeId?: string;
       employeeName?: string;
+      managerInstanceId?: string;
       lockedAgentId?: string;
       lockedSessionKey?: string;
     };

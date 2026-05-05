@@ -922,11 +922,143 @@ async function executePlan(registry, plan, options) {
       throw new Error(`Unknown target agent: ${step.to}`);
     }
 
+<<<<<<< HEAD
+    if (step.type === "product_research") {
+      let payload;
+      try {
+        payload = runProductResearch(step, plan, options);
+      } catch (error) {
+        if (!demoSmoothMode) {
+          throw error;
+        }
+        payload = createDemoProductResearchFallback(step, plan, options);
+        simulation?.addNote(
+          `Demo smooth fallback at step ${index + 1} (${step.type}): ${error?.message || error}`,
+        );
+      }
+      workflowState.productResearch = payload;
+      const summary = [
+        `Da lay du lieu san pham bang skill search_product_text.`,
+        `San pham: ${payload?.data?.product_name || "(khong ro)"}`,
+        `URL: ${payload?.data?.product_url || "(khong ro)"}`,
+        `Thu muc anh: ${payload?.data?.image_download_dir || "(khong ro)"}`,
+      ].join("\n");
+      const record = {
+        ...step,
+        sessionKey: agent.transport?.sessionKey || agent.sessionKey,
+        envelope: {
+          type: "product_research",
+          from: step.from,
+          to: step.to,
+          keyword: payload.keyword,
+          targetSite: payload.targetSite,
+        },
+        prompt: "[local] run skills/search_product_text/action.js",
+        reply: summary,
+        productResearch: payload,
+      };
+      steps.push(record);
+      simulation?.setProductResearch(payload);
+      simulation?.addStep(index, {
+        type: step.type,
+        from: step.from,
+        to: step.to,
+        keyword: payload.keyword,
+        targetSite: payload.targetSite,
+        productName: payload?.data?.product_name || null,
+        productUrl: payload?.data?.product_url || null,
+      });
+      continue;
+    }
+
+    if (step.type === "publish") {
+      const publishReply = buildPublishSimulationReply(workflowState);
+      const publishRecord = {
+        ...step,
+        sessionKey: agent.transport?.sessionKey || agent.sessionKey,
+        envelope: {
+          type: "publish",
+          from: step.from,
+          to: step.to,
+          simulateOnly: true,
+        },
+        prompt: "[local] simulate facebook publish payload",
+        reply: publishReply,
+      };
+      steps.push(publishRecord);
+      simulation?.setPublishSimulation({
+        status: "SIMULATED",
+        finalContent: workflowState.finalContent || "",
+        imagePrompt: workflowState.imagePrompt || "",
+        videoPrompt: workflowState.videoPrompt || "",
+      });
+      simulation?.addStep(index, {
+        type: step.type,
+        from: step.from,
+        to: step.to,
+        status: "SIMULATED",
+        hasFinalContent: Boolean(workflowState.finalContent),
+        hasImagePrompt: Boolean(workflowState.imagePrompt),
+        hasVideoPrompt: Boolean(workflowState.videoPrompt),
+      });
+      continue;
+    }
+
+
+
+    const priorSteps = steps.map((item) => ({
+      stepIndex: item.envelope?.stepIndex ?? null,
+      from: item.from,
+      to: item.to,
+      type: item.type,
+      summary: buildCompletedStepSummary(item.reply, step.type),
+    }));
+    const isReviewStep = ["content_review", "media_review", "final_review"].includes(
+      step.type,
+    );
+    const previousReply = steps.length > 0 ? steps[steps.length - 1]?.reply : null;
+    let handoffContext = buildHandoffContext(step.type, previousReply);
+    if (
+      step.to === "nv_content" &&
+      workflowState.productResearch?.data &&
+      ["produce", "content_revise"].includes(step.type)
+    ) {
+      const research = workflowState.productResearch.data;
+      const normalizedCategory = normalizeCategoryForHandoff(
+        research.category || research.categories || "",
+      );
+      const researchSummary = [
+        `TEN_SAN_PHAM: ${research.product_name || ""}`,
+        `URL_SAN_PHAM: ${research.product_url || ""}`,
+        `DANH_MUC: ${normalizedCategory}`,
+        `THONG_SO: ${research.specifications_text || ""}`,
+        `THU_MUC_ANH_GOC: ${research.image_download_dir || ""}`,
+      ].join("\n");
+      handoffContext = handoffContext
+        ? `${handoffContext}\n\nDU_LIEU_SAN_PHAM_BAT_BUOC:\n${researchSummary}`
+        : `DU_LIEU_SAN_PHAM_BAT_BUOC:\n${researchSummary}`;
+    }
+    const envelope = buildTaskEnvelope(step, registry, index, plan.steps.length, {
+      handoffContext,
+      completedSteps: isReviewStep
+        ? priorSteps.map((item) =>
+            step.type === "final_review"
+              ? item
+              : {
+                  stepIndex: item.stepIndex,
+                  from: item.from,
+                  to: item.to,
+                  type: item.type,
+                },
+          )
+        : priorSteps,
+=======
     const sessionKey = agent.transport?.sessionKey || agent.sessionKey;
     const envelope = transport.buildTaskEnvelope(step, registry, index, plan.steps.length, {
       workflowId,
       handoffContext: buildStepHandoffContext(step, executedSteps),
       completedSteps: buildCompletedStepsHistory(executedSteps, step.type),
+>>>>>>> afc8a7a0be33009de4ce6c7bbee5299c4e166ccc
     });
     const prompt = transport.buildTaskPrompt(envelope, registry);
     const stepState = {
@@ -1008,6 +1140,21 @@ async function executePlan(registry, plan, options) {
       throw new Error(
         `Invalid reply for ${step.type} (${envelope.stepId}): ${validation.errors.join("; ")}`,
       );
+<<<<<<< HEAD
+      rawReply = "";
+    }
+    let reply = String(rawReply || "").trim();
+
+    if (
+      demoSmoothMode &&
+      !reply &&
+      ["compile_post", "final_review"].includes(
+        step.type,
+      )
+    ) {
+      reply = buildDemoSmoothReply(step, workflowState);
+=======
+>>>>>>> afc8a7a0be33009de4ce6c7bbee5299c4e166ccc
     }
 
     await emitStepCompletionMarkers(
@@ -1037,6 +1184,63 @@ async function executePlan(registry, plan, options) {
       validation,
     });
 
+<<<<<<< HEAD
+    let decision =
+      ["content_review", "media_review", "final_review"].includes(step.type)
+        ? classifyReviewDecision(reply)
+        : null;
+
+    const stepRecord = {
+      type: step.type,
+      from: step.from,
+      to: step.to,
+      sessionKey: agent.transport?.sessionKey || agent.sessionKey,
+      replyPreview: compactReply(reply, 1200),
+      decision,
+    };
+    simulation?.addStep(index, stepRecord);
+
+    if (step.to === "nv_content" && ["produce", "content_revise"].includes(step.type)) {
+      const candidate = extractBestContent(reply);
+      if (candidate) {
+        workflowState.latestContentDraft = candidate;
+      }
+    }
+    if (step.type === "content_review") {
+      if (decision === "approved" && workflowState.latestContentDraft) {
+        workflowState.finalContent = workflowState.latestContentDraft;
+      }
+    }
+    if (["produce", "media_review", "compile_post"].includes(step.type)) {
+      const imagePrompt = extractPromptByLabel(reply, [
+        "IMAGE_PROMPT",
+        "PROMPT_ANH",
+        "PROMPT TẠO ẢNH",
+        "PROMPT TAO ANH",
+      ]);
+      const videoPrompt = extractPromptByLabel(reply, [
+        "VIDEO_PROMPT",
+        "PROMPT_VIDEO",
+        "PROMPT TẠO VIDEO",
+        "PROMPT TAO VIDEO",
+      ]);
+      if (imagePrompt) {
+        workflowState.imagePrompt = imagePrompt;
+      }
+      if (videoPrompt) {
+        workflowState.videoPrompt = videoPrompt;
+      }
+    }
+
+    if (
+      demoSmoothMode &&
+      ["produce", "media_revise", "media_review", "compile_post", "final_review"].includes(step.type)
+    ) {
+      ensureDemoWorkflowBundle(workflowState);
+    }
+
+=======
+>>>>>>> afc8a7a0be33009de4ce6c7bbee5299c4e166ccc
     if (["content_review", "media_review", "final_review"].includes(step.type)) {
       const loopCount = reviewLoopCounts.get(step.type) || 0;
       if (validation.decision !== "approved") {

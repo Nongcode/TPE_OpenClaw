@@ -11,10 +11,10 @@ const { normalizeText } = require("./common");
 const REPO_ROOT = path.resolve(__dirname, "..", "..", "..");
 
 const DEFAULT_MEDIA_CONFIG = {
-  browser_path: "C:/Program Files/CocCoc/Browser/Application/browser.exe",
-  user_data_dir: "C:/Users/Administrator/AppData/Local/CocCoc/Browser/User Data",
+  browser_path: "C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe",
+  user_data_dir: "C:/Users/PHAMDUCLONG/AppData/Local/Microsoft/Edge/User Data/Default",
   profile_name: "Default",
-  target_gemini_image_url: "https://gemini.google.com/app/3f383fca1153c26a",
+  target_gemini_image_url: "https://gemini.google.com/app/f656f2fb0ee3ee9d",
   target_gemini_video_url: "https://gemini.google.com/app",
   page_id: "643048852218433",
   access_token:
@@ -110,6 +110,47 @@ function slugifySegment(value) {
 
 function uniqueNormalizedPaths(paths) {
   return [...new Set(paths.map((item) => path.normalize(item)).filter(Boolean))];
+}
+
+function extractModelCandidates(value) {
+  const source = String(value || "").toUpperCase();
+  const matches = [
+    ...(source.match(/[A-Z]{1,6}-\d+(?:\.\d+)?(?:-[A-Z0-9]+)+/g) || []),
+    ...(source.match(/[A-Z]{2,}\d+[A-Z0-9.-]*(?:\s+(?:PLUS|PRO|MAX|EVO|ECO))?/g) || []),
+    ...(source.match(/[A-Z]{1,4}\s+\d{2,5}(?:[A-Z0-9.-]*)?(?:\s+(?:PLUS|PRO|MAX|EVO|ECO))?/g) || []),
+  ];
+  return [...new Set(matches.map((item) => item.replace(/\s+/g, " ").trim()).filter(Boolean))];
+}
+
+function extractProductModel(productProfile, productResearchData = null) {
+  const sources = [
+    ...(Array.isArray(productProfile?.specifications) ? productProfile.specifications : []),
+    productProfile?.product_description,
+    productProfile?.product_name,
+    productResearchData?.product_ids?.product_id,
+    productResearchData?.product_name,
+    productResearchData?.long_description,
+    productResearchData?.specifications_text,
+  ];
+
+  for (const source of sources) {
+    const normalizedSource = String(source || "").trim();
+    const directModelMatch = normalizedSource.match(/(?:^|\b)model\s*:\s*([^\n\r,;]+)/i);
+    if (directModelMatch?.[1]?.trim()) {
+      return directModelMatch[1].trim().slice(0, 120);
+    }
+
+    if (/^[A-Z][A-Z0-9]*(?:\s+[A-Z][A-Z0-9]*)+$/.test(normalizedSource)) {
+      return normalizedSource.slice(0, 120);
+    }
+
+    const candidates = extractModelCandidates(source);
+    if (candidates.length > 0) {
+      return candidates[0];
+    }
+  }
+
+  return "";
 }
 
 async function collectValidReferenceImages(productResearchData, limit = 1) {
@@ -589,12 +630,17 @@ async function generateMediaAssets(workflowState, options = {}) {
     workflowState.productProfile,
     referenceImages,
   );
+  const productModel = extractProductModel(
+    workflowState.productProfile,
+    workflowState.productResearch?.data,
+  );
   const step3 = await runSkillStep({
     step: 3,
     skillName: "gemini_generate_image",
     payload: {
       image_prompt: imagePrompt,
       image_paths: referenceImages,
+      product_model: productModel,
       browser_path: config.browser_path,
       user_data_dir: config.user_data_dir,
       profile_name: config.profile_name,
@@ -670,6 +716,7 @@ async function generateMediaAssets(workflowState, options = {}) {
   workflowState.imagePrompt = imagePrompt;
   workflowState.videoPrompt = videoPrompt;
   workflowState.referenceImages = referenceImages;
+  workflowState.productModel = productModel;
   workflowState.videoReferenceImages = videoReferenceImages;
   workflowState.generatedImagePaths = mediaBundle.bundledImages;
   workflowState.generatedVideoPaths = mediaBundle.bundledVideos;
@@ -783,6 +830,7 @@ async function publishCampaignPosts(workflowState, options = {}) {
 module.exports = {
   buildMediaSpecificContent,
   ensureCampaignBundle,
+  extractProductModel,
   generateMediaAssets,
   isWindowsAbsolutePath,
   publishCampaignPosts,

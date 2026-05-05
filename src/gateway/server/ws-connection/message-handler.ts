@@ -151,6 +151,7 @@ function resolveControlUiAccessPolicyForConnect(params: {
   return buildClientDeclaredAccessPolicy({
     employeeId: requestedEmployeeId,
     employeeName: requestedEmployeeName,
+    managerInstanceId: params.connectParams.controlUiAccess?.managerInstanceId,
     lockedAgentId: params.connectParams.controlUiAccess?.lockedAgentId,
     lockedSessionKey: params.connectParams.controlUiAccess?.lockedSessionKey,
     canViewAllSessions: params.connectParams.controlUiAccess?.canViewAllSessions,

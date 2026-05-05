@@ -208,6 +208,7 @@ function resolveControlUiDemoLoginConfig(
           label: entry.label?.trim() || undefined,
           employeeId: entry.employeeId?.trim() || undefined,
           employeeName: entry.employeeName?.trim() || undefined,
+          managerInstanceId: entry.managerInstanceId?.trim() || undefined,
           lockedAgentId: normalizeBootstrapAgentId(entry.lockedAgentId) ?? undefined,
         };
       })
@@ -241,7 +242,7 @@ function resolveControlUiDemoLoginResult(params: {
     return undefined;
   }
 
-  const accessPolicy =
+  const resolvedAccessPolicy =
     resolveDirectoryAccessPolicy({
       config: params.config,
       employeeId: matched.employeeId,
@@ -250,11 +251,16 @@ function resolveControlUiDemoLoginResult(params: {
     buildClientDeclaredAccessPolicy({
       employeeId: matched.employeeId,
       employeeName: matched.employeeName,
+      managerInstanceId: matched.managerInstanceId,
       lockedAgentId: matched.lockedAgentId,
       lockedSessionKey: matched.lockedSessionKey,
       lockAgent: true,
       lockSession: true,
     });
+  const accessPolicy =
+    matched.managerInstanceId && resolvedAccessPolicy && !resolvedAccessPolicy.managerInstanceId
+      ? { ...resolvedAccessPolicy, managerInstanceId: matched.managerInstanceId.trim() }
+      : resolvedAccessPolicy;
 
   return {
     ok: true,
@@ -309,6 +315,7 @@ function resolveBootstrapAccessPolicy(params: {
     trustedProxyIdentity?.employeeName ??
     params.url.searchParams.get("employeeName")?.trim() ??
     undefined;
+  const managerInstanceId = params.url.searchParams.get("managerInstanceId")?.trim() ?? undefined;
   const directoryPolicy = resolveDirectoryAccessPolicy({
     config: params.config,
     employeeId,
@@ -330,6 +337,7 @@ function resolveBootstrapAccessPolicy(params: {
   if (
     !employeeId &&
     !employeeName &&
+    !managerInstanceId &&
     !lockedAgentId &&
     !lockedSessionKey &&
     !lockAgent &&
@@ -342,6 +350,7 @@ function resolveBootstrapAccessPolicy(params: {
   return buildClientDeclaredAccessPolicy({
     employeeId,
     employeeName,
+    managerInstanceId,
     lockedAgentId,
     lockedSessionKey,
     canViewAllSessions: lockedAgentId === "main" || lockedAgentId === "quan_ly",

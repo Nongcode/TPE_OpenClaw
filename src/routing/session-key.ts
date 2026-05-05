@@ -61,7 +61,7 @@ export function toAgentStoreSessionKey(params: {
   }
   const parsed = parseAgentSessionKey(raw);
   if (parsed) {
-    return `agent:${parsed.agentId}:${parsed.rest}`;
+    return `${parsed.prefix}:${parsed.agentId}:${parsed.rest}`;
   }
   const lowered = raw.toLowerCase();
   if (lowered.startsWith("agent:")) {

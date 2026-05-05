@@ -2,6 +2,15 @@
 
 ## Main path
 
+Each manager account/instance must run the CLI with its own `--manager-instance-id`.
+The manager state file is namespaced by that value, while worker agents are shared
+through workflow-scoped sessions:
+
+```text
+mgr_pho_phong_A -> nv_content session agent:nv_content:automation:<workflow-A>:<step>
+mgr_pho_phong_B -> nv_content session agent:nv_content:automation:<workflow-B>:<step>
+```
+
 ```text
 idle
   -> CREATE_NEW

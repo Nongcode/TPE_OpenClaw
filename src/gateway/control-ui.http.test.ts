@@ -95,7 +95,9 @@ describe("handleControlUiHttpRequest", () => {
     const req = {
       url: params.url,
       method: params.method,
+      headers: {},
       socket: { remoteAddress: "127.0.0.1" },
+      destroyed: false,
       on(event: string, handler: (...args: unknown[]) => void) {
         if (event === "data") {
           handler(Buffer.from(params.body));
@@ -105,14 +107,20 @@ describe("handleControlUiHttpRequest", () => {
         }
         return req;
       },
+      removeListener() {
+        return req;
+      },
+      destroy() {
+        req.destroyed = true;
+        return req;
+      },
     } as unknown as IncomingMessage;
     const { res, end } = makeMockHttpResponse();
     const handled = handleControlUiHttpRequest(req, res, {
       ...(params.config ? { config: params.config as never } : {}),
       root: { kind: "resolved", path: params.rootPath },
     });
-    await Promise.resolve();
-    await Promise.resolve();
+    await new Promise((resolve) => setImmediate(resolve));
     return { res, end, handled };
   }
 
@@ -557,6 +565,51 @@ describe("handleControlUiHttpRequest", () => {
     });
   });
 
+  it("carries manager instance ids through employee access policies", async () => {
+    await withControlUiRoot({
+      fn: async (tmp) => {
+        const { res, end } = makeMockHttpResponse();
+        const handled = handleControlUiHttpRequest(
+          {
+            url: `${CONTROL_UI_BOOTSTRAP_CONFIG_PATH}?employeeId=pho_phong_a`,
+            method: "GET",
+          } as IncomingMessage,
+          res,
+          {
+            root: { kind: "resolved", path: tmp },
+            config: {
+              agents: { defaults: { workspace: tmp } },
+              gateway: {
+                controlUi: {
+                  employeeDirectory: [
+                    {
+                      employeeId: "pho_phong_a",
+                      employeeName: "Pho phong A",
+                      managerInstanceId: "mgr_pho_phong_A",
+                      lockedAgentId: "pho_phong",
+                    },
+                  ],
+                },
+              },
+            },
+          },
+        );
+
+        expect(handled).toBe(true);
+        const parsed = parseBootstrapPayload(end);
+        expect(parsed.accessPolicy).toMatchObject({
+          employeeId: "pho_phong_a",
+          employeeName: "Pho phong A",
+          managerInstanceId: "mgr_pho_phong_A",
+          lockedAgentId: "pho_phong",
+          lockedSessionKey: "agent:pho_phong:main",
+          visibleAgentIds: ["pho_phong", "nv_content", "nv_media"],
+          enforcedByServer: true,
+        });
+      },
+    });
+  });
+
   it("authenticates demo login accounts and returns token plus access policy", async () => {
     await withControlUiRoot({
       fn: async (tmp) => {
@@ -611,6 +664,79 @@ describe("handleControlUiHttpRequest", () => {
             lockAgent: true,
             lockSession: true,
             autoConnect: false,
+            enforcedByServer: true,
+          },
+        });
+      },
+    });
+  });
+
+  it("authenticates separate pho_phong demo login accounts with manager instance ids", async () => {
+    await withControlUiRoot({
+      fn: async (tmp) => {
+        const { res, end, handled } = await runControlUiRequestWithBody({
+          url: CONTROL_UI_LOGIN_PATH,
+          method: "POST",
+          rootPath: tmp,
+          body: JSON.stringify({
+            email: "pho_phong_b@local.test",
+            password: "PhoPhongB@123",
+          }),
+          config: {
+            gateway: {
+              auth: { token: "demo-token" },
+              controlUi: {
+                employeeDirectory: [
+                  {
+                    employeeId: "pho_phong_a",
+                    employeeName: "Pho phong A",
+                    managerInstanceId: "mgr_pho_phong_A",
+                    lockedAgentId: "pho_phong",
+                    lockAgent: true,
+                  },
+                  {
+                    employeeId: "pho_phong_b",
+                    employeeName: "Pho phong B",
+                    managerInstanceId: "mgr_pho_phong_B",
+                    lockedAgentId: "pho_phong",
+                    lockAgent: true,
+                  },
+                ],
+                demoLogin: {
+                  enabled: true,
+                  accounts: [
+                    {
+                      email: "pho_phong_a@local.test",
+                      password: "PhoPhongA@123",
+                      employeeId: "pho_phong_a",
+                      label: "Pho phong A",
+                    },
+                    {
+                      email: "pho_phong_b@local.test",
+                      password: "PhoPhongB@123",
+                      employeeId: "pho_phong_b",
+                      label: "Pho phong B",
+                    },
+                  ],
+                },
+              },
+            },
+          },
+        });
+
+        expect(handled).toBe(true);
+        expect(res.statusCode).toBe(200);
+        expect(JSON.parse(String(end.mock.calls[0]?.[0] ?? ""))).toMatchObject({
+          ok: true,
+          token: "demo-token",
+          accessPolicy: {
+            employeeId: "pho_phong_b",
+            employeeName: "Pho phong B",
+            managerInstanceId: "mgr_pho_phong_B",
+            lockedAgentId: "pho_phong",
+            lockedSessionKey: "agent:pho_phong:main",
+            visibleAgentIds: ["pho_phong", "nv_content", "nv_media"],
+            lockAgent: true,
             enforcedByServer: true,
           },
         });

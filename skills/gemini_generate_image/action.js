@@ -3,12 +3,13 @@ import { access, mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { chromium } from "playwright-core";
 import { buildChatImageReplyPayload } from "../shared/chat-image-result.js";
+import { publishGeneratedImageToUpTekGallery } from "../shared/uptek-gallery-publisher.js";
 
 const DEFAULTS = {
   browser_path: "C:/Program Files/CocCoc/Browser/Application/browser.exe",
-  user_data_dir: "C:/Users/Administrator/AppData/Local/CocCoc/Browser/User Data",
+  user_data_dir: "C:/Users/PHAMDUCLONG/AppData/Local/CocCoc/Browser/User Data",
   profile_name: "Default",
-  target_gemini_url: "https://gemini.google.com/app/e3636a8c526637e9",
+  target_gemini_url: "https://gemini.google.com/app/c3226ddbd6829c8c",
   image_paths: [],
   output_dir: "",
   timeout_ms: 120000,
@@ -900,12 +901,37 @@ async function downloadFromSpecificBlock(page, freshTarget, outputDir, logs) {
       .relative(process.cwd(), downloadedImagePath)
       .replace(/\\/g, "/");
 
+    let gallerySync = null;
+    try {
+      gallerySync = await publishGeneratedImageToUpTekGallery(downloadedImagePath, {
+        imagePaths,
+        imagePrompt,
+        workspaceRoot: process.cwd(),
+        productModel: typeof parsed.product_model === "string" ? parsed.product_model.trim() : "",
+      });
+      logs.push(
+        `[step7] Synced generated image to UpTek gallery ${gallerySync.companyId}/${gallerySync.departmentId} with productModel=${gallerySync.productModel}: ${gallerySync.copiedPath}`,
+      );
+    } catch (error) {
+      logs.push(
+        `[step7] Warning: generated image sync to UpTek gallery failed: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+
     const chatReply = buildChatImageReplyPayload({
       imagePath: downloadedImagePath,
       data: {
         target_gemini_url: targetGeminiUrl,
         image_prompt: imagePrompt,
         downloaded_image_path: relativeDownloadedImagePath,
+        company_gallery_synced: Boolean(gallerySync),
+        company_gallery_path: gallerySync?.copiedPath || null,
+        company_gallery_company_id: gallerySync?.companyId || "UpTek",
+        company_gallery_department_id: gallerySync?.departmentId || "Phong_Marketing",
+        company_gallery_product_model: gallerySync?.productModel || null,
+        company_gallery_url: gallerySync?.galleryUrl || null,
+        company_gallery_image_id: gallerySync?.imageId || null,
+        company_gallery_media_file_id: gallerySync?.mediaFileId || null,
       },
       artifacts: [{ type: "generated_image", path: relativeDownloadedImagePath }],
     });

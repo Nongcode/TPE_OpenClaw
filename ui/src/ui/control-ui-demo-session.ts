@@ -40,6 +40,7 @@ function normalizeStoredAccessPolicy(value: unknown): ControlUiBootstrapAccessPo
   const policy: ControlUiBootstrapAccessPolicy = {
     employeeId: normalizeOptionalString(raw.employeeId),
     employeeName: normalizeOptionalString(raw.employeeName),
+    managerInstanceId: normalizeOptionalString(raw.managerInstanceId),
     lockedAgentId: normalizeOptionalString(raw.lockedAgentId),
     lockedSessionKey: normalizeOptionalString(raw.lockedSessionKey),
     canViewAllSessions: normalizeOptionalBoolean(raw.canViewAllSessions),
@@ -52,6 +53,7 @@ function normalizeStoredAccessPolicy(value: unknown): ControlUiBootstrapAccessPo
   if (
     !policy.employeeId &&
     !policy.employeeName &&
+    !policy.managerInstanceId &&
     !policy.lockedAgentId &&
     !policy.lockedSessionKey &&
     policy.canViewAllSessions !== true &&

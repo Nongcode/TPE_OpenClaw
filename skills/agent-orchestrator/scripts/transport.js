@@ -5,11 +5,69 @@ const { pathToFileURL } = require("url");
 const { loadOpenClawConfig, resolveGatewayToken } = require("./common");
 const REPO_ROOT = path.resolve(__dirname, "..", "..", "..");
 
-function resolveSessionKey(agentId, sessionKey) {
-  if (typeof sessionKey === "string" && sessionKey.trim()) {
-    return sessionKey.trim();
+const UPTEK_API_BASE = process.env.UPTEK_FE_API_URL || "http://localhost:3001/api";
+const UPTEK_BACKEND_TOKEN = process.env.UPTEK_BACKEND_TOKEN || "";
+
+function resolveConversationIdFromSession(sessionKey, agentId) {
+  const raw = String(sessionKey || `agent:${agentId}:main`).trim();
+  // Loại bỏ prefix agent: hoặc automation: để tạo conversation ID đồng nhất
+  const normalized = raw.replace(/^(agent|automation):/i, "").replace(/[^a-zA-Z0-9_-]/g, "_");
+  return `lane_${normalized}`.slice(0, 180);
+}
+
+async function syncToUpTekFE(endpoint, data) {
+  if (!UPTEK_BACKEND_TOKEN) {
+    return;
   }
-  return `agent:${agentId}:main`;
+
+  try {
+    const url = `${UPTEK_API_BASE}${endpoint}`;
+    const res = await fetch(url, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${UPTEK_BACKEND_TOKEN}`,
+      },
+      body: JSON.stringify(data),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      console.error(`[Sync FE] Failed ${endpoint}:`, err.error || res.statusText);
+    }
+  } catch (err) {
+    console.error(`[Sync FE] Error connecting to ${endpoint}:`, err.message);
+  }
+}
+
+function resolveSessionKey(agentId, sessionKey, workflowId) {
+  const parentKey = String(sessionKey || "").trim();
+  const isAutomation = parentKey.startsWith("automation:");
+  const prefix = isAutomation ? "automation" : "agent";
+
+  if (parentKey) {
+    if (workflowId && /:main$/i.test(parentKey)) {
+      const wfSegment = workflowId.startsWith("wf_") ? workflowId : `wf_${workflowId}`;
+      return parentKey.replace(/:main$/i, `:${wfSegment}`);
+    }
+    // Nếu session cha đã có prefix automation, nhưng sub-agent lane chưa có prefix, thì gán prefix đó
+    if (isAutomation && !parentKey.includes(`:${agentId}:`)) {
+      // Keep manager instance scopes such as automation:pho_phong:mgr_pho_phong_B:conv_*.
+      const managerMatch = parentKey.match(/:(mgr_[a-zA-Z0-9_-]+)(?::|$)/);
+      const managerSegment = managerMatch ? `${managerMatch[1]}:` : "";
+      const wfSegment = workflowId
+        ? workflowId.startsWith("wf_")
+          ? workflowId
+          : `wf_${workflowId}`
+        : "main";
+      return `automation:${agentId}:${managerSegment}${wfSegment}`;
+    }
+    return parentKey;
+  }
+
+  if (workflowId) {
+    return `${prefix}:${agentId}:${workflowId.startsWith("wf_") ? workflowId : "wf_" + workflowId}`;
+  }
+  return `${prefix}:${agentId}:main`;
 }
 
 function resolveSkillHints(step) {
@@ -61,6 +119,7 @@ function buildTaskEnvelope(step, registry, index, total, context = {}) {
   return {
     workflowId,
     stepId,
+    managerInstanceId: step.manager_instance_id || step.managerInstanceId || context.managerInstanceId || null,
     action,
     taskId: step.task_id || `task_${workflowId}_${stepId}`,
     parentTaskId: step.parent_task_id || null,
@@ -110,6 +169,8 @@ function buildTaskPrompt(envelope, registry) {
   const compactEnvelope = {
     workflow_id: envelope.workflowId,
     step_id: envelope.stepId,
+    task_id: envelope.taskId,
+    manager_instance_id: envelope.managerInstanceId || null,
     action: envelope.action,
     from_agent: envelope.fromAgent,
     to_agent: envelope.toAgent,
@@ -142,6 +203,7 @@ function buildTaskPrompt(envelope, registry) {
     "Thong tin truy vet:",
     `- workflow_id: ${envelope.workflowId}`,
     `- step_id: ${envelope.stepId}`,
+    `- task_id: ${envelope.taskId}`,
     `- action: ${envelope.action}`,
     `- loai_buoc: ${envelope.type}`,
     `- so_lan_thu_toi_da: ${envelope.maxRetries}`,
@@ -422,8 +484,80 @@ async function markStepFailed(options) {
 }
 
 function sendTaskToAgentLane(options) {
-  const sessionKey = resolveSessionKey(options.agentId, options.sessionKey);
+  const sessionKey = resolveSessionKey(options.agentId, options.sessionKey, options.workflowId);
   const runId = options.runId || randomUUID();
+  const taskId =
+    String(options.taskId || "").trim() ||
+    `task_${String(options.workflowId || "wf_runtime").trim()}_${String(options.stepId || "step").trim()}`;
+  const workerAgentId = options.workerAgentId || options.agentId;
+
+  // Đồng bộ sang Front-end UpTek: Tạo cuộc hội thoại và đẩy tin nhắn yêu cầu
+  void (async () => {
+    const convId = resolveConversationIdFromSession(sessionKey, options.agentId);
+    // 1. Đảm bảo cuộc hội thoại tồn tại trên FE
+    await syncToUpTekFE("/conversations", {
+      id: convId,
+      title: `[Auto] ${options.agentId} • ${options.workflowId || "Moi"}`,
+      agentId: options.agentId,
+      workerAgentId,
+      workflowId: options.workflowId,
+      taskId,
+      stepId: options.stepId,
+      ...(options.managerInstanceId ? { managerInstanceId: options.managerInstanceId } : {}),
+      sessionKey: sessionKey,
+      employeeId: options.agentId, // Gán cho nhân viên sở hữu lane này
+      status: "active",
+      createdAt: Date.now(),
+      updatedAt: Date.now()
+    });
+    // 2. Lưu tin nhắn yêu cầu từ người giao (pho_phong)
+    await syncToUpTekFE("/messages", {
+      messages: [{
+        id: `msg_${runId}_req`,
+        conversationId: convId,
+        workflowId: options.workflowId,
+        taskId,
+        stepId: options.stepId,
+        workerAgentId,
+        ...(options.managerInstanceId ? { managerInstanceId: options.managerInstanceId } : {}),
+        role: "manager", // Hiển thị dưới dạng tin nhắn chỉ đạo
+        content: options.prompt,
+        timestamp: Date.now()
+      }]
+    });
+  })();
+
+  // Đồng bộ sang Backend UI (OpenClaw Dashboard)
+  void (async () => {
+    try {
+      // 1. Inject vào lane của Agent con (worker)
+      await callGatewayMethod({
+        openClawHome: options.openClawHome,
+        method: "chat.inject",
+        params: {
+          sessionKey,
+          message: options.prompt,
+          label: "Manager Task Request"
+        }
+      });
+
+      // 2. Mirroring: Inject vào lane của Manager (Phó phòng) để đồng bộ lịch sử
+      if (options.sessionKey && options.sessionKey !== sessionKey) {
+        await callGatewayMethod({
+          openClawHome: options.openClawHome,
+          method: "chat.inject",
+          params: {
+            sessionKey: options.sessionKey,
+            message: `[Giao việc cho ${options.agentId}]: ${options.prompt}`,
+            label: "Workflow Management"
+          }
+        });
+      }
+    } catch (err) {
+      console.error(`[Sync Backend UI] Failed inject:`, err.message);
+    }
+  })();
+
   const timeoutMs = Number(options.timeoutMs || process.env.OPENCLAW_ORCHESTRATOR_TIMEOUT_MS || 180000);
   const pending = callGatewayMethod({
     openClawHome: options.openClawHome,
@@ -441,16 +575,60 @@ function sendTaskToAgentLane(options) {
   return {
     runId,
     agentId: options.agentId,
+    workerAgentId,
     sessionKey,
+    managerSessionKey: options.sessionKey, // Lưu lại để mirroring phản hồi
+    managerInstanceId: options.managerInstanceId || null,
     workflowId: options.workflowId,
     stepId: options.stepId,
+    taskId,
     pending,
+    openClawHome: options.openClawHome
   };
 }
 
 async function waitForAgentResponse(task) {
   const result = await task.pending;
   const text = extractTextFromGatewayResult(result);
+
+  // Đồng bộ phản hồi sang Front-end & Backend UI
+  void (async () => {
+    const convId = resolveConversationIdFromSession(task.sessionKey, task.agentId);
+    
+    // Front-end UpTek
+    await syncToUpTekFE("/messages", {
+      messages: [{
+        id: `msg_${task.runId}_res`,
+        conversationId: convId,
+        workflowId: task.workflowId,
+        taskId: task.taskId,
+        stepId: task.stepId,
+        workerAgentId: task.workerAgentId || task.agentId,
+        ...(task.managerInstanceId ? { managerInstanceId: task.managerInstanceId } : {}),
+        role: "assistant",
+        content: text,
+        timestamp: Date.now()
+      }]
+    });
+
+    // Mirroring Backend UI (Inject phản hồi nhân viên vào lane của Phó phòng)
+    try {
+      if (task.managerSessionKey && task.managerSessionKey !== task.sessionKey) {
+        await callGatewayMethod({
+          openClawHome: task.openClawHome,
+          method: "chat.inject",
+          params: {
+            sessionKey: task.managerSessionKey,
+            message: `[Phản hồi từ ${task.agentId}]: ${text}`,
+            label: "Workflow Result Sync"
+          }
+        });
+      }
+    } catch (e) {
+      console.error(`[Mirror Result] Failed:`, e.message);
+    }
+  })();
+
   const correlation = correlateByWorkflowIdAndStepId({
     workflowId: task.workflowId,
     stepId: task.stepId,
@@ -474,6 +652,9 @@ async function sendToSession(options) {
     prompt: options.prompt,
     workflowId: options.envelope?.workflowId,
     stepId: options.envelope?.stepId,
+    taskId: options.envelope?.taskId,
+    managerInstanceId: options.envelope?.managerInstanceId || options.managerInstanceId,
+    workerAgentId: options.envelope?.toAgent || options.agentId,
     timeoutMs: options.timeoutMs,
   });
   const response = await waitForAgentResponse(task);

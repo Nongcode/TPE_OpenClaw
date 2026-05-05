@@ -13,7 +13,7 @@ const path = require("path");
 const memory = require("./memory");
 
 const REPO_ROOT = path.resolve(__dirname, "..", "..", "..");
-const DEFAULT_LOGO_DIR = "C:/Users/Administrator/.openclaw/assets/logos";
+const DEFAULT_LOGO_DIR = "C:/Users/PHAMDUCLONG/.openclaw/assets/logos";
 const DEFAULT_LOGO_PATH = `${DEFAULT_LOGO_DIR}/logo.png`;
 const FLOW_IMAGE_PROJECT_URL =
   "https://labs.google/fx/vi/tools/flow/project/4679cf5a-d618-444b-86ba-2210e96c6a69";
@@ -215,7 +215,7 @@ function tryLoadSharp() {
  * Resolve danh sach logo references tu .openclaw/assets/logos.
  */
 function resolveLogoAssetPaths(openClawHome, limit = 8) {
-  const baseDir = path.join(openClawHome || "C:/Users/Administrator/.openclaw", "assets", "logos");
+  const baseDir = path.join(openClawHome || "C:/Users/PHAMDUCLONG/.openclaw", "assets", "logos");
   if (!fs.existsSync(baseDir)) {
     return fs.existsSync(DEFAULT_LOGO_PATH) ? [path.normalize(DEFAULT_LOGO_PATH)] : [];
   }
@@ -430,8 +430,10 @@ function buildMediaGeneratePrompt(params) {
     .join(REPO_ROOT, "skills", "generate_flow_image", "action.js")
     .replace(/\\/g, "/");
 
+
   const productImagePath = normalizeAgentReportedPath(state.content?.primaryProductImage || "");
   const mediaOutputDir = resolveMediaOutputDir(openClawHome, workflowId, stepId);
+
   const promptContext = [
     promptPackage.imagePrompt ? `IMAGE_PROMPT_DUOC_GIAO:\n${promptPackage.imagePrompt}` : "",
     promptPackage.videoPrompt ? `VIDEO_PROMPT_DUOC_GIAO:\n${promptPackage.videoPrompt}` : "",
@@ -443,6 +445,7 @@ function buildMediaGeneratePrompt(params) {
     `Brief goc: ${state.original_brief}`,
     state.content?.productName ? `Ten san pham: ${state.content.productName}` : "",
     state.content?.productUrl ? `URL san pham: ${state.content.productUrl}` : "",
+    productModel ? `Model san pham bat buoc giu dung: ${productModel}` : "",
     state.content?.imageDir ? `Thu muc anh goc: ${state.content.imageDir}` : "",
     productImagePath ? `Anh san pham goc bat buoc gui cho skill: ${productImagePath}` : "",
     logoPaths.length > 0 ? `Logo cong ty bat buoc gui cho skill anh: ${logoPaths.join(" ; ")}` : "",
@@ -463,6 +466,7 @@ function buildMediaGeneratePrompt(params) {
     "- Dung DUNG IMAGE_PROMPT_DUOC_GIAO, khong tu y doi nghia.",
     `- image_paths BAT BUOC gom dung cac file that nay: [${[productImagePath, ...logoPaths].filter(Boolean).join(" ; ")}].`,
     "- Neu IMAGE_PROMPT_DUOC_GIAO co duong dan cu/sai, van phai uu tien danh sach image_paths bat buoc o dong tren.",
+
     `- output_dir BAT BUOC la: ${mediaOutputDir}. Khong duoc de tool tu suy ra theo cwd.`,
     "- Muc tieu la tao ra anh quang cao cuoi cung tu reference that, khong phai background-only.",
     "- Khong doc lai SKILL.md ra chat. Khong thu lenh sai truoc roi moi sua. Khong tua thich sua file skill trong luc dang lam media.",

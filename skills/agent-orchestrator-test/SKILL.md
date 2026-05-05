@@ -28,10 +28,12 @@ Workflow hien tai:
 ## Runtime requirements
 
 - Can co 5 agent: `pho_phong`, `nv_content`, `nv_prompt`, `nv_media`, `media_video`.
+- Neu co nhieu tai khoan/instance pho_phong, moi lan goi CLI phai truyen `--manager-instance-id <manager-instance-code>` de tach state, conversation, va worker session theo tung pho_phong.
+- Hai manager instance mac dinh de test song song: `mgr_pho_phong_A` va `mgr_pho_phong_B`; ca hai dung chung worker templates `nv_content`, `nv_prompt`, `nv_media`.
 - `pho_phong.subagents.allowAgents` phai co `nv_prompt`.
-- `nv_prompt` dung workspace `C:/Users/Administrator/.openclaw/workspace_prompt`.
+- `nv_prompt` dung workspace `C:/Users/PHAMDUCLONG/.openclaw/workspace_prompt`.
 - `nv_media` dung prompt package tu `nv_prompt`, khong con mac dinh background-only.
-- `media_video` dung workspace `C:/Users/Administrator/.openclaw/workspace_media_video`.
+- `media_video` dung workspace `C:/Users/PHAMDUCLONG/.openclaw/workspace_media_video`.
 - `media_video` phai goi `generate_veo_video` voi:
   - `prompt`
   - `reference_image = anh san pham goc`
@@ -44,6 +46,7 @@ Workflow hien tai:
 - User luon duyet anh truoc khi dang bai.
 - Neu tao them video, user luon duyet video truoc khi dang bai.
 - Khi `pho_phong` goi entry point orchestrator, phai cho lenh chay xong va lay ket qua cuoi cung roi moi tra loi user.
+- QUY TAC CUNG: Pho phong khong duoc tu ý viet content nháp. Neu nhận yêu cầu viết bài, BAT BUOC phai goi orchestrator de nv_content thuc hien.
 - Khong duoc dung o trang thai `Process still running` trong luc dang cho `nv_content`; buoc nay bat buoc phai doi den khi co ban content de trinh duyet.
 - `pho_phong` khong duoc gui thong bao kieu "da nhan brief", "dang giao viec", "dang kiem tra", "dang render" truoc khi da chay entry point orchestrator cho tin nhan hien tai va da xac minh state that.
 - Khong gui thong bao tien do tam thoi cho buoc content/media/video trong chat root; phai tiep tuc cho/poll cho toi khi co checkpoint that hoac loi that tu orchestrator.
@@ -60,15 +63,17 @@ Workflow hien tai:
 - Khi orchestrator tra ve truong `human_message`, `pho_phong` phai uu tien chuyen nguyen van truong nay cho user.
 - Neu `human_message` co cac dong `MEDIA: "..."`, phai giu nguyen de gateway chat render anh; khong duoc doi sang duong dan text thuong.
 - O buoc tao media, neu lenh chay tra ve `Command still running`, `pho_phong` phai tiep tuc `process poll` thay vi dung lai sau lan poll dau.
+
 - Truoc khi gui thong bao tien do tam thoi, can kiem tra `workspace_phophong/agent-orchestrator-test/current-workflow.json`; neu da sang `awaiting_media_approval` thi phai trinh ngay media cho user duyet.
 - Khong dung thong bao tam thoi lam ket qua cua workflow; neu tien trinh con chay, agent phai tiep tuc poll va chi tra checkpoint hoac loi that.
+
 
 ## Progress protocol
 
 - Mac dinh, `pho_phong` chi tra lai checkpoint that cua orchestrator, khong tu viet thong bao tien do.
 - Neu process van dang chay va chua co checkpoint duyet:
   - phai tiep tuc `process poll`;
-  - phai kiem tra `agent-orchestrator-test/current-workflow.json`;
+  - phai kiem tra `agent-orchestrator-test/managers/<manager-instance-id>/current-workflow.json`;
   - neu state da doi sang checkpoint duyet thi trinh ngay checkpoint do.
 - Khong gui thong bao tam thoi trong chat root; tiep tuc poll cho toi khi co checkpoint hoac loi that.
 - Khong duoc rerun entry point chi vi PowerShell in ra log giua chung hoac `NativeCommandError` neu state file va checkpoint cho thay workflow van dang tien trien.
@@ -83,9 +88,26 @@ Workflow hien tai:
 
 ## Entry point
 
+Dung OpenClaw home trung voi workspace/session hien tai. Tren may test nay la `C:/Users/PHAMDUCLONG/.openclaw`; khong dung home cua user khac.
+
+Neu session key hien tai co segment `mgr_pho_phong_A` hoac `mgr_pho_phong_B`, phai dung dung segment do cho `--manager-instance-id`. Neu khong co segment manager trong session key, suy ra theo tai khoan dang nhap: `pho_phong_a` dung `mgr_pho_phong_A`, `pho_phong_b` dung `mgr_pho_phong_B`.
+
+Moi manager phai dung file brief rieng trong `workspace_phophong/tmp/` de tranh 2 luong song song ghi de nhau.
+
 ```bash
-node D:/CodeAiTanPhat/TPE_OpenClaw/skills/agent-orchestrator-test/scripts/orchestrator.js --json --openclaw-home C:/Users/Administrator/.openclaw --from pho_phong --message-file C:/Users/Administrator/.openclaw/workspace_phophong/tmp/workflow-brief.txt
+node D:/openclaw/skills/agent-orchestrator-test/scripts/orchestrator.js --json --openclaw-home C:/Users/PHAMDUCLONG/.openclaw --from pho_phong --manager-instance-id mgr_pho_phong_A --message-file C:/Users/PHAMDUCLONG/.openclaw/workspace_phophong/tmp/workflow-brief-A.txt
 ```
+
+Test manager B song song bang cung worker agents:
+
+```bash
+node D:/openclaw/skills/agent-orchestrator-test/scripts/orchestrator.js --json --openclaw-home C:/Users/PHAMDUCLONG/.openclaw --from pho_phong --manager-instance-id mgr_pho_phong_B --message-file C:/Users/PHAMDUCLONG/.openclaw/workspace_phophong/tmp/workflow-brief-B.txt
+```
+
+State files duoc tach rieng:
+
+- `workspace_phophong/agent-orchestrator-test/managers/mgr_pho_phong_A/current-workflow.json`
+- `workspace_phophong/agent-orchestrator-test/managers/mgr_pho_phong_B/current-workflow.json`
 
 ## Bat buoc cho `pho_phong`
 

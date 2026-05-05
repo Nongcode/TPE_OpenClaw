@@ -7,6 +7,7 @@ const { spawnSync } = require("child_process");
 
 const {
   buildContentApprovalCheckpointMessage,
+  buildPaths,
   buildRootSyncPayloadFromResult,
   buildStageHumanMessage,
   buildWorkflowScopedSessionKey,
@@ -22,6 +23,7 @@ const {
   parseContentReply,
   parseMediaReply,
   migrateState,
+  resolveAutomationSessionKey,
   resolveRootWorkflowBinding,
   runContentCheckpointStep,
   runAutoNotifyWatcher,
@@ -2376,6 +2378,7 @@ test("buildWorkflowScopedSessionKey isolates workflow runtime from agent main la
   );
 });
 
+
 test("workflow-scoped session resolver never falls back to an agent main lane", () => {
   assert.equal(
     resolveWorkflowScopedSessionKey({
@@ -2398,6 +2401,7 @@ test("workflow-scoped session resolver never falls back to an agent main lane", 
   assert.equal(
     isWorkflowScopedSessionKey("agent:nv_content:main", "nv_content", "wf_parallel_a"),
     false,
+
   );
 });
 

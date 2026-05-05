@@ -314,8 +314,11 @@ async function waitForAgentResponse(task) {
       return {
         runId: task.runId,
         agentId: task.agentId,
+        workerAgentId: task.workerAgentId || task.agentId,
+        managerInstanceId: task.managerInstanceId || null,
         workflowId: correlation.workflowId,
         stepId: correlation.stepId,
+        taskId: task.taskId,
         ok: correlation.ok,
         matchedBy: correlation.matchedBy,
         text: historyText,
@@ -337,8 +340,11 @@ async function waitForAgentResponse(task) {
       return {
         runId: task.runId,
         agentId: task.agentId,
+        workerAgentId: task.workerAgentId || task.agentId,
+        managerInstanceId: task.managerInstanceId || null,
         workflowId: correlation.workflowId,
         stepId: correlation.stepId,
+        taskId: task.taskId,
         ok: correlation.ok,
         matchedBy: correlation.matchedBy,
         text,

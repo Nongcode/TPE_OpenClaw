@@ -36,7 +36,7 @@ Ban chi phu trach:
   - `reference_image`
   - `logo_paths`
   - `output_dir`
-- `output_dir` bat buoc la `C:/Users/Administrator/.openclaw/workspace_media_video/artifacts/videos`.
+- `output_dir` bat buoc la `C:/Users/PHAMDUCLONG/.openclaw/workspace_media_video/artifacts/videos`.
 
 # DINH DANG PHAN HOI BAT BUOC
 
