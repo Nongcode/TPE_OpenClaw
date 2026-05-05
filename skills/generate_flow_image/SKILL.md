@@ -3,7 +3,7 @@ name: generate-flow-image
 metadata:
   openclaw:
     skillKey: "generate_flow_image"
-description: Dung Google Flow theo profile browser co dinh de tao anh bang adapter input/output kieu image, tai tep ve `output_dir` duoc chi dinh hoac mac dinh `artifacts/images/`, va ghi logs.
+description: Dung Google Flow project da cau hinh san de tao anh, tai anh ve `output_dir` voi do phan giai 2k mac dinh, va ghi logs.
 requires:
   bins:
     - node
@@ -28,22 +28,26 @@ File JSON can co toi thieu:
 ```json
 {
   "image_prompt": "...",
-  "image_paths": [
-    "C:/path/to/product-image.png",
-    "C:/path/to/logo.png"
-  ],
-  "target_flow_url": "https://labs.google/fx/vi/tools/flow/project/....",
+  "image_paths": ["C:/path/to/product-image.png", "C:/path/to/logo.png"],
   "output_dir": "C:/Users/Administrator/.openclaw/workspace_media/artifacts/images",
+  "automation_mode": "playwright",
   "dry_run": false
 }
+```
+
+Mac dinh skill dung Flow project:
+
+```text
+https://labs.google/fx/vi/tools/flow/project/64c7c243-037d-4136-a867-4ba4d834605b
 ```
 
 ## Required behavior
 
 - Khi tao anh, phai gui day du `image_prompt`.
-- `image_paths[0]` duoc map thanh anh tham chieu chinh cho Flow.
-- `image_paths[1..n]` duoc forward tiep vao child flow nhu cac anh bo sung.
-- Neu workflow muon luu tep o thu muc co dinh, phai truyen ro `output_dir`.
+- Khi co reference, phai dua day du vao `image_paths`.
+- Neu workflow muon luu anh o thu muc co dinh, phai truyen ro `output_dir`.
+- Mac dinh tai ban `2k` tu Flow.
 - Tren Windows/PowerShell, uu tien `--input_file`.
+- Mac dinh dung Playwright deterministic trong `action.js`. Khong dung `browser-use`/Ollama cho Flow vi cham va khong on dinh voi UI thuc te.
 - Khong sua file skill trong luc dang chay workflow thong thuong.
 - Neu tool fail, bao lai loi that tu output cua tool.

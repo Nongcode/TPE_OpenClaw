@@ -5,6 +5,7 @@ import { access, mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { chromium } from "playwright-core";
 import { buildChatVideoReplyPayload } from "../shared/chat-video-result.js";
+import { withBrowserProfileLock } from "../shared/browser-profile-lock.js";
 
 const DEFAULTS = {
   browser_path: "C:/Program Files/CocCoc/Browser/Application/browser.exe",
@@ -21,7 +22,14 @@ const DEFAULTS = {
   auto_close_browser: false,
   retry_count: 2,
   dry_run: false,
+  no_company_logo: true,
 };
+
+const UPLOAD_SETTLE_MS = 3000;
+const PRE_SUBMIT_SETTLE_MS = 3000;
+const MIN_GENERATED_VIDEO_BYTES = 64 * 1024;
+const VIDEO_PROGRESS_SETTLE_MS = 12000;
+const FALLBACK_FRESH_VIDEO_DELAY_MS = 90000;
 
 function buildResult({ success, message, data = {}, artifacts = [], logs = [], error = null }) {
   return { success, message, data, artifacts, logs, error };
@@ -81,6 +89,11 @@ function parseArgs(argv) {
       params.dry_run = true;
       continue;
     }
+    if (token === "--no-company-logo" || token === "--no-logo") {
+      params.no_company_logo = true;
+      params.logo_paths = [];
+      continue;
+    }
     if (!next || next.startsWith("--")) continue;
 
     if (token === "--prompt") {
@@ -127,6 +140,15 @@ function parseArgs(argv) {
 
 function nowStamp() {
   return new Date().toISOString().replace(/[:.]/g, "-");
+}
+
+function normalizeText(value) {
+  return String(value || "")
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .toLowerCase();
 }
 
 async function ensureReadableFile(filePath) {
@@ -224,6 +246,174 @@ async function dismissPopupsIfAny(page, logs) {
   }
 }
 
+async function findComposerGeometry(page, logs = null) {
+  const result = await page.evaluate(() => {
+    const isVisible = (element) => {
+      if (!(element instanceof HTMLElement)) return false;
+      const style = window.getComputedStyle(element);
+      const rect = element.getBoundingClientRect();
+      return (
+        style.display !== "none" &&
+        style.visibility !== "hidden" &&
+        Number(style.opacity || "1") > 0 &&
+        rect.width >= 10 &&
+        rect.height >= 10
+      );
+    };
+    const normalize = (value) =>
+      String(value || "")
+        .normalize("NFKD")
+        .replace(/[\u0300-\u036f]/g, "")
+        .replace(/\s+/g, " ")
+        .trim()
+        .toLowerCase();
+
+    const promptNodes = Array.from(
+      document.querySelectorAll(
+        'div[role="textbox"][contenteditable="true"], [data-slate-editor="true"][contenteditable="true"], .ql-editor[contenteditable="true"], textarea, input[type="text"]',
+      ),
+    )
+      .filter(isVisible)
+      .map((element) => {
+        const rect = element.getBoundingClientRect();
+        const text = normalize(
+          [
+            element.textContent,
+            element.getAttribute("aria-label"),
+            element.getAttribute("placeholder"),
+            element.getAttribute("title"),
+          ].join(" "),
+        );
+        let score = rect.y;
+        if (rect.y > window.innerHeight * 0.45) score += 500;
+        if (text.includes("ban muon tao") || text.includes("tao gi") || text.includes("prompt")) {
+          score += 400;
+        }
+        if (text.includes("search") || text.includes("tim kiem") || text.includes("filter")) {
+          score -= 1000;
+        }
+        return {
+          x: rect.x,
+          y: rect.y,
+          width: rect.width,
+          height: rect.height,
+          text,
+          score,
+        };
+      })
+      .filter((item) => item.score > -500)
+      .sort((left, right) => right.score - left.score);
+
+    const promptBox = promptNodes[0] || null;
+    if (!promptBox) return { promptBox: null, plusCandidates: [] };
+
+    const buttonNodes = Array.from(document.querySelectorAll('button, [role="button"]'))
+      .filter(isVisible)
+      .map((element) => {
+        const rect = element.getBoundingClientRect();
+        const text = normalize(
+          [
+            element.textContent,
+            element.getAttribute("aria-label"),
+            element.getAttribute("title"),
+            element.getAttribute("data-testid"),
+          ].join(" "),
+        );
+        const centerX = rect.x + rect.width / 2;
+        const centerY = rect.y + rect.height / 2;
+        const nearComposer =
+          centerY >= promptBox.y - 170 &&
+          centerY <= promptBox.y + promptBox.height + 170 &&
+          centerX >= promptBox.x - 160 &&
+          centerX <= promptBox.x + Math.max(180, promptBox.width * 0.35);
+        let score = 0;
+        if (text.includes("add_2") || text === "+" || text.includes("add")) score += 250;
+        if (text.includes("tao") || text.includes("them") || text.includes("upload")) score += 50;
+        if (nearComposer) score += 300;
+        score -= Math.abs(centerX - (promptBox.x + 20)) / 4;
+        score -= Math.abs(centerY - (promptBox.y + promptBox.height + 30)) / 4;
+        return {
+          x: rect.x,
+          y: rect.y,
+          width: rect.width,
+          height: rect.height,
+          text,
+          score,
+        };
+      })
+      .filter((item) => item.score > 100)
+      .sort((left, right) => right.score - left.score);
+
+    return { promptBox, plusCandidates: buttonNodes.slice(0, 5) };
+  });
+
+  if (!result.promptBox) throw new Error("Khong tim thay khung prompt composer");
+  if (!result.plusCandidates.length) throw new Error("Khong tim thay nut + trong composer");
+  if (logs) {
+    logs.push(
+      `[step2] Composer prompt box x=${Math.round(result.promptBox.x)}, y=${Math.round(
+        result.promptBox.y,
+      )}, w=${Math.round(result.promptBox.width)}, h=${Math.round(result.promptBox.height)}`,
+    );
+  }
+  return { promptBox: result.promptBox, plusBox: result.plusCandidates[0] };
+}
+
+async function pageLooksCrashed(page) {
+  return page.evaluate(() => {
+    const text = document.body?.innerText || "";
+    return (
+      /Application error|client-side exception/i.test(text) ||
+      document.title.includes("Application error")
+    );
+  });
+}
+
+async function waitForFlowComposerReady(page, logs, timeoutMs = 90000) {
+  const startedAt = Date.now();
+  let lastLogAt = 0;
+  while (Date.now() - startedAt < timeoutMs) {
+    await dismissPopupsIfAny(page, logs);
+    if (await pageLooksCrashed(page).catch(() => false)) {
+      throw new Error("Flow page dang o trang thai Application error");
+    }
+    try {
+      return await findComposerGeometry(page, null);
+    } catch (error) {
+      if (Date.now() - lastLogAt > 5000) {
+        lastLogAt = Date.now();
+        logs.push(`[step2] Waiting Flow composer render: ${error.message}`);
+      }
+      await page.waitForTimeout(1000);
+    }
+  }
+  throw new Error("Flow load timeout: khong thay khung prompt composer");
+}
+
+async function ensureFlowPageReady(page, projectUrl, logs) {
+  for (let attempt = 1; attempt <= 3; attempt += 1) {
+    if (!page.url().includes(projectUrl)) {
+      logs.push(`[step2] goto Flow attempt ${attempt}`);
+      await page.goto(projectUrl, { waitUntil: "domcontentloaded", timeout: 90000 });
+    } else if (attempt > 1) {
+      logs.push(`[step2] reload Flow attempt ${attempt}`);
+      await page.reload({ waitUntil: "domcontentloaded", timeout: 90000 });
+    }
+
+    await page.waitForTimeout(3500);
+    await dismissPopupsIfAny(page, logs);
+    try {
+      const geometry = await waitForFlowComposerReady(page, logs, 45000);
+      logs.push(`[step2] PASS Flow ready on attempt ${attempt}`);
+      return geometry;
+    } catch (error) {
+      logs.push(`[step2] Flow not ready on attempt ${attempt}: ${error.message}`);
+      if (attempt === 3) throw error;
+    }
+  }
+  throw new Error("Flow page did not become ready");
+}
+
 const PROMPT_INPUT_SELECTORS = [
   '.ql-editor[contenteditable="true"]',
   'rich-textarea .ql-editor[contenteditable="true"]',
@@ -236,6 +426,15 @@ const PROMPT_INPUT_SELECTORS = [
 function normalizePromptText(value) {
   return String(value || "")
     .replace(/\s+/g, " ")
+    .trim();
+}
+
+function removeCompanyLogoPromptLines(value) {
+  return String(value || "")
+    .split(/\r?\n/)
+    .filter((line) => !/logo/i.test(line))
+    .join("\n")
+    .replace(/\n{3,}/g, "\n\n")
     .trim();
 }
 
@@ -262,6 +461,72 @@ async function readPromptInputText(locator) {
     }
     return htmlElement.innerText || htmlElement.textContent || "";
   });
+}
+
+async function forceSetPromptText(locator, promptText) {
+  return locator.evaluate((element, value) => {
+    const target = /** @type {HTMLElement | HTMLInputElement | HTMLTextAreaElement} */ (element);
+    target.focus();
+
+    if ("value" in target && typeof target.value === "string") {
+      target.value = value;
+    } else {
+      const selection = window.getSelection();
+      if (selection) {
+        const range = document.createRange();
+        range.selectNodeContents(target);
+        selection.removeAllRanges();
+        selection.addRange(range);
+      }
+      try {
+        document.execCommand("selectAll", false);
+        document.execCommand("insertText", false, value);
+      } catch {}
+      const current = target.innerText || target.textContent || "";
+      if (!current.includes(value.slice(0, 20))) {
+        target.textContent = value;
+      }
+    }
+
+    target.dispatchEvent(
+      new InputEvent("beforeinput", {
+        bubbles: true,
+        cancelable: true,
+        inputType: "insertText",
+        data: value,
+      }),
+    );
+    target.dispatchEvent(
+      new InputEvent("input", {
+        bubbles: true,
+        cancelable: true,
+        inputType: "insertText",
+        data: value,
+      }),
+    );
+    target.dispatchEvent(new Event("change", { bubbles: true }));
+    target.dispatchEvent(new KeyboardEvent("keyup", { bubbles: true }));
+  }, promptText);
+}
+
+async function verifyPromptAnywhere(page, promptText) {
+  const needle = normalizePromptText(promptText).slice(0, Math.min(40, normalizePromptText(promptText).length));
+  if (!needle) return false;
+  return page.evaluate((expected) => {
+    const nodes = Array.from(
+      document.querySelectorAll(
+        '[data-slate-editor="true"][contenteditable="true"], .ql-editor[contenteditable="true"], div[role="textbox"][contenteditable="true"], [contenteditable="true"], textarea, input[type="text"]',
+      ),
+    );
+    const normalize = (value) =>
+      String(value || "")
+        .replace(/\s+/g, " ")
+        .trim();
+    return nodes.some((node) => {
+      const text = "value" in node ? node.value : node.innerText || node.textContent || "";
+      return normalize(text).includes(expected);
+    });
+  }, needle);
 }
 
 async function waitForPromptValue(page, expectedText, logs, timeoutMs = 5000) {
@@ -347,8 +612,11 @@ async function isGenerationInFlight(page) {
     "Generating",
     "Creating",
     "Processing",
+    "Rendering",
+    "Uploading",
     "\u0110ang t\u1ea1o",
     "\u0110ang x\u1eed l\u00fd",
+    "\u0110ang t\u1ea3i",
   ];
   for (const label of runningTexts) {
     if (
@@ -362,7 +630,396 @@ async function isGenerationInFlight(page) {
     }
   }
 
+  const progressVisible = await page
+    .locator("text=/\\b\\d{1,3}%\\b/")
+    .first()
+    .isVisible({ timeout: 250 })
+    .catch(() => false);
+  if (progressVisible) return true;
+
   return false;
+}
+
+async function collectGenerationProgressRegions(page) {
+  return page
+    .evaluate(() => {
+      const isVisible = (element) => {
+        if (!(element instanceof HTMLElement)) return false;
+        const style = window.getComputedStyle(element);
+        const rect = element.getBoundingClientRect();
+        return (
+          style.display !== "none" &&
+          style.visibility !== "hidden" &&
+          Number(style.opacity || "1") > 0 &&
+          rect.width >= 8 &&
+          rect.height >= 8
+        );
+      };
+
+      const normalize = (value) =>
+        String(value || "")
+          .normalize("NFKD")
+          .replace(/[\u0300-\u036f]/g, "")
+          .toLowerCase();
+
+      const percentNodes = Array.from(document.querySelectorAll("*")).filter((node) => {
+        if (!(node instanceof HTMLElement) || !isVisible(node)) return false;
+        const text = (node.textContent || "").trim();
+        return /^(?:100|[1-9]?\d)%$/.test(text);
+      });
+
+      const regions = [];
+      for (const node of percentNodes) {
+        let root = node;
+        let best = null;
+        for (
+          let current = node.parentElement;
+          current && current !== document.body;
+          current = current.parentElement
+        ) {
+          if (!(current instanceof HTMLElement) || !isVisible(current)) continue;
+          const rect = current.getBoundingClientRect();
+          const text = normalize(current.textContent || "");
+          const plausibleCard =
+            rect.width >= 180 &&
+            rect.height >= 120 &&
+            rect.width <= window.innerWidth * 0.9 &&
+            rect.height <= window.innerHeight * 0.9;
+          const hasMediaHint =
+            current.querySelector("video,img,canvas,svg") ||
+            text.includes("veo") ||
+            text.includes("video") ||
+            text.includes("tao") ||
+            text.includes("dang");
+          if (plausibleCard && hasMediaHint) {
+            const area = rect.width * rect.height;
+            if (!best || area < best.area) {
+              best = { element: current, area };
+            }
+          }
+        }
+        root = best?.element || root;
+        const rect = root.getBoundingClientRect();
+        const percent = Number((node.textContent || "").replace("%", ""));
+        regions.push({
+          x: rect.x,
+          y: rect.y,
+          width: rect.width,
+          height: rect.height,
+          percent: Number.isFinite(percent) ? percent : null,
+        });
+      }
+
+      return regions.sort((left, right) => left.y - right.y || left.x - right.x);
+    })
+    .catch(() => []);
+}
+
+async function clickComposerPlus(page, logs) {
+  const geometry = await waitForFlowComposerReady(page, logs, 90000);
+  const { plusBox } = await findComposerGeometry(page, logs);
+  const x = plusBox.x + plusBox.width / 2;
+  const y = plusBox.y + plusBox.height / 2;
+  logs.push(`[step3] Clicking composer + at x=${Math.round(x)}, y=${Math.round(y)}`);
+  await page.mouse.click(x, y);
+  await page.waitForTimeout(700);
+  return geometry.promptBox;
+}
+
+async function clickUploadImageMenuItem(page, logs) {
+  const candidates = [
+    page.getByText("Upload image", { exact: true }),
+    page.getByText("Upload images", { exact: true }),
+    page.getByText("Tải hình ảnh lên", { exact: true }),
+    page.locator('[role="menuitem"]').filter({ hasText: /tải hình ảnh|tai hinh anh|upload|image/i }),
+    page.locator("button").filter({ hasText: /tải hình ảnh|tai hinh anh|upload|image/i }),
+    page.locator("div").filter({ hasText: /^Tải hình ảnh lên$/i }),
+    page.locator('button:has(i:has-text("upload"))'),
+    page.locator('div:has(i:has-text("upload"))'),
+  ];
+
+  for (let index = 0; index < candidates.length; index += 1) {
+    const locator = candidates[index].first();
+    if (await locator.isVisible({ timeout: 3000 }).catch(() => false)) {
+      logs.push(`[step3] Clicking upload image menu item by candidate ${index}`);
+      await locator.click({ force: true, timeout: 5000 });
+      return;
+    }
+  }
+  throw new Error("Khong tim thay menu Tai hinh anh len");
+}
+
+async function readComposerRootState(page, promptBox) {
+  return page.evaluate((box) => {
+    const isVisible = (element, minWidth = 8, minHeight = 8) => {
+      if (!(element instanceof HTMLElement)) return false;
+      const rect = element.getBoundingClientRect();
+      const style = window.getComputedStyle(element);
+      return (
+        style.display !== "none" &&
+        style.visibility !== "hidden" &&
+        Number(style.opacity || "1") > 0 &&
+        rect.width >= minWidth &&
+        rect.height >= minHeight
+      );
+    };
+    const normalize = (value) =>
+      String(value || "")
+        .normalize("NFKD")
+        .replace(/[\u0300-\u036f]/g, "")
+        .toLowerCase();
+    const prompt = Array.from(
+      document.querySelectorAll(
+        'div[role="textbox"][contenteditable="true"], [data-slate-editor="true"][contenteditable="true"], .ql-editor[contenteditable="true"], textarea, input[type="text"]',
+      ),
+    ).find((element) => {
+      if (!isVisible(element, 80, 10)) return false;
+      const rect = element.getBoundingClientRect();
+      return (
+        Math.abs(rect.x - box.x) < 100 &&
+        Math.abs(rect.y - box.y) < 140 &&
+        Math.abs(rect.width - box.width) < 220
+      );
+    });
+
+    if (!prompt) {
+      return { found: false, imageCount: 0, loading: false, failed: false, rootBox: null };
+    }
+
+    let root = prompt;
+    let bestScore = -Infinity;
+    for (
+      let current = prompt.parentElement;
+      current && current !== document.body;
+      current = current.parentElement
+    ) {
+      const rect = current.getBoundingClientRect();
+      const text = normalize(current.textContent || "");
+      const hasComposerButton =
+        text.includes("add_2") ||
+        text.includes("arrow_forward") ||
+        text.includes("create") ||
+        text.includes("tao");
+      const plausibleSize =
+        rect.width >= 300 &&
+        rect.width <= 1000 &&
+        rect.height >= 70 &&
+        rect.height <= 420 &&
+        rect.y >= box.y - 360 &&
+        rect.y <= box.y + 120;
+      if (!plausibleSize || !hasComposerButton) continue;
+      const score = rect.width + rect.height * 2 - Math.abs(rect.y - (box.y - 70));
+      if (score > bestScore) {
+        bestScore = score;
+        root = current;
+      }
+    }
+
+    const rootRect = root.getBoundingClientRect();
+    const images = Array.from(root.querySelectorAll("img")).filter((img) => isVisible(img, 20, 20));
+    const textBlob = normalize(
+      Array.from(root.querySelectorAll("*"))
+        .filter((element) => isVisible(element))
+        .map((element) => element.textContent || "")
+        .join("\n"),
+    );
+    const loading =
+      /\b(?:100|[1-9]?\d)%\b/.test(textBlob) ||
+      textBlob.includes("dang tai") ||
+      textBlob.includes("dang xu ly") ||
+      textBlob.includes("uploading") ||
+      textBlob.includes("processing");
+    const failed =
+      textBlob.includes("failed") ||
+      textBlob.includes("khong thanh cong") ||
+      textBlob.includes("không thành công") ||
+      textBlob.includes("loi") ||
+      textBlob.includes("lỗi");
+
+    return {
+      found: true,
+      imageCount: images.length,
+      loading,
+      failed,
+      rootBox: {
+        x: rootRect.x,
+        y: rootRect.y,
+        width: rootRect.width,
+        height: rootRect.height,
+      },
+      inputCount: root.querySelectorAll('input[type="file"]').length,
+    };
+  }, promptBox);
+}
+
+async function setFilesViaFileInputFallback(page, imagePaths, logs) {
+  const inputs = page.locator('input[type="file"]');
+  const count = await inputs.count().catch(() => 0);
+  for (let index = count - 1; index >= 0; index -= 1) {
+    const input = inputs.nth(index);
+    try {
+      await input.setInputFiles(imagePaths, { timeout: 15000 });
+      logs.push(`[step3] Uploaded ${imagePaths.length} image file(s) via input[type=file] fallback`);
+      return true;
+    } catch (error) {
+      logs.push(`[step3] File input fallback skipped index=${index}: ${error.message.split("\n")[0]}`);
+    }
+  }
+  return false;
+}
+
+async function uploadImagesRobust(page, imagePaths, logs) {
+  const normalizedPaths = [
+    ...new Set(
+      parseList(imagePaths)
+        .map((item) => path.resolve(String(item || "").trim()))
+        .filter(Boolean),
+    ),
+  ];
+  if (!normalizedPaths.length) throw new Error("Khong co file anh nao de upload");
+
+  const missingFiles = normalizedPaths.filter((filePath) => !existsSync(filePath));
+  if (missingFiles.length) throw new Error(`Khong tim thay file upload: ${missingFiles.join(", ")}`);
+
+  logs.push("[step3] Finding composer and opening upload menu");
+  const promptBox = await clickComposerPlus(page, logs);
+  const beforeState = await readComposerRootState(page, promptBox).catch(() => null);
+  if (beforeState?.rootBox) {
+    logs.push(
+      `[step3] Composer root x=${Math.round(beforeState.rootBox.x)}, y=${Math.round(
+        beforeState.rootBox.y,
+      )}, w=${Math.round(beforeState.rootBox.width)}, h=${Math.round(
+        beforeState.rootBox.height,
+      )}, fileInputs=${beforeState.inputCount}`,
+    );
+  }
+  const beforeCount = beforeState?.imageCount || 0;
+  logs.push(`[step3] Composer image count before upload=${beforeCount}`);
+
+  const fileChooserPromise = page.waitForEvent("filechooser", { timeout: 20000 }).catch((error) => {
+    logs.push(`[step3] File chooser did not open, using file input fallback: ${error.message.split("\n")[0]}`);
+    return null;
+  });
+  await clickUploadImageMenuItem(page, logs);
+  const fileChooser = await fileChooserPromise;
+  logs.push(`[step3] Uploading ${normalizedPaths.length} image file(s)`);
+  if (fileChooser) {
+    await fileChooser.setFiles(normalizedPaths);
+  } else if (!(await setFilesViaFileInputFallback(page, normalizedPaths, logs))) {
+    throw new Error("Khong mo duoc file chooser va khong tim thay input[type=file] de upload anh");
+  }
+
+  const startedAt = Date.now();
+  let stablePasses = 0;
+  const expectedImageCount = Math.max(normalizedPaths.length, beforeCount + normalizedPaths.length);
+  while (Date.now() - startedAt < 180000) {
+    const state = await readComposerRootState(page, promptBox).catch(() => null);
+    const count = state?.imageCount || 0;
+    const loading = Boolean(state?.loading);
+    const failed = Boolean(state?.failed);
+    const enoughImages = count >= expectedImageCount;
+
+    if (failed) {
+      stablePasses = 0;
+      logs.push(
+        `[step3] Waiting upload recovery: composerImages=${count}, expected=${expectedImageCount}, failed=${failed}`,
+      );
+    } else if (enoughImages && !loading) {
+      stablePasses += 1;
+      if (stablePasses >= 3) {
+        logs.push(
+          `[step3] Upload appears complete: composerImages=${count}, expected=${expectedImageCount}, loading=${loading}`,
+        );
+        logs.push(`[step3] Waiting ${UPLOAD_SETTLE_MS}ms for uploaded images to settle`);
+        await page.waitForTimeout(UPLOAD_SETTLE_MS);
+        const settledState = await readComposerRootState(page, promptBox).catch(() => null);
+        const settledCount = settledState?.imageCount || 0;
+        const settledLoading = Boolean(settledState?.loading);
+        const settledFailed = Boolean(settledState?.failed);
+        if (settledCount >= expectedImageCount && !settledLoading && !settledFailed) {
+          logs.push(
+            `[step3] PASS upload settled: composerImages=${settledCount}, loading=${settledLoading}, failed=${settledFailed}`,
+          );
+          return { promptBox, normalizedPaths };
+        }
+        logs.push(
+          `[step3] Upload changed during settle wait: composerImages=${settledCount}, loading=${settledLoading}, failed=${settledFailed}`,
+        );
+        stablePasses = 0;
+      }
+    } else {
+      stablePasses = 0;
+      logs.push(
+        `[step3] Waiting upload complete: composerImages=${count}, expected=${expectedImageCount}, loading=${loading}, failed=${failed}`,
+      );
+    }
+    await page.waitForTimeout(1200);
+  }
+  throw new Error("Upload timeout: anh chua xuat hien du trong khung composer");
+}
+
+async function findPromptLocatorForBox(page, promptBox = null) {
+  const selectors = [
+    'div[role="textbox"][data-slate-editor="true"][contenteditable="true"]',
+    '[data-slate-editor="true"][contenteditable="true"]',
+    '.ql-editor[contenteditable="true"]',
+    'div[role="textbox"][contenteditable="true"]',
+    '[contenteditable="true"]',
+    "textarea",
+    'input[type="text"]',
+  ];
+
+  const candidates = [];
+  for (const selector of selectors) {
+    const locator = page.locator(selector);
+    const count = await locator.count().catch(() => 0);
+    for (let index = 0; index < Math.min(count, 20); index += 1) {
+      const item = locator.nth(index);
+      if (!(await item.isVisible({ timeout: 300 }).catch(() => false))) continue;
+      const box = await item.boundingBox().catch(() => null);
+      if (!box || box.width < 80 || box.height < 10) continue;
+      const meta = await item
+        .evaluate((element) =>
+          [
+            element.textContent,
+            element.getAttribute("aria-label"),
+            element.getAttribute("placeholder"),
+            element.getAttribute("title"),
+          ].join(" "),
+        )
+        .catch(() => "");
+      const normalized = normalizeText(meta);
+      if (normalized.includes("search") || normalized.includes("tim kiem")) continue;
+
+      let score = box.y;
+      if (box.y > 300) score += 300;
+      if (normalized.includes("ban muon tao") || normalized.includes("tao gi")) score += 250;
+      if (promptBox) {
+        const intersects =
+          box.x >= promptBox.x - 50 &&
+          box.x <= promptBox.x + promptBox.width + 50 &&
+          box.y >= promptBox.y - 80 &&
+          box.y <= promptBox.y + promptBox.height + 120;
+        if (intersects) score += 500;
+      }
+      candidates.push({ locator: item, score });
+    }
+  }
+
+  candidates.sort((left, right) => right.score - left.score);
+  return candidates[0]?.locator || null;
+}
+
+async function clickPromptPlaceholder(page, logs) {
+  const placeholder = page.getByText("Bạn muốn tạo gì?", { exact: false }).last();
+  if (await placeholder.isVisible({ timeout: 700 }).catch(() => false)) {
+    const box = await placeholder.boundingBox().catch(() => null);
+    if (box && box.y > 300) {
+      logs.push(`[step4] Clicking prompt placeholder at x=${Math.round(box.x)}, y=${Math.round(box.y)}`);
+      await page.mouse.click(box.x + 8, box.y + Math.max(8, box.height / 2));
+      await page.waitForTimeout(200);
+    }
+  }
 }
 
 async function prepareImageUpload(page, assetPaths, logs) {
@@ -575,10 +1232,57 @@ async function prepareImageUpload(page, assetPaths, logs) {
   throw new Error(`Upload anh timeout, composer chua on dinh cho: ${expectedNames.join(", ")}`);
 }
 
-async function setPromptRobust(page, promptText, logs) {
+async function setPromptRobust(page, promptText, logs, promptBox = null) {
   logs.push("[step4] Typing prompt");
-  const candidates = PROMPT_INPUT_SELECTORS;
+  const verifyPrompt = async (locator) => {
+    const currentText = normalizePromptText(await readPromptInputText(locator));
+    const expected = normalizePromptText(promptText).slice(0, Math.min(40, normalizePromptText(promptText).length));
+    return currentText.includes(expected) || (await verifyPromptAnywhere(page, promptText));
+  };
 
+  const promptLocator = await findPromptLocatorForBox(page, promptBox).catch(() => null);
+  if (promptLocator) {
+    try {
+      await promptLocator.scrollIntoViewIfNeeded().catch(() => {});
+      await clickPromptPlaceholder(page, logs);
+      const box = await promptLocator.boundingBox().catch(() => null);
+      if (box) {
+        await page.mouse.click(box.x + box.width - 30, box.y + box.height / 2);
+      } else {
+        await promptLocator.click({ force: true, timeout: 3000 });
+      }
+      await page.waitForTimeout(300);
+      await page.keyboard
+        .press(process.platform === "darwin" ? "Meta+A" : "Control+A")
+        .catch(() => {});
+      await page.keyboard.press("Backspace").catch(() => {});
+
+      const pasted = await page
+        .evaluate(async (value) => {
+          await navigator.clipboard.writeText(value);
+          return true;
+        }, promptText)
+        .catch(() => false);
+      if (pasted) {
+        await page.keyboard.press(process.platform === "darwin" ? "Meta+V" : "Control+V");
+        logs.push("[step4] Prompt inserted via focused composer clipboard paste");
+      } else {
+        await forceSetPromptText(promptLocator, promptText);
+        logs.push("[step4] Prompt inserted via focused composer direct set");
+      }
+
+      await page.waitForTimeout(700);
+      if (await verifyPrompt(promptLocator)) {
+        logs.push("[step4] Prompt verified in focused composer");
+        return { promptBox, promptLocator };
+      }
+      logs.push("[step4] Focused composer prompt did not verify; trying selector fallbacks");
+    } catch (error) {
+      logs.push(`[step4] Focused composer prompt insert failed: ${error.message.split("\n")[0]}`);
+    }
+  }
+
+  const candidates = PROMPT_INPUT_SELECTORS;
   for (const sel of candidates) {
     try {
       const loc = page.locator(sel).filter({ hasNotText: "T\u00ecm ki\u1ebfm" }).last();
@@ -595,21 +1299,195 @@ async function setPromptRobust(page, promptText, logs) {
         if (tagName === "textarea" || tagName === "input") {
           await loc.fill(promptText);
         } else {
-          await page.keyboard.insertText(promptText);
+          await forceSetPromptText(loc, promptText);
         }
 
         await page.waitForTimeout(500);
-        logs.push(`[step4] Typed prompt into ${sel}`);
-        return true;
+        if (await verifyPrompt(loc)) {
+          logs.push(`[step4] Prompt verified after direct set in ${sel}`);
+          return { promptBox, promptLocator: loc };
+        }
+
+        logs.push(`[step4] Prompt not visible after direct set in ${sel}; retrying clipboard paste`);
+        await loc.click({ timeout: 2000 }).catch(() => {});
+        await page.keyboard
+          .press(process.platform === "darwin" ? "Meta+A" : "Control+A")
+          .catch(() => {});
+        await page.keyboard.press("Backspace").catch(() => {});
+        const pasted = await page
+          .evaluate(async (value) => {
+            await navigator.clipboard.writeText(value);
+            return true;
+          }, promptText)
+          .catch(() => false);
+        if (pasted) {
+          await page.keyboard.press(process.platform === "darwin" ? "Meta+V" : "Control+V");
+        } else {
+          await forceSetPromptText(loc, promptText);
+        }
+        await page.waitForTimeout(700);
+        if (await verifyPrompt(loc)) {
+          logs.push(`[step4] Prompt verified after paste in ${sel}`);
+          return { promptBox, promptLocator: loc };
+        }
+
+        logs.push(`[step4] Prompt still not visible in ${sel}; trying next candidate`);
       }
     } catch (_) {}
   }
 
-  throw new Error("Could not locate any input field for the prompt");
+  throw new Error("Could not set and verify prompt text in the composer");
 }
 
-async function submitPrompt(page, logs, expectedPrompt = "") {
+async function findComposerSubmitButtonBox(page, promptBox = null) {
+  return page.evaluate((box) => {
+    const isVisible = (element) => {
+      if (!(element instanceof HTMLElement)) return false;
+      const rect = element.getBoundingClientRect();
+      const style = window.getComputedStyle(element);
+      return (
+        style.display !== "none" &&
+        style.visibility !== "hidden" &&
+        Number(style.opacity || "1") > 0 &&
+        rect.width >= 16 &&
+        rect.height >= 16
+      );
+    };
+    const buttons = Array.from(document.querySelectorAll("button"))
+      .filter(isVisible)
+      .map((button) => {
+        const rect = button.getBoundingClientRect();
+        const text = (button.textContent || "").toLowerCase();
+        const disabled =
+          button.disabled ||
+          button.getAttribute("aria-disabled") === "true" ||
+          button.getAttribute("disabled") !== null;
+        const inComposer = box
+          ? rect.x >= box.x - 120 &&
+            rect.x <= box.x + box.width + 140 &&
+            rect.y >= box.y - 140 &&
+            rect.y <= box.y + box.height + 240
+          : rect.y > window.innerHeight * 0.45;
+        const isArrow = text.includes("arrow_forward");
+        const isModelSelector =
+          text.includes("nano banana") ||
+          text.includes("crop_16_9") ||
+          text.includes("pro") ||
+          text.includes("1x");
+        const squareish = rect.width <= 72 && rect.height <= 72;
+        let score = 0;
+        if (isArrow) score += 500;
+        if (inComposer) score += 400;
+        if (squareish) score += 180;
+        if (isModelSelector) score -= 500;
+        score += rect.x / 6 + rect.y / 40;
+        return {
+          x: rect.x,
+          y: rect.y,
+          width: rect.width,
+          height: rect.height,
+          text,
+          score,
+          disabled,
+        };
+      })
+      .filter((item) => item.score > 300)
+      .sort((left, right) => right.score - left.score);
+    return buttons[0] || null;
+  }, promptBox);
+}
+
+async function findComposerSubmitTarget(page, promptBox = null) {
+  const buttonBox = await findComposerSubmitButtonBox(page, promptBox).catch(() => null);
+  if (buttonBox) return { ...buttonBox, source: "button" };
+
+  const state = promptBox ? await readComposerRootState(page, promptBox).catch(() => null) : null;
+  if (state?.rootBox) {
+    return {
+      x: state.rootBox.x + state.rootBox.width - 28,
+      y: state.rootBox.y + state.rootBox.height - 24,
+      width: 1,
+      height: 1,
+      text: "composer-bottom-right-fallback",
+      disabled: false,
+      source: "root-fallback",
+    };
+  }
+  return null;
+}
+
+async function waitForComposerReadyToSubmit(page, promptBox, logs, timeoutMs = 60000) {
+  const startedAt = Date.now();
+  let lastLogAt = 0;
+  while (Date.now() - startedAt < timeoutMs) {
+    const state = promptBox ? await readComposerRootState(page, promptBox).catch(() => null) : null;
+    const submitButton = await findComposerSubmitTarget(page, promptBox).catch(() => null);
+    const loading = Boolean(state?.loading);
+    const failed = Boolean(state?.failed);
+    if (submitButton && !loading && !failed) {
+      logs.push(
+        `[step5] PASS composer submit target is visible and upload loading is complete source=${submitButton.source} disabled=${submitButton.disabled}`,
+      );
+      logs.push(`[step5] Waiting ${PRE_SUBMIT_SETTLE_MS}ms before submit`);
+      await page.waitForTimeout(PRE_SUBMIT_SETTLE_MS);
+      const settledState = promptBox ? await readComposerRootState(page, promptBox).catch(() => null) : null;
+      if (!Boolean(settledState?.loading) && !Boolean(settledState?.failed)) return true;
+    }
+    if (Date.now() - lastLogAt > 5000) {
+      lastLogAt = Date.now();
+      logs.push(
+        `[step5] Waiting composer submit ready: hasButton=${Boolean(submitButton)}, disabled=${
+          submitButton?.disabled ?? "unknown"
+        }, loading=${loading}, failed=${failed}`,
+      );
+    }
+    await page.waitForTimeout(1000);
+  }
+  throw new Error("Timeout waiting for composer submit button to become active after upload");
+}
+
+async function promptLocatorStillHasPrompt(promptLocator, expectedPrompt) {
+  const current = normalizePromptText(await readPromptInputText(promptLocator).catch(() => ""));
+  const expected = normalizePromptText(expectedPrompt);
+  return Boolean(expected && (current === expected || current.includes(expected)));
+}
+
+async function submitPrompt(page, logs, expectedPrompt = "", promptBox = null, promptLocator = null) {
   logs.push("[step5] Submitting prompt");
+  if (promptBox) {
+    await waitForComposerReadyToSubmit(page, promptBox, logs);
+    const clickSubmit = async (label) => {
+      const buttonBox = await findComposerSubmitTarget(page, promptBox);
+      if (!buttonBox) return false;
+      const x = buttonBox.width > 1 ? buttonBox.x + buttonBox.width / 2 : buttonBox.x;
+      const y = buttonBox.height > 1 ? buttonBox.y + buttonBox.height / 2 : buttonBox.y;
+      logs.push(
+        `[step5] Clicking composer submit ${label} source=${buttonBox.source} x=${Math.round(x)}, y=${Math.round(y)}, disabled=${buttonBox.disabled}, text="${buttonBox.text}"`,
+      );
+      await page.mouse.click(x, y);
+      await page.waitForTimeout(2500);
+      return true;
+    };
+
+    if (await clickSubmit("primary")) {
+      if (
+        promptLocator &&
+        expectedPrompt &&
+        (await promptLocatorStillHasPrompt(promptLocator, expectedPrompt))
+      ) {
+        logs.push("[step5] Prompt still visible after submit click; retrying composer submit once");
+        await clickSubmit("retry");
+        if (await promptLocatorStillHasPrompt(promptLocator, expectedPrompt)) {
+          logs.push("[step5] Prompt still visible after retry; sending Control+Enter fallback");
+          await promptLocator.click({ force: true, timeout: 2000 }).catch(() => {});
+          await page.keyboard.press("Control+Enter").catch(() => {});
+          await page.waitForTimeout(1500);
+        }
+      }
+      return;
+    }
+  }
+
   const submitCandidates = [
     "button.send-button",
     'button[aria-label="G\u1eedi tin nh\u1eafn"]',
@@ -651,13 +1529,90 @@ async function submitPrompt(page, logs, expectedPrompt = "") {
 async function waitForNewVideoSource(page, beforeVideoSources, timeoutMs, logs) {
   const beforeSet = new Set((beforeVideoSources || []).filter(Boolean));
   const startedAt = Date.now();
+  let candidateSource = "";
+  let stablePasses = 0;
+  let trackedProgressRegion = null;
+  let lastProgressAt = 0;
+  let lastProgressPercent = null;
+  let lastLogAt = 0;
 
   while (Date.now() - startedAt < timeoutMs) {
-    const currentSources = await collectVideoSources(page);
-    const freshSources = currentSources.filter((src) => src && !beforeSet.has(src));
-    if (freshSources.length > 0) {
-      logs.push(`[step6] Detected new video source: ${freshSources[0]}`);
-      return freshSources[0];
+    const progressRegions = await collectGenerationProgressRegions(page);
+    if (progressRegions.length > 0) {
+      const currentRegion = progressRegions[0];
+      trackedProgressRegion = trackedProgressRegion || currentRegion;
+      lastProgressAt = Date.now();
+      lastProgressPercent = currentRegion.percent;
+      candidateSource = "";
+      stablePasses = 0;
+      if (Date.now() - lastLogAt > 10000) {
+        lastLogAt = Date.now();
+        logs.push(
+          `[step6] Flow video generation still in progress percent=${currentRegion.percent}, region=${Math.round(
+            currentRegion.x,
+          )},${Math.round(currentRegion.y)},${Math.round(currentRegion.width)}x${Math.round(
+            currentRegion.height,
+          )}`,
+        );
+      }
+      await page.waitForTimeout(3000);
+      continue;
+    }
+
+    if (
+      trackedProgressRegion &&
+      lastProgressAt > 0 &&
+      Date.now() - lastProgressAt < VIDEO_PROGRESS_SETTLE_MS
+    ) {
+      await page.waitForTimeout(1500);
+      continue;
+    }
+
+    const currentRecords = await collectVideoRecords(page);
+    const freshRecords = currentRecords
+      .filter((record) => {
+        const inTrackedGenerationRegion = trackedProgressRegion
+          ? videoRecordOverlapsRegion(record, trackedProgressRegion)
+          : Date.now() - startedAt >= FALLBACK_FRESH_VIDEO_DELAY_MS;
+        return (
+          record.src &&
+          !beforeSet.has(record.src) &&
+          inTrackedGenerationRegion &&
+          record.readyState >= 2 &&
+          record.width >= 160 &&
+          record.height >= 90
+        );
+      })
+      .sort((left, right) => right.area - left.area);
+    const freshSource = freshRecords[0]?.src || "";
+    const generationInFlight = await isGenerationInFlight(page).catch(() => false);
+
+    if (freshSource) {
+      if (freshSource === candidateSource) {
+        stablePasses += 1;
+      } else {
+        candidateSource = freshSource;
+        stablePasses = 1;
+        logs.push(`[step6] Detected candidate video source: ${freshSource}`);
+      }
+
+      if (stablePasses >= 3 && !generationInFlight) {
+        const picked = freshRecords[0];
+        logs.push(
+          `[step6] PASS new generated video source is stable and generation is idle: ${freshSource} box=${Math.round(
+            picked.width,
+          )}x${Math.round(picked.height)} trackedProgress=${Boolean(trackedProgressRegion)} lastProgress=${
+            lastProgressPercent ?? "none"
+          }`,
+        );
+        return freshSource;
+      }
+
+      logs.push(
+        `[step6] Waiting video source to settle: stablePasses=${stablePasses}, generationInFlight=${generationInFlight}, trackedProgress=${Boolean(
+          trackedProgressRegion,
+        )}`,
+      );
     }
 
     await page.waitForTimeout(3000);
@@ -826,6 +1781,80 @@ async function findLeftmostVideoCard(page, logs) {
   };
 }
 
+async function findVideoCardBySource(page, sourceUrl, logs) {
+  const expectedSource = String(sourceUrl || "").trim();
+  if (!expectedSource) return null;
+
+  const videoNodes = page.locator("video");
+  const videoCount = await videoNodes.count();
+  const candidates = [];
+
+  for (let i = 0; i < videoCount; i += 1) {
+    const video = videoNodes.nth(i);
+    const src = await video
+      .evaluate((node) => {
+        const element = /** @type {HTMLVideoElement} */ (node);
+        return element.currentSrc || element.src || "";
+      })
+      .catch(() => "");
+    if (src !== expectedSource) continue;
+
+    const box = await video.boundingBox().catch(() => null);
+    if (!box) continue;
+    if (box.width < 80 || box.height < 60) continue;
+    candidates.push({ mediaIndex: i, x: box.x, y: box.y, w: box.width, h: box.height });
+  }
+
+  if (candidates.length === 0) {
+    logs.push("[step7] Could not map expected generated video source to a visible card");
+    return null;
+  }
+
+  candidates.sort((a, b) => {
+    const rowDelta = Math.abs(a.y - b.y);
+    if (rowDelta > 24) return a.y - b.y;
+    return a.x - b.x;
+  });
+
+  const chosenCard = candidates[0];
+  logs.push(
+    `[step7] Mapped expected generated source to card: x=${Math.round(
+      chosenCard.x,
+    )}, y=${Math.round(chosenCard.y)}, w=${Math.round(chosenCard.w)}, h=${Math.round(
+      chosenCard.h,
+    )}`,
+  );
+
+  const menuButtons = page.locator('button[aria-haspopup="menu"]');
+  const menuCount = await menuButtons.count();
+  let bestMenuIndex = -1;
+  let bestDistance = Number.POSITIVE_INFINITY;
+  const targetX = chosenCard.x + chosenCard.w - 24;
+  const targetY = chosenCard.y + 24;
+
+  for (let i = 0; i < menuCount; i += 1) {
+    const menuBtn = menuButtons.nth(i);
+    const box = await menuBtn.boundingBox().catch(() => null);
+    if (!box) continue;
+    if (box.y < chosenCard.y - 20 || box.y > chosenCard.y + 90) continue;
+    if (box.x < chosenCard.x - 40 || box.x > chosenCard.x + chosenCard.w + 60) continue;
+
+    const centerX = box.x + box.width / 2;
+    const centerY = box.y + box.height / 2;
+    const distance = Math.abs(centerX - targetX) + Math.abs(centerY - targetY);
+    if (distance < bestDistance) {
+      bestDistance = distance;
+      bestMenuIndex = i;
+    }
+  }
+
+  return {
+    media: videoNodes.nth(chosenCard.mediaIndex),
+    cardBox: chosenCard,
+    menuButton: bestMenuIndex >= 0 ? menuButtons.nth(bestMenuIndex) : null,
+  };
+}
+
 async function isPreviewOpen(page) {
   return page
     .locator('button:has-text("T\u1ea3i xu\u1ed1ng"), button:has-text("Download")')
@@ -846,6 +1875,57 @@ async function collectVideoSources(page) {
         .filter(Boolean),
     )
     .catch(() => []);
+}
+
+async function collectVideoRecords(page) {
+  return page
+    .locator("video")
+    .evaluateAll((nodes) =>
+      nodes
+        .map((node) => {
+          const element = /** @type {HTMLVideoElement} */ (node);
+          const rect = element.getBoundingClientRect();
+          const style = window.getComputedStyle(element);
+          const src = element.currentSrc || element.src || "";
+          return {
+            src,
+            x: rect.x,
+            y: rect.y,
+            width: rect.width,
+            height: rect.height,
+            area: Math.max(0, rect.width) * Math.max(0, rect.height),
+            videoWidth: element.videoWidth || 0,
+            videoHeight: element.videoHeight || 0,
+            readyState: element.readyState || 0,
+            visible:
+              style.display !== "none" &&
+              style.visibility !== "hidden" &&
+              Number(style.opacity || "1") > 0 &&
+              rect.width >= 80 &&
+              rect.height >= 60,
+          };
+        })
+        .filter((record) => record.src && record.visible),
+    )
+    .catch(() => []);
+}
+
+function videoRecordOverlapsRegion(record, region) {
+  if (!record || !region) return false;
+  const left = Math.max(record.x, region.x);
+  const top = Math.max(record.y, region.y);
+  const right = Math.min(record.x + record.width, region.x + region.width);
+  const bottom = Math.min(record.y + record.height, region.y + region.height);
+  const overlapArea = Math.max(0, right - left) * Math.max(0, bottom - top);
+  const recordArea = Math.max(1, record.width * record.height);
+  const centerX = record.x + record.width / 2;
+  const centerY = record.y + record.height / 2;
+  const centerInside =
+    centerX >= region.x - 40 &&
+    centerX <= region.x + region.width + 40 &&
+    centerY >= region.y - 40 &&
+    centerY <= region.y + region.height + 40;
+  return overlapArea / recordArea >= 0.35 || centerInside;
 }
 
 async function tryDownloadNewestVideoBySource(
@@ -1163,6 +2243,43 @@ async function tryDownloadLatestVideo(page, outputDir, logs, preferredResolution
   return null;
 }
 
+async function tryDownloadExpectedVideoBySourceCard(
+  page,
+  expectedSource,
+  outputDir,
+  logs,
+  preferredResolution,
+) {
+  const target = await findVideoCardBySource(page, expectedSource, logs);
+  if (!target?.cardBox) {
+    return null;
+  }
+
+  logs.push("[step7] Download flow via the exact generated video card...");
+  const previewOpened = await openLatestCardPreview(page, target, logs);
+  if (previewOpened) {
+    const fromPreview = await tryDownloadFromPreviewTopBar(
+      page,
+      outputDir,
+      logs,
+      preferredResolution,
+    );
+    if (fromPreview) return fromPreview;
+  }
+
+  const fromMenu = await tryDownloadFromCardMenu(
+    page,
+    target,
+    outputDir,
+    logs,
+    preferredResolution,
+  );
+  if (fromMenu) return fromMenu;
+
+  logs.push("[step7] Exact generated video card did not yield a download");
+  return null;
+}
+
 async function tryDownloadLatestVideoWithFallbacks(
   context,
   page,
@@ -1170,7 +2287,24 @@ async function tryDownloadLatestVideoWithFallbacks(
   logs,
   preferredResolution,
   beforeVideoSources,
+  expectedSource = "",
 ) {
+  if (expectedSource) {
+    const byExactCard = await tryDownloadExpectedVideoBySourceCard(
+      page,
+      expectedSource,
+      outputDir,
+      logs,
+      preferredResolution,
+    );
+    if (byExactCard) return byExactCard;
+
+    logs.push(
+      "[step7] Skipping arbitrary latest-card/source fallback after exact generated card download failed to avoid returning an old video",
+    );
+    return null;
+  }
+
   const byUi = await tryDownloadLatestVideo(page, outputDir, logs, preferredResolution);
   if (byUi) return byUi;
 
@@ -1186,6 +2320,21 @@ async function tryDownloadLatestVideoWithFallbacks(
 
 function computeFileSha256(filePath) {
   return createHash("sha256").update(readFileSync(filePath)).digest("hex");
+}
+
+function looksLikeImagePayload(buffer) {
+  if (!buffer || buffer.length < 12) return false;
+  if (buffer[0] === 0x89 && buffer.slice(1, 4).toString("ascii") === "PNG") return true;
+  if (buffer[0] === 0xff && buffer[1] === 0xd8 && buffer[2] === 0xff) return true;
+  if (buffer.slice(0, 4).toString("ascii") === "RIFF" && buffer.slice(8, 12).toString("ascii") === "WEBP") {
+    return true;
+  }
+  return false;
+}
+
+function looksLikeHtmlPayload(buffer) {
+  const prefix = buffer.slice(0, 256).toString("utf8").trimStart().toLowerCase();
+  return prefix.startsWith("<!doctype html") || prefix.startsWith("<html") || prefix.includes("<body");
 }
 
 async function runPostGenerationQc({ videoPath, referenceImage, logs }) {
@@ -1216,8 +2365,14 @@ async function runPostGenerationQc({ videoPath, referenceImage, logs }) {
   }
 
   const videoBuffer = readFileSync(resolvedVideoPath);
-  if (!videoBuffer || videoBuffer.length < 1024) {
+  if (!videoBuffer || videoBuffer.length < MIN_GENERATED_VIDEO_BYTES) {
     return { pass: false, score: 0, reason: "Video QC fail: file video rong hoac qua nho" };
+  }
+  if (looksLikeImagePayload(videoBuffer)) {
+    return { pass: false, score: 0, reason: "Video QC fail: payload tai ve la anh, khong phai video" };
+  }
+  if (looksLikeHtmlPayload(videoBuffer)) {
+    return { pass: false, score: 0, reason: "Video QC fail: payload tai ve la HTML/error page" };
   }
 
   const qcResult = {
@@ -1249,7 +2404,14 @@ async function runPostGenerationQc({ videoPath, referenceImage, logs }) {
     cdp_url,
     download_resolution,
     auto_close_browser,
+    no_company_logo,
   } = parsed;
+  const effectiveLogoPaths =
+    no_company_logo || process.env.OPENCLAW_NO_COMPANY_LOGO === "1"
+      ? []
+      : parseList(logo_paths);
+  const effectivePrompt =
+    effectiveLogoPaths.length === 0 ? removeCompanyLogoPromptLines(prompt) : prompt;
 
   const outDir = path.resolve(output_dir || path.join(process.cwd(), "artifacts", "videos"));
   await mkdir(outDir, { recursive: true });
@@ -1257,7 +2419,10 @@ async function runPostGenerationQc({ videoPath, referenceImage, logs }) {
   logs.push(`[input] project_url=${project_url}`);
   logs.push(`[input] browser=${browser_path} ${profile_name}`);
   logs.push(`[input] target_dir=${outDir}`);
-  logs.push(`[input] logo_paths=${parseList(logo_paths).length}`);
+  logs.push(`[input] logo_paths=${effectiveLogoPaths.length}`);
+  if (parseList(logo_paths).length > 0 && effectiveLogoPaths.length === 0) {
+    logs.push("[input] Company logo disabled for this video run");
+  }
 
   if (!reference_image || !String(reference_image).trim()) {
     logs.push("[fail] Missing reference_image");
@@ -1272,7 +2437,7 @@ async function runPostGenerationQc({ videoPath, referenceImage, logs }) {
     process.exit(1);
   }
 
-  if (!prompt || !String(prompt).trim()) {
+  if (!effectivePrompt || !String(effectivePrompt).trim()) {
     logs.push("[fail] Missing prompt");
     printResult(
       buildResult({
@@ -1304,8 +2469,8 @@ async function runPostGenerationQc({ videoPath, referenceImage, logs }) {
   }
 
   try {
-    await ensureReadableFiles(parseList(logo_paths));
-    if (parseList(logo_paths).length > 0) {
+    await ensureReadableFiles(effectiveLogoPaths);
+    if (effectiveLogoPaths.length > 0) {
       logs.push("[step1] Checked logo readability");
     }
   } catch (err) {
@@ -1327,10 +2492,23 @@ async function runPostGenerationQc({ videoPath, referenceImage, logs }) {
     return;
   }
 
-  let context;
-  let connectedByCdp = false;
   try {
-    let page;
+    await withBrowserProfileLock(
+      {
+        browserPath: browser_path,
+        userDataDir: user_data_dir,
+        profileName: profile_name,
+        cdpUrl: cdp_url,
+        timeoutMs: Number(timeout_ms || 1200000),
+        logs,
+      },
+      async () => {
+        let context;
+        let page;
+        let generationCompleted = false;
+        let connectedByCdp = false;
+        try {
+
     if (cdp_url) {
       logs.push(`[step2] Connecting to existing browser via CDP: ${cdp_url}`);
       try {
@@ -1352,7 +2530,11 @@ async function runPostGenerationQc({ videoPath, referenceImage, logs }) {
         executablePath: browser_path,
         headless: false,
         acceptDownloads: true,
-        args: [`--profile-directory=${profile_name}`, "--start-maximized"],
+        args: [
+          `--profile-directory=${profile_name}`,
+          "--start-maximized",
+          "--disable-session-crashed-bubble",
+        ],
         viewport: { width: 1440, height: 900 },
       });
     }
@@ -1367,11 +2549,7 @@ async function runPostGenerationQc({ videoPath, referenceImage, logs }) {
     } catch (_) {}
 
     logs.push(`[step2] Navigating to ${project_url}`);
-    if (!page.url().includes(project_url)) {
-      await page.goto(project_url, { waitUntil: "domcontentloaded", timeout: 60000 });
-    }
-    await page.waitForTimeout(4000);
-    await dismissPopupsIfAny(page, logs);
+    await ensureFlowPageReady(page, project_url, logs);
 
     const screenshotBefore = path.join(outDir, `veo-before-${nowStamp()}.png`);
     await page.screenshot({ path: screenshotBefore, fullPage: true });
@@ -1384,22 +2562,31 @@ async function runPostGenerationQc({ videoPath, referenceImage, logs }) {
 
     const normalizedAssetPaths = [
       path.resolve(reference_image),
-      ...parseList(logo_paths).map((filePath) => path.resolve(filePath)),
+      ...effectiveLogoPaths.map((filePath) => path.resolve(filePath)),
     ].filter(Boolean);
     const uploadReferenceImage = normalizedAssetPaths[0];
     logs.push(
       `[step1] Using ${normalizedAssetPaths.length} image asset(s): ${normalizedAssetPaths.join(", ")}`,
     );
 
-    await prepareImageUpload(page, normalizedAssetPaths, logs);
+    const uploadState = await uploadImagesRobust(page, normalizedAssetPaths, logs);
 
     logs.push("[step4] Ảnh đã sẵn sàng, bắt đầu nhập prompt...");
-    await setPromptRobust(page, prompt, logs);
-    if (!(await waitForPromptValue(page, prompt, logs, 5000))) {
+    const promptState = await setPromptRobust(page, effectivePrompt, logs, uploadState.promptBox);
+    if (
+      !(await waitForPromptValue(page, effectivePrompt, logs, 5000)) &&
+      !(await verifyPromptAnywhere(page, effectivePrompt))
+    ) {
       throw new Error("Prompt text could not be verified after image upload completed.");
     }
 
-    await submitPrompt(page, logs, prompt);
+    await submitPrompt(
+      page,
+      logs,
+      effectivePrompt,
+      promptState.promptBox || uploadState.promptBox,
+      promptState.promptLocator,
+    );
 
     const waitResult = await waitForVideoResource(page, timeout_ms, logs, beforeVideoSources);
     const newVideoSource = waitResult.source;
@@ -1422,6 +2609,7 @@ async function runPostGenerationQc({ videoPath, referenceImage, logs }) {
         logs,
         download_resolution,
         beforeVideoSources,
+        newVideoSource,
       );
     }
 
@@ -1448,15 +2636,16 @@ async function runPostGenerationQc({ videoPath, referenceImage, logs }) {
     }
 
     logs.push("[step8] Flow finished successfully");
+    generationCompleted = true;
     const chatReply = downloadedVideoPath
       ? buildChatVideoReplyPayload({
           videoPath: downloadedVideoPath,
           data: {
             project_url,
-            prompt,
+            prompt: effectivePrompt,
             downloaded_video_path: relVideoPath || downloadedVideoPath,
             used_reference_image: uploadReferenceImage,
-            used_logo_paths: parseList(logo_paths),
+            used_logo_paths: effectiveLogoPaths,
             reference_image_sha256: computeFileSha256(uploadReferenceImage),
             video_qc_status: "PASS",
             video_qc_reason: qcResult.reason,
@@ -1474,10 +2663,10 @@ async function runPostGenerationQc({ videoPath, referenceImage, logs }) {
             : "Video generated but could not be downloaded."),
         data: {
           project_url,
-          prompt,
+          prompt: effectivePrompt,
           downloaded_video_path: relVideoPath || downloadedVideoPath,
           used_reference_image: uploadReferenceImage,
-          used_logo_paths: parseList(logo_paths),
+          used_logo_paths: effectiveLogoPaths,
           reference_image_sha256: computeFileSha256(uploadReferenceImage),
           video_qc_status: "PASS",
           video_qc_reason: qcResult.reason,
@@ -1487,30 +2676,45 @@ async function runPostGenerationQc({ videoPath, referenceImage, logs }) {
         logs,
       }),
     );
+  } finally {
+    if (context) {
+      if (generationCompleted && !connectedByCdp) {
+        await context.close().catch(() => {});
+        logs.push("[cleanup] Closed Flow browser context after successful download");
+      } else if (generationCompleted && page) {
+        await page.close().catch(() => {});
+        logs.push("[cleanup] Closed Flow video tab after successful download");
+      } else if (auto_close_browser && !connectedByCdp) {
+        await context.close().catch(() => {});
+      } else if (!auto_close_browser && !generationCompleted) {
+        const browser = context.browser?.();
+        if (browser?.disconnect) {
+          browser.disconnect();
+          logs.push("[cleanup] Auto close browser is disabled; disconnected Playwright and kept browser open");
+        } else {
+          logs.push("[cleanup] Auto close browser is disabled; leaving browser context open");
+        }
+      }
+    }
+
+    if (auto_close_browser) {
+      await killAllCocCocBrowsers(logs);
+    }
+  }
+      },
+    );
   } catch (error) {
     logs.push(`[fail] ${error.stack || error.message}`);
     printResult(
       buildResult({
         success: false,
         message: "Failed during Veo video generation flow",
-        data: { project_url, prompt },
+        data: { project_url, prompt: effectivePrompt },
         artifacts,
         logs,
         error: { details: error.message },
       }),
     );
     process.exit(1);
-  } finally {
-    if (context) {
-      if (!connectedByCdp) {
-        await context.close().catch(() => {});
-      }
-    }
-
-    if (auto_close_browser) {
-      await killAllCocCocBrowsers(logs);
-    } else {
-      logs.push("[cleanup] Auto close browser is disabled");
-    }
   }
 })();

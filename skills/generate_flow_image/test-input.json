@@ -1,18 +1,15 @@
 {
-  "target_flow_url": "https://labs.google/fx/vi/tools/flow/project/84c5e618-a20d-49cf-b4ef-707db64693bc",
-  "image_prompt": "Táº¡o video giá»›i thiá»‡u sáº£n pháº©m tÄ©nh, bÃ¡m sÃ¡t tuyá»‡t Ä‘á»‘i 100% hÃ¬nh dÃ¡ng, cáº¥u trÃºc, mÃ u sáº¯c vÃ  tá»· lá»‡ cá»§a sáº£n pháº©m trong áº£nh tham chiáº¿u.\n\nYÃŠU Cáº¦U Báº®T BUá»˜C Vá»€ HÃŒNH áº¢NH VÃ€ CHUYá»‚N Äá»˜NG:\n- Cáº£nh quay tÄ©nh: Sáº£n pháº©m Ä‘á»©ng im, khÃ´ng hoáº¡t Ä‘á»™ng, khÃ´ng cÃ³ chuyá»ƒn Ä‘á»™ng cÆ¡ há»c hay thay Ä‘á»•i tráº¡ng thÃ¡i.\n- Camera motion: Chuyá»ƒn Ä‘á»™ng mÃ¡y quay chá»‰ di chuyá»ƒn xoay mÆ°á»£t mÃ  (orbit/pan) xung quanh sáº£n pháº©m gá»‘c Ä‘á»ƒ khoe gÃ³c cáº¡nh.\n- Tuyá»‡t Ä‘á»‘i tuÃ¢n thá»§ áº£nh gá»‘c: KhÃ´ng tá»± Ã½ biáº¿n táº¥u sang máº«u khÃ¡c, hÃ£ng khÃ¡c, káº¿t cáº¥u khÃ¡c.\n- KhÃ´ng cÃ³ con ngÆ°á»i: Tuyá»‡t Ä‘á»‘i khÃ´ng cÃ³ con ngÆ°á»i xuáº¥t hiá»‡n trong báº¥t ká»³ khung hÃ¬nh nÃ o.\n- KhÃ´ng cÃ³ Text: Tuyá»‡t Ä‘á»‘i khÃ´ng lá»“ng chá»¯, text, thÃ´ng sá»‘ hay typography vÃ o khung hÃ¬nh.\n- Logo cÃ´ng ty: Báº¯t buá»™c sá»­ dá»¥ng file logo cÃ´ng ty Ä‘Ã­nh kÃ¨m (Ä‘Ã£ tÃ¡ch ná»n sáº¡ch) Ä‘áº·t cá»‘ Ä‘á»‹nh á»Ÿ gÃ³c dÆ°á»›i cÃ¹ng bÃªn pháº£i video. Tuyá»‡t Ä‘á»‘i khÃ´ng dÃ¹ng/nháº§m láº«n vá»›i logo thÆ°Æ¡ng hiá»‡u cá»§a báº£n thÃ¢n sáº£n pháº©m.\n- Bá»‘i cáº£nh: KhÃ´ng gian thá»±c táº¿, Ã¡nh sÃ¡ng trong tráº»o, sáº¡ch sáº½, táº­p trung 100% sá»± chÃº Ã½ vÃ o sáº£n pháº©m.",
+  "target_gemini_url": "https://labs.google/fx/vi/tools/flow/project/ca452ad9-8b12-485f-9357-9def62da6ab2",
+  "image_prompt": "Create one complete Facebook advertising image for the two-post car lift product. Keep the product shape, blue color, proportions, and structure faithful to the reference image. Use a clean professional auto repair garage background with modern lighting. Do not add people. Do not add text. Do not add any logo except the supplied company logo asset.",
   "image_paths": [
     "C:/Users/Administrator/.openclaw/workspace_content/artifacts/references/search_product_text/ca-u-na-ng-o-to-2-tru-hoa-t-o-ng-thuy-lu-c-co-ng-sua-t-na-ng-3.2-ta-n-model-gl-3.2-2e-1-pha/image_1920.webp",
     "C:/Users/Administrator/.openclaw/assets/logos/logo.png"
   ],
   "browser_path": "C:/Program Files/CocCoc/Browser/Application/browser.exe",
   "user_data_dir": "C:/Users/Administrator/AppData/Local/CocCoc/Browser/User Data",
-  "profile_name": "Profile 2",
-  "output_dir": "",
-  "cdp_url": "",
+  "profile_name": "Default",
   "timeout_ms": 1200000,
-  "download_resolution": "720p",
   "auto_close_browser": false,
-  "retry_count": 2,
+  "automation_mode": "playwright",
   "dry_run": false
 }

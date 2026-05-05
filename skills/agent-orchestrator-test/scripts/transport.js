@@ -1,5 +1,7 @@
 const baseTransport = require("../../agent-orchestrator/scripts/transport");
 
+const MAX_WORKER_WAIT_MS = 2 * 60 * 60 * 1000;
+
 function extractTextFromHistoryMessage(message) {
   if (!message || typeof message !== "object") return "";
   const entry = message;
@@ -20,6 +22,41 @@ function extractTextFromHistoryMessage(message) {
       .filter(Boolean)
       .join("\n\n")
       .trim();
+  }
+  return "";
+}
+
+async function findLatestAssistantTextInHistory(options) {
+  try {
+    const historyResult = await baseTransport.callGatewayMethod({
+      openClawHome: options.openClawHome,
+      method: "chat.history",
+      params: {
+        sessionKey: options.sessionKey,
+        limit: options.limit || 20,
+      },
+      timeoutMs: options.timeoutMs || 30000,
+    });
+    const messages =
+      historyResult?.result?.payload?.messages ||
+      historyResult?.result?.messages ||
+      historyResult?.messages ||
+      [];
+    if (!Array.isArray(messages)) {
+      return "";
+    }
+    for (let index = messages.length - 1; index >= 0; index -= 1) {
+      const message = messages[index];
+      if (!message || typeof message !== "object" || message.role !== "assistant") {
+        continue;
+      }
+      const text = extractTextFromHistoryMessage(message);
+      if (text) {
+        return text;
+      }
+    }
+  } catch {
+    return "";
   }
   return "";
 }
@@ -201,7 +238,7 @@ async function waitForCompletedWorkflowReply(task, initialText) {
   if (looksLikeCompletedWorkflowReply(initialText, task.workflowId, task.stepId)) {
     return initialText;
   }
-  const maxWaitMs = Math.min(Math.max(Number(task.timeoutMs) || 180000, 30000), 1800000);
+  const maxWaitMs = Math.min(Math.max(Number(task.timeoutMs) || 180000, 30000), MAX_WORKER_WAIT_MS);
   const pollIntervalMs =
     Number.isFinite(task.pollIntervalMs) && task.pollIntervalMs > 0
       ? task.pollIntervalMs
@@ -251,7 +288,7 @@ async function waitForAgentResponse(task) {
       pendingSettled = true;
     });
 
-  const maxWaitMs = Math.min(Math.max(Number(task.timeoutMs) || 180000, 30000), 1800000);
+  const maxWaitMs = Math.min(Math.max(Number(task.timeoutMs) || 180000, 30000), MAX_WORKER_WAIT_MS);
   const pollIntervalMs =
     Number.isFinite(task.pollIntervalMs) && task.pollIntervalMs > 0
       ? task.pollIntervalMs
@@ -331,6 +368,7 @@ module.exports = {
   correlateByWorkflowIdAndStepId,
   extractWorkflowReplyCandidates,
   extractWorkflowField,
+  findLatestAssistantTextInHistory,
   findLatestWorkflowReplyInHistory,
   normalizeWorkflowReplyText,
   looksLikeCompletedWorkflowReply,

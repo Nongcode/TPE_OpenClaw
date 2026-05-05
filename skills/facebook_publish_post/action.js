@@ -12,13 +12,20 @@ const DEFAULTS = {
 
 const TARGET_PAGES = [
   {
+    page_id: "1131157960071384",
+    access_token:
+      "EAAUnu2nAp08BRYhR8vsGPVE7mxmzy7ZCoW6UOAPrxsEiY9J4lkVBjq4Bsv6BUWuicTDRGz1EJN1StQZCGZCDyvlWAyCM0ly6ECTjxIIv2DHPVLdd8xC2oDuJmVSTBf7J6JKFdR94IxZB63SoM1A7J6J36f5snKZCS2uQhGWrH0HRT7SxRo5MavJCphSUOKHZCrFi0Mkln8jPlJB8bZBWNmo",
+  },
+  {
     page_id: "1021996431004626",
-    access_token: "EAAUnu2nAp08BRXf1OSuTB7Bxxe7oYA4Js2behf3JMBbrA2TaquIjfLogbxl6zYe8C2lDn91j8vZCZBJPoZAn1jZCEY98ZAVH8IyjibcLNv0BtD3RegfqPTl14ukMzZApZCLchxI4TeisFm8nwi8TOqcJHsLSRn3AADHMZCgc1uhrDR0ZBbWunSN1C910ZAi2XwAxOl0DMdrZAdxsRu9XZC4OJN1O"
+    access_token:
+      "EAAUnu2nAp08BRV6ZAuAAjp8pv5RZAqB4d7BwGAY1wVHc9uHhklc6YZCXZC98X7GxxIWXqC47PFHnCApCA7TZCWvNETpfhgZAMvHeVSRDsTWgmmgBPbTdXGSYKwX7WZAO2dZCwfe4PFUrXlQAL9Q3FN8OZBWVcVayB3pa9eHJoz0PhWXx1fL5HGBn1OkxQu4zjdaLGQZAO3cYUjTbUIxfYBZC7c46ZBgv",
   },
   {
     page_id: "1129362243584971",
-    access_token: "EAAUnu2nAp08BRUpLU9JM1S7ZAYUQoG8vtjjuOYU4uqP8r4Pu5H9v5KrlbaSIE1jgFBptyExWPfyQWzc54PDHDaJXZCqEz7CcTzdJFz0LCdJXYvslbnJZAPNndbktC1SGIqyZCJtt4Ivn6HXoHzmZC39OyiEHs6HwgElgq9qopfi2aWMNUUuV56MnSSNHqSHCX8CA3xO8mngdZAQw11qe54"
-  }
+    access_token:
+      "EAAUnu2nAp08BRSOKFfRZBaZB8Eu9NxMoJUN4PyuWvpI0VC7d3F3BuzzOxqOfEkYJOEQ68Pur7mcB4WZAX3WZADNLc1FMo4DZBmLnhdg4rbzZBFunxECAZAZAd407UffINo8640ZBcaZA7ywzLZCvEJxvURhmB4f6i5pPKZBFWeYMdTCY0zDxd5fsElnji3a1ntwqGLpA6kZCn3txM7axCzcepczbL",
+  },
 ];
 
 function buildResult({ success, message, data = {}, artifacts = [], logs = [], error = null }) {
@@ -211,7 +218,10 @@ async function uploadUnpublishedMedia({ pageId, accessToken, filePath, logs }) {
         formData.append("access_token", accessToken);
         formData.append("message", caption);
         uploads.forEach((upload, index) => {
-          formData.append(`attached_media[${index}]`, JSON.stringify({ media_fbid: upload.mediaId }));
+          formData.append(
+            `attached_media[${index}]`,
+            JSON.stringify({ media_fbid: upload.mediaId }),
+          );
         });
 
         logs.push(`[step3-${pageId}] Creating combined feed post...`);

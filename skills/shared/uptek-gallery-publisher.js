@@ -57,6 +57,10 @@ function dedupe(values) {
 function extractModelCandidates(value) {
   const source = String(value || "").toUpperCase();
   const matches = [
+    ...(source.match(/(?:^|[-_\s])MODEL[-_\s]+([A-Z0-9][A-Z0-9._-]{1,80})/g) || []).map((item) =>
+      item.replace(/.*MODEL[-_\s]+/i, ""),
+    ),
+
     ...(source.match(/[A-Z]{1,6}-\d+(?:\.\d+)?(?:-[A-Z0-9]+)+/g) || []),
     ...(source.match(/[A-Z]{2,}\d+[A-Z0-9.-]*(?:\s+(?:PLUS|PRO|MAX|EVO|ECO))?/g) || []),
     ...(source.match(/[A-Z]{1,4}\s+\d{2,5}(?:[A-Z0-9.-]*)?(?:\s+(?:PLUS|PRO|MAX|EVO|ECO))?/g) || []),
@@ -135,7 +139,11 @@ async function resolveProductModel(options = {}) {
     return profileName.slice(0, 120);
   }
 
-  const fallbackDir = path.basename(path.dirname(String(imagePaths[0] || ""))).replace(/-/g, " ").trim();
+
+  const fallbackDir = imagePaths[0]
+    ? path.basename(path.dirname(String(imagePaths[0]))).replace(/-/g, " ").trim()
+    : "";
+
   if (fallbackDir) {
     return fallbackDir.slice(0, 120);
   }
@@ -153,6 +161,9 @@ function buildCopiedFilename(sourcePath) {
 function postJson(url, body, headers = {}) {
   return new Promise((resolve, reject) => {
     const payload = JSON.stringify(body);
+
+    const payloadBytes = Buffer.byteLength(payload);
+
     const client = url.protocol === "https:" ? https : http;
     const request = client.request(
       url,
@@ -160,7 +171,9 @@ function postJson(url, body, headers = {}) {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          "Content-Length": Buffer.byteLength(payload),
+
+          "Content-Length": payloadBytes,
+
           ...headers,
         },
       },
@@ -173,7 +186,9 @@ function postJson(url, body, headers = {}) {
           if ((response.statusCode || 500) >= 400) {
             reject(
               new Error(
-                `Gallery sync failed: ${response.statusCode} ${buffer.slice(0, 300) || response.statusMessage || "unknown error"}`,
+
+                `Gallery sync failed: ${response.statusCode} (${payloadBytes} request bytes) ${buffer.slice(0, 300) || response.statusMessage || "unknown error"}`,
+
               ),
             );
             return;

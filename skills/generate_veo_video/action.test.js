@@ -11,6 +11,8 @@ import {
   retryStep,
 } from "./core.js";
 
+const actionSource = fs.readFileSync(new URL("./action.js", import.meta.url), "utf8");
+
 test("parseArgs reads video_count and new batch flags from input file", () => {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "veo-parse-"));
   const inputPath = path.join(tempDir, "input.json");
@@ -129,4 +131,37 @@ test("retryStep retries and eventually succeeds", async () => {
   assert.equal(attempts, 3);
   assert.match(logs.join("\n"), /retry-unit attempt 1 failed/);
   assert.match(logs.join("\n"), /retry-unit attempt 2 failed/);
+});
+
+test("action QC rejects image or HTML payloads saved as video files", () => {
+  assert.match(actionSource, /MIN_GENERATED_VIDEO_BYTES = 64 \* 1024/);
+  assert.match(actionSource, /looksLikeImagePayload/);
+  assert.match(actionSource, /looksLikeHtmlPayload/);
+  assert.match(actionSource, /payload tai ve la anh, khong phai video/);
+  assert.match(actionSource, /payload tai ve la HTML\/error page/);
+});
+
+test("action locks the browser profile before launching or attaching to Flow", () => {
+  assert.match(actionSource, /withBrowserProfileLock/);
+  assert.match(actionSource, /browserPath: browser_path/);
+  assert.match(actionSource, /userDataDir: user_data_dir/);
+  assert.match(actionSource, /profileName: profile_name/);
+  assert.match(actionSource, /cdpUrl: cdp_url/);
+});
+
+test("action waits for the tracked video progress card before accepting a source", () => {
+  assert.match(actionSource, /collectGenerationProgressRegions/);
+  assert.match(actionSource, /trackedProgressRegion/);
+  assert.match(actionSource, /videoRecordOverlapsRegion/);
+  assert.match(actionSource, /VIDEO_PROGRESS_SETTLE_MS/);
+  assert.match(actionSource, /FALLBACK_FRESH_VIDEO_DELAY_MS/);
+  assert.match(actionSource, /PASS new generated video source is stable/);
+});
+
+test("action downloads from the exact generated card before refusing arbitrary old videos", () => {
+  assert.match(actionSource, /findVideoCardBySource/);
+  assert.match(actionSource, /tryDownloadExpectedVideoBySourceCard/);
+  assert.match(actionSource, /Download flow via the exact generated video card/);
+  assert.match(actionSource, /Skipping arbitrary latest-card\/source fallback/);
+  assert.match(actionSource, /exact generated card download failed to avoid returning an old video/);
 });

@@ -349,6 +349,7 @@ function classifyPendingDecision(message, currentStage) {
     const approveSignals = [
       "duyet content", "duyet bai", "ok content", "ok bai",
       "dong y content", "cho lam anh", "tao anh", "lam anh",
+      "tao lai anh", "lam lai anh", "tao lai hinh", "lam lai hinh",
       "duyet noi dung", "content ok", "bai ok",
       "anh duyet", "duyet nhe", "duyet nha", "duyet roi",
     ];

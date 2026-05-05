@@ -1,19 +1,18 @@
-﻿import { createHash } from "node:crypto";
+import { createHash } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
 import { access, mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { chromium } from "playwright-core";
-import { withBrowserProfileLock } from "../shared/browser-profile-lock.js";
 import { buildChatImageReplyPayload } from "../shared/chat-image-result.js";
 import { publishGeneratedImageToUpTekGallery } from "../shared/uptek-gallery-publisher.js";
 
 const FLOW_PROJECT_URL =
-  "https://labs.google/fx/tools/flow/project/86643437-621b-4f69-9ac4-2f0b193586eb";
+  "https://labs.google/fx/tools/flow/project/0049461b-a587-4c3d-ba90-464aa0f51336";
 
 const DEFAULTS = {
   browser_path: "C:/Program Files/CocCoc/Browser/Application/browser.exe",
   user_data_dir: "C:/Users/Administrator/AppData/Local/CocCoc/Browser/User Data",
-  profile_name: "Profile 3",
+  profile_name: "Default",
   project_url: FLOW_PROJECT_URL,
   target_gemini_url: FLOW_PROJECT_URL,
   image_prompt: "",
@@ -28,11 +27,7 @@ const DEFAULTS = {
 };
 
 const MIN_GENERATED_IMAGE_BYTES = 50 * 1024;
-const UPLOAD_SETTLE_MS = 3000;
-const PRE_SUBMIT_SETTLE_MS = 3000;
-const GENERATION_PROGRESS_SETTLE_MS = 8000;
-const FALLBACK_FRESH_IMAGE_DELAY_MS = 45000;
-const AUTOMATION_REVISION = "flow-rewrite-stepwise-20260505-submit-guard";
+const AUTOMATION_REVISION = "flow-rewrite-stepwise-20260503-restore-1748";
 
 function buildResult({ success, message, data = {}, artifacts = [], logs = [], error = null }) {
   return { success, message, data, artifacts, logs, error };
@@ -156,12 +151,6 @@ function normalizeText(value) {
     .toLowerCase();
 }
 
-function normalizePromptForComposer(value) {
-  return String(value || "")
-    .replace(/\s+/g, " ")
-    .trim();
-}
-
 function mediaNameFromSource(source) {
   try {
     const url = new URL(String(source || ""), "https://labs.google");
@@ -189,19 +178,6 @@ async function ensureReadableFiles(filePaths) {
 
 function computeFileSha256(filePath) {
   return createHash("sha256").update(readFileSync(filePath)).digest("hex");
-}
-
-function computeReadableFileHashes(filePaths, logs) {
-  const hashes = new Set();
-  for (const filePath of filePaths) {
-    try {
-      if (!filePath || !existsSync(filePath)) continue;
-      hashes.add(computeFileSha256(filePath));
-    } catch (error) {
-      logs?.push?.(`[qc] Could not hash reference file ${filePath}: ${error.message}`);
-    }
-  }
-  return hashes;
 }
 
 async function dismissPopupsIfAny(page, logs) {
@@ -490,7 +466,6 @@ async function readComposerRootState(page, promptBox) {
         imageCount: 0,
         mediaNames: [],
         loading: false,
-        failed: false,
         rootBox: null,
         inputCount: 0,
       };
@@ -549,19 +524,12 @@ async function readComposerRootState(page, promptBox) {
       textBlob.includes("dang xu ly") ||
       textBlob.includes("uploading") ||
       textBlob.includes("processing");
-    const failed =
-      textBlob.includes("failed") ||
-      textBlob.includes("khong thanh cong") ||
-      textBlob.includes("không thành công") ||
-      textBlob.includes("loi") ||
-      textBlob.includes("lỗi");
 
     return {
       found: true,
       imageCount: images.length,
       mediaNames: [...new Set(mediaNames)],
       loading,
-      failed,
       rootBox: {
         x: rootRect.x,
         y: rootRect.y,
@@ -626,47 +594,23 @@ async function uploadImages(page, imagePaths, logs) {
 
   const startedAt = Date.now();
   let stablePasses = 0;
-  const expectedImageCount = Math.max(imagePaths.length, beforeCount + imagePaths.length);
   while (Date.now() - startedAt < 180000) {
     const state = await readComposerRootState(page, promptBox).catch(() => null);
     const count = state?.imageCount || 0;
     const loading = Boolean(state?.loading);
-    const failed = Boolean(state?.failed);
-    const enoughImages = count >= expectedImageCount;
-    if (failed) {
-      stablePasses = 0;
-      logs.push(
-        `[step3] Waiting upload recovery: composerImages=${count}, expected=${expectedImageCount}, failed=${failed}`,
-      );
-    } else if (enoughImages && !loading) {
+    const elapsedMs = Date.now() - startedAt;
+    const enoughImages = count >= Math.max(1, imagePaths.length);
+    if (enoughImages && (!loading || elapsedMs > 12000)) {
       stablePasses += 1;
       if (stablePasses >= 3) {
-        const elapsedMs = Date.now() - startedAt;
         logs.push(
-          `[step3] Upload appears complete: composerImages=${count}, expected=${expectedImageCount}, loading=${loading}, elapsedMs=${elapsedMs}`,
+          `[step3] PASS upload: composer image count=${count}, loading=${loading}, elapsedMs=${elapsedMs}`,
         );
-        logs.push(`[step3] Waiting ${UPLOAD_SETTLE_MS}ms for uploaded images to settle`);
-        await page.waitForTimeout(UPLOAD_SETTLE_MS);
-        const settledState = await readComposerRootState(page, promptBox).catch(() => null);
-        const settledCount = settledState?.imageCount || 0;
-        const settledLoading = Boolean(settledState?.loading);
-        const settledFailed = Boolean(settledState?.failed);
-        if (settledCount >= expectedImageCount && !settledLoading && !settledFailed) {
-          logs.push(
-            `[step3] PASS upload settled: composerImages=${settledCount}, loading=${settledLoading}, failed=${settledFailed}`,
-          );
-          return promptBox;
-        }
-        logs.push(
-          `[step3] Upload changed during settle wait: composerImages=${settledCount}, loading=${settledLoading}, failed=${settledFailed}`,
-        );
-        stablePasses = 0;
+        return promptBox;
       }
     } else {
       stablePasses = 0;
-      logs.push(
-        `[step3] Waiting upload complete: composerImages=${count}, expected=${expectedImageCount}, loading=${loading}, failed=${failed}`,
-      );
+      logs.push(`[step3] Waiting upload: composerImages=${count}, loading=${loading}`);
     }
     await page.waitForTimeout(1200);
   }
@@ -759,53 +703,7 @@ async function clickPlaceholderPrompt(page, logs) {
   }
 }
 
-async function readPromptText(locator) {
-  return locator.evaluate((element) => {
-    if ("value" in element && typeof element.value === "string") return element.value;
-    return element.innerText || element.textContent || "";
-  });
-}
-
-async function waitForPromptText(locator, expectedPrompt, timeoutMs = 6000) {
-  const expected = normalizePromptForComposer(expectedPrompt);
-  const startedAt = Date.now();
-  while (Date.now() - startedAt < timeoutMs) {
-    const current = normalizePromptForComposer(await readPromptText(locator).catch(() => ""));
-    if (current === expected || current.includes(expected)) return true;
-    await new Promise((resolve) => setTimeout(resolve, 250));
-  }
-  return false;
-}
-
-async function pastePromptIntoFocusedComposer(page, locator, normalizedPrompt, logs) {
-  const origin = new URL(page.url()).origin;
-  try {
-    await page.context().grantPermissions(["clipboard-read", "clipboard-write"], { origin });
-    await page.evaluate(async (text) => navigator.clipboard.writeText(text), normalizedPrompt);
-    await page.keyboard.press(process.platform === "darwin" ? "Meta+V" : "Control+V");
-    logs.push("[step4] Prompt inserted via clipboard paste");
-    return;
-  } catch (error) {
-    logs.push(
-      `[step4] Clipboard paste failed, using keyboard.insertText: ${error.message.split("\n")[0]}`,
-    );
-  }
-
-  try {
-    await page.keyboard.insertText(normalizedPrompt);
-    logs.push("[step4] Prompt inserted via keyboard.insertText");
-  } catch (error) {
-    logs.push(
-      `[step4] keyboard.insertText failed, using locator.fill: ${error.message.split("\n")[0]}`,
-    );
-    await locator.fill(normalizedPrompt, { timeout: 5000 });
-  }
-}
-
 async function typePrompt(page, prompt, logs, promptBox = null) {
-  const normalizedPrompt = normalizePromptForComposer(prompt);
-  if (!normalizedPrompt) throw new Error("Prompt rong sau khi normalize, khong the submit Flow");
-
   const freshGeometry = await findComposerGeometry(page, logs).catch((error) => {
     logs.push(`[step4] Could not refresh composer geometry before typing: ${error.message}`);
     return null;
@@ -836,320 +734,43 @@ async function typePrompt(page, prompt, logs, promptBox = null) {
   await page.keyboard.press("Backspace").catch(() => {});
   await page.waitForTimeout(300);
 
-  await pastePromptIntoFocusedComposer(page, locator, normalizedPrompt, logs);
-
-  await locator.evaluate((element) => {
-    try {
-      element.dispatchEvent(
-        new InputEvent("input", {
-          bubbles: true,
-          cancelable: true,
-          inputType: "insertText",
-        }),
-      );
-    } catch {
-      element.dispatchEvent(new Event("input", { bubbles: true }));
-    }
-    element.dispatchEvent(new Event("change", { bubbles: true }));
-  });
-  logs.push(`[step4] Dispatched input/change events for ${tagName} composer`);
-
-  if (!(await waitForPromptText(locator, normalizedPrompt, 7000))) {
-    const current = normalizePromptForComposer(await readPromptText(locator).catch(() => ""));
-    throw new Error(
-      `Prompt text was not fully inserted before submit: expectedLength=${normalizedPrompt.length}, currentLength=${current.length}`,
+  if (tagName === "textarea" || tagName === "input") {
+    await locator.fill(prompt);
+    await locator.evaluate((element) =>
+      element.dispatchEvent(new Event("input", { bubbles: true })),
     );
+  } else {
+    await page.keyboard.type(prompt, { delay: 10 });
   }
 
   await page.waitForTimeout(800);
-  logs.push(
-    `[step4] PASS prompt inserted as single composer value length=${normalizedPrompt.length}`,
-  );
-  return { promptBox: activePromptBox, promptLocator: locator, normalizedPrompt };
+  logs.push("[step4] PASS prompt typed successfully");
 }
 
-async function findComposerSubmitButtonBox(page, promptBox = null, rootBox = null) {
-  return page.evaluate(
-    (boxes) => {
-      const { promptBox: box, rootBox: root } = boxes || {};
-      const isVisible = (element) => {
-        if (!(element instanceof HTMLElement)) return false;
-        const rect = element.getBoundingClientRect();
-        const style = window.getComputedStyle(element);
-        return (
-          style.display !== "none" &&
-          style.visibility !== "hidden" &&
-          Number(style.opacity || "1") > 0 &&
-          rect.width >= 16 &&
-          rect.height >= 16
-        );
-      };
-      const normalize = (value) =>
-        String(value || "")
-          .normalize("NFKD")
-          .replace(/[\u0300-\u036f]/g, "")
-          .toLowerCase()
-          .replace(/\s+/g, " ")
-          .trim();
-      const textFor = (element) =>
-        normalize(
-          [
-            element.textContent,
-            element.getAttribute("aria-label"),
-            element.getAttribute("title"),
-            element.getAttribute("data-testid"),
-            element.getAttribute("data-test-id"),
-            element.getAttribute("jsname"),
-          ].join(" "),
-        );
-      const area = root || box;
-      const buttons = Array.from(document.querySelectorAll('button, [role="button"]'))
-        .filter(isVisible)
-        .map((button) => {
-          const rect = button.getBoundingClientRect();
-          const text = textFor(button);
-          const disabled =
-            button.disabled ||
-            button.getAttribute("aria-disabled") === "true" ||
-            button.getAttribute("disabled") !== null;
-          const inComposer = area
-            ? rect.x >= area.x - 80 &&
-              rect.x <= area.x + area.width + 80 &&
-              rect.y >= area.y - 80 &&
-              rect.y <= area.y + area.height + 90
-            : rect.y > window.innerHeight * 0.45;
-          const centerX = rect.x + rect.width / 2;
-          const centerY = rect.y + rect.height / 2;
-          const bottomRight = area
-            ? centerX >= area.x + area.width * 0.55 && centerY >= area.y + area.height * 0.45
-            : centerX >= window.innerWidth * 0.55 && centerY >= window.innerHeight * 0.55;
-          const isSubmitIntent =
-            text.includes("arrow_forward") ||
-            text.includes("arrow_upward") ||
-            text.includes("send") ||
-            text.includes("submit") ||
-            text.includes("generate") ||
-            text.includes("create") ||
-            text.includes("gui") ||
-            text.includes("tao");
-          const isDangerousNonSubmit =
-            text.includes("close") ||
-            text.includes("dong") ||
-            text.includes("cancel") ||
-            text.includes("clear") ||
-            text.includes("remove") ||
-            text.includes("delete") ||
-            text.includes("xoa") ||
-            text.includes("upload") ||
-            text.includes("tai hinh") ||
-            text.includes("add") ||
-            text.includes("plus") ||
-            text.includes("settings") ||
-            text.includes("help") ||
-            text.includes("filter") ||
-            text.includes("menu") ||
-            text.includes("more") ||
-            text.includes("search") ||
-            text.includes("download") ||
-            text.includes("share");
-          const isModelSelector =
-            text.includes("nano banana") ||
-            text.includes("banana") ||
-            text.includes("crop_16_9") ||
-            text.includes("pro") ||
-            text.includes("1x");
-          const squareish = rect.width <= 72 && rect.height <= 72;
-          const plausibleIconSubmit = !text && squareish && bottomRight;
-          let score = 0;
-          if (isSubmitIntent) score += 800;
-          if (plausibleIconSubmit) score += 420;
-          if (inComposer) score += 500;
-          if (bottomRight) score += 280;
-          if (squareish) score += 180;
-          if (disabled) score -= 120;
-          if (isDangerousNonSubmit) score -= 1200;
-          if (isModelSelector) score -= 1200;
-          if (area) score -= Math.max(0, area.y + area.height * 0.35 - centerY) / 2;
-          score += rect.x / 12 + rect.y / 80;
-          return {
-            x: rect.x,
-            y: rect.y,
-            width: rect.width,
-            height: rect.height,
-            text,
-            score,
-            disabled,
-          };
-        })
-        .filter((item) => item.score > 500)
-        .sort((left, right) => right.score - left.score);
-      return buttons[0] || null;
-    },
-    { promptBox, rootBox },
-  );
-}
-
-async function findComposerSubmitTarget(page, promptBox = null) {
-  const state = promptBox ? await readComposerRootState(page, promptBox).catch(() => null) : null;
-  const buttonBox = await findComposerSubmitButtonBox(
-    page,
-    promptBox,
-    state?.rootBox || null,
-  ).catch(() => null);
-  if (buttonBox) {
-    return { ...buttonBox, source: "button" };
+async function submitPrompt(page, logs) {
+  const arrowButtons = page
+    .locator("button")
+    .filter({ has: page.locator('i:has-text("arrow_forward")') });
+  const count = await arrowButtons.count().catch(() => 0);
+  const candidates = [];
+  for (let index = 0; index < count; index += 1) {
+    const button = arrowButtons.nth(index);
+    if (!(await button.isVisible({ timeout: 300 }).catch(() => false))) continue;
+    if (!(await button.isEnabled().catch(() => false))) continue;
+    const box = await button.boundingBox().catch(() => null);
+    if (!box || box.y < 300) continue;
+    candidates.push({ button, box });
   }
-
-  if (state?.rootBox) {
-    return {
-      x: state.rootBox.x + state.rootBox.width - 28,
-      y: state.rootBox.y + state.rootBox.height - 24,
-      width: 1,
-      height: 1,
-      text: "composer-bottom-right-fallback",
-      disabled: false,
-      source: "root-fallback",
-    };
-  }
-
-  if (promptBox) {
-    return {
-      x: promptBox.x + promptBox.width + 16,
-      y: promptBox.y + promptBox.height + 32,
-      width: 1,
-      height: 1,
-      text: "prompt-box-fallback",
-      disabled: false,
-      source: "prompt-fallback",
-    };
-  }
-
-  return null;
-}
-
-async function waitForComposerReadyToSubmit(page, promptBox, logs, timeoutMs = 60000) {
-  const startedAt = Date.now();
-  let lastLogAt = 0;
-  while (Date.now() - startedAt < timeoutMs) {
-    const state = promptBox ? await readComposerRootState(page, promptBox).catch(() => null) : null;
-    const submitButton = await findComposerSubmitTarget(page, promptBox).catch(() => null);
-    const loading = Boolean(state?.loading);
-    const failed = Boolean(state?.failed);
-    const blockedByDisabledButton = submitButton?.source === "button" && submitButton.disabled;
-    if (submitButton && !blockedByDisabledButton && !loading && !failed) {
-      logs.push(
-        `[step5] PASS composer submit target is visible and upload loading is complete source=${submitButton.source} disabled=${submitButton.disabled}`,
-      );
-      logs.push(`[step5] Waiting ${PRE_SUBMIT_SETTLE_MS}ms before submit`);
-      await page.waitForTimeout(PRE_SUBMIT_SETTLE_MS);
-      const settledState = promptBox
-        ? await readComposerRootState(page, promptBox).catch(() => null)
-        : null;
-      if (!Boolean(settledState?.loading) && !Boolean(settledState?.failed)) return true;
-      logs.push(
-        `[step5] Composer changed during pre-submit settle: loading=${Boolean(
-          settledState?.loading,
-        )}, failed=${Boolean(settledState?.failed)}`,
-      );
-    }
-    if (Date.now() - lastLogAt > 5000) {
-      lastLogAt = Date.now();
-      logs.push(
-        `[step5] Waiting composer submit ready: hasButton=${Boolean(submitButton)}, disabled=${
-          submitButton?.disabled ?? "unknown"
-        }, loading=${loading}, failed=${failed}`,
-      );
-    }
-    await page.waitForTimeout(1000);
-  }
-  throw new Error("Timeout waiting for composer submit button to become active after upload");
-}
-
-async function composerStillHasPrompt(promptLocator, expectedPrompt) {
-  const current = normalizePromptForComposer(await readPromptText(promptLocator).catch(() => ""));
-  const expected = normalizePromptForComposer(expectedPrompt);
-  return Boolean(expected && (current === expected || current.includes(expected)));
-}
-
-async function waitForPromptSubmitAccepted(page, promptBox, promptLocator, expectedPrompt, logs) {
-  const startedAt = Date.now();
-  while (Date.now() - startedAt < 15000) {
-    const stillHasPrompt =
-      promptLocator && expectedPrompt
-        ? await composerStillHasPrompt(promptLocator, expectedPrompt).catch(() => false)
-        : false;
-    const state = promptBox ? await readComposerRootState(page, promptBox).catch(() => null) : null;
-    const button = await findComposerSubmitButtonBox(page, promptBox, state?.rootBox || null).catch(
-      () => null,
+  candidates.sort((left, right) => right.box.y - left.box.y || right.box.x - left.box.x);
+  if (candidates.length) {
+    const { button, box } = candidates[0];
+    logs.push(
+      `[step5] Clicking submit arrow_forward button x=${Math.round(box.x + box.width / 2)}, y=${Math.round(
+        box.y + box.height / 2,
+      )}`,
     );
-    if (!stillHasPrompt) {
-      logs.push("[step5] PASS Flow accepted submit: prompt composer changed");
-      return true;
-    }
-    if (state?.loading || button?.disabled) {
-      logs.push(
-        `[step5] PASS Flow accepted submit: composer busy loading=${Boolean(
-          state?.loading,
-        )}, submitDisabled=${Boolean(button?.disabled)}`,
-      );
-      return true;
-    }
-    await page.waitForTimeout(750);
-  }
-  return false;
-}
-
-async function submitPrompt(
-  page,
-  logs,
-  promptBox = null,
-  promptLocator = null,
-  expectedPrompt = "",
-) {
-  await waitForComposerReadyToSubmit(page, promptBox, logs);
-
-  const clickSubmit = async (label) => {
-    const buttonBox = await findComposerSubmitTarget(page, promptBox);
-    if (buttonBox) {
-      if (buttonBox.source === "button" && buttonBox.disabled) {
-        logs.push(`[step5] Skip disabled composer submit ${label}`);
-        return false;
-      }
-      const x = buttonBox.width > 1 ? buttonBox.x + buttonBox.width / 2 : buttonBox.x;
-      const y = buttonBox.height > 1 ? buttonBox.y + buttonBox.height / 2 : buttonBox.y;
-      logs.push(
-        `[step5] Clicking composer submit ${label} source=${buttonBox.source} x=${Math.round(x)}, y=${Math.round(y)}, disabled=${buttonBox.disabled}, text="${buttonBox.text}"`,
-      );
-      await page.mouse.click(x, y);
-      await page.waitForTimeout(2500);
-      return true;
-    }
-    return false;
-  };
-
-  if (await clickSubmit("primary")) {
-    if (await waitForPromptSubmitAccepted(page, promptBox, promptLocator, expectedPrompt, logs)) {
-      return;
-    }
-    if (promptLocator && expectedPrompt) {
-      logs.push("[step5] Prompt still visible after submit click; retrying composer submit once");
-      await clickSubmit("retry");
-      if (await waitForPromptSubmitAccepted(page, promptBox, promptLocator, expectedPrompt, logs)) {
-        return;
-      }
-      logs.push("[step5] Prompt still visible after retry; sending keyboard fallback");
-      await promptLocator.click({ force: true, timeout: 2000 }).catch(() => {});
-      await page.keyboard.press("Control+Enter").catch(() => {});
-      await page.waitForTimeout(500);
-      await page.keyboard.press("Enter").catch(() => {});
-      await page.waitForTimeout(1500);
-      if (await waitForPromptSubmitAccepted(page, promptBox, promptLocator, expectedPrompt, logs)) {
-        return;
-      }
-      throw new Error(
-        "FLOW_SUBMIT_FAILED: Flow composer did not accept the prompt after submit click, retry, and keyboard fallback",
-      );
-    }
+    await button.click({ force: true, timeout: 5000 });
+    await page.waitForTimeout(1500);
     return;
   }
 
@@ -1159,9 +780,6 @@ async function submitPrompt(
   await page.waitForTimeout(250);
   await page.keyboard.press("Enter").catch(() => {});
   logs.push("[step5] Submitted via keyboard fallback");
-  if (!(await waitForPromptSubmitAccepted(page, promptBox, promptLocator, expectedPrompt, logs))) {
-    throw new Error("FLOW_SUBMIT_FAILED: Flow composer did not accept keyboard submit fallback");
-  }
 }
 
 async function collectImageSources(page) {
@@ -1235,75 +853,6 @@ async function collectRenderableImageRecords(page, promptBox = null) {
     .catch(() => []);
 }
 
-async function collectGenerationProgressRegions(page) {
-  return page
-    .locator("body")
-    .evaluate(() => {
-      const regions = [];
-      const seen = new Set();
-      const nodes = Array.from(document.querySelectorAll("body *"));
-      for (const node of nodes) {
-        const text = String(node.textContent || "").trim();
-        const match = text.match(/\b([1-9]\d?)%\b/);
-        if (!match) continue;
-        let current = node;
-        let picked = null;
-        for (let depth = 0; current && depth < 8; depth += 1, current = current.parentElement) {
-          const rect = current.getBoundingClientRect();
-          const style = window.getComputedStyle(current);
-          const visible =
-            style.display !== "none" &&
-            style.visibility !== "hidden" &&
-            Number(style.opacity || "1") > 0 &&
-            rect.width >= 160 &&
-            rect.height >= 90 &&
-            rect.y >= 60;
-          if (!visible) continue;
-          picked = rect;
-          if (rect.width >= 240 && rect.height >= 140) break;
-        }
-        if (!picked) continue;
-        const key = [
-          Math.round(picked.x / 10) * 10,
-          Math.round(picked.y / 10) * 10,
-          Math.round(picked.width / 10) * 10,
-          Math.round(picked.height / 10) * 10,
-        ].join(":");
-        if (seen.has(key)) continue;
-        seen.add(key);
-        regions.push({
-          x: picked.x,
-          y: picked.y,
-          width: picked.width,
-          height: picked.height,
-          percent: Number(match[1]),
-        });
-      }
-      return regions
-        .filter((item) => item.width >= 160 && item.height >= 90)
-        .sort((left, right) => left.y - right.y || left.x - right.x);
-    })
-    .catch(() => []);
-}
-
-function imageRecordOverlapsRegion(record, region) {
-  if (!record || !region) return false;
-  const left = Math.max(record.x, region.x);
-  const top = Math.max(record.y, region.y);
-  const right = Math.min(record.x + record.width, region.x + region.width);
-  const bottom = Math.min(record.y + record.height, region.y + region.height);
-  const overlapArea = Math.max(0, right - left) * Math.max(0, bottom - top);
-  const recordArea = Math.max(1, record.width * record.height);
-  const centerX = record.x + record.width / 2;
-  const centerY = record.y + record.height / 2;
-  const centerInside =
-    centerX >= region.x - 40 &&
-    centerX <= region.x + region.width + 40 &&
-    centerY >= region.y - 40 &&
-    centerY <= region.y + region.height + 40;
-  return overlapArea / recordArea >= 0.35 || centerInside;
-}
-
 async function waitForNewImageSource(
   page,
   beforeSources,
@@ -1320,51 +869,15 @@ async function waitForNewImageSource(
 
   const startedAt = Date.now();
   let lastLogAt = 0;
-  let trackedProgressRegion = null;
-  let lastProgressAt = 0;
-  let lastProgressPercent = null;
   while (Date.now() - startedAt < timeoutMs) {
     const records = await collectRenderableImageRecords(page, promptBox);
-    const progressRegions = await collectGenerationProgressRegions(page);
-    if (progressRegions.length > 0) {
-      const currentRegion = progressRegions[0];
-      trackedProgressRegion = trackedProgressRegion || currentRegion;
-      lastProgressAt = Date.now();
-      lastProgressPercent = currentRegion.percent;
-      if (Date.now() - lastLogAt > 10000) {
-        lastLogAt = Date.now();
-        logs.push(
-          `[step6] Flow generation still in progress percent=${currentRegion.percent}, region=${Math.round(
-            currentRegion.x,
-          )},${Math.round(currentRegion.y)},${Math.round(currentRegion.width)}x${Math.round(
-            currentRegion.height,
-          )}`,
-        );
-      }
-      await page.waitForTimeout(2500);
-      continue;
-    }
-
-    if (
-      trackedProgressRegion &&
-      lastProgressAt > 0 &&
-      Date.now() - lastProgressAt < GENERATION_PROGRESS_SETTLE_MS
-    ) {
-      await page.waitForTimeout(1500);
-      continue;
-    }
-
     const fresh = records
       .filter((record) => {
         const name = mediaNameFromSource(record.src);
-        const inTrackedGenerationRegion = trackedProgressRegion
-          ? imageRecordOverlapsRegion(record, trackedProgressRegion)
-          : Date.now() - startedAt >= FALLBACK_FRESH_IMAGE_DELAY_MS;
         return (
           !beforeSet.has(record.src) &&
           !excludedSet.has(name) &&
           !record.inComposer &&
-          inTrackedGenerationRegion &&
           record.complete &&
           record.naturalWidth >= 512 &&
           record.naturalHeight >= 256
@@ -1375,18 +888,14 @@ async function waitForNewImageSource(
     if (fresh.length > 0) {
       const picked = fresh[0];
       logs.push(
-        `[step6] PASS detected generated image source: ${picked.src} natural=${picked.naturalWidth}x${picked.naturalHeight} box=${Math.round(picked.width)}x${Math.round(picked.height)} trackedProgress=${Boolean(trackedProgressRegion)} lastProgress=${lastProgressPercent ?? "none"}`,
+        `[step6] PASS detected generated image source: ${picked.src} natural=${picked.naturalWidth}x${picked.naturalHeight} box=${Math.round(picked.width)}x${Math.round(picked.height)}`,
       );
       return picked.src;
     }
 
     if (Date.now() - lastLogAt > 10000) {
       lastLogAt = Date.now();
-      logs.push(
-        `[step6] Waiting generated renderable image; visible candidates=${records.length}, trackedProgress=${Boolean(
-          trackedProgressRegion,
-        )}, fallbackReady=${Date.now() - startedAt >= FALLBACK_FRESH_IMAGE_DELAY_MS}`,
-      );
+      logs.push(`[step6] Waiting generated renderable image; visible candidates=${records.length}`);
     }
     await page.waitForTimeout(2500);
   }
@@ -1465,20 +974,13 @@ async function saveImageFromSource(context, page, sourceUrl, outputDir, resoluti
   throw new Error("Generated image detected but could not be saved");
 }
 
-async function runPostGenerationQc(imagePath, referenceImageHashes = new Set()) {
+async function runPostGenerationQc(imagePath) {
   if (!imagePath || !existsSync(imagePath)) {
     return { pass: false, reason: "generated image file does not exist" };
   }
   const size = readFileSync(imagePath).length;
   if (size < MIN_GENERATED_IMAGE_BYTES) {
     return { pass: false, reason: `generated image too small: ${size} bytes` };
-  }
-  const generatedHash = computeFileSha256(imagePath);
-  if (referenceImageHashes.has(generatedHash)) {
-    return {
-      pass: false,
-      reason: "generated image matches an input reference image byte-for-byte",
-    };
   }
   return { pass: true, reason: `generated image saved, size=${size} bytes` };
 }
@@ -1532,10 +1034,6 @@ async function runPostGenerationQc(imagePath, referenceImageHashes = new Set()) 
     );
     process.exit(1);
   }
-  const referenceImageHashes = computeReadableFileHashes(imagePaths, logs);
-  if (referenceImageHashes.size > 0) {
-    logs.push(`[step0] Reference image hashes registered for QC: ${referenceImageHashes.size}`);
-  }
 
   if (parsed.dry_run) {
     logs.push("[dry-run] Exiting early.");
@@ -1554,158 +1052,113 @@ async function runPostGenerationQc(imagePath, referenceImageHashes = new Set()) 
     return;
   }
 
+  let context = null;
   try {
-    await withBrowserProfileLock(
-      {
-        browserPath: parsed.browser_path,
-        userDataDir: parsed.user_data_dir,
-        profileName: parsed.profile_name,
-        timeoutMs: Number(parsed.timeout_ms || 1200000),
+    const opened = await openFlowPage(parsed, logs);
+    context = opened.context;
+    const page = opened.page;
+
+    const screenshotBefore = path.join(outputDir, `flow-before-${nowStamp()}.png`);
+    await page.screenshot({ path: screenshotBefore, fullPage: true });
+    artifacts.push({ type: "screenshot_before", path: relativePath(screenshotBefore) });
+
+    let promptBox = null;
+    if (imagePaths.length > 0) {
+      promptBox = await uploadImages(page, imagePaths, logs);
+    }
+    const uploadedMediaNames = promptBox ? await collectComposerMediaNames(page, promptBox) : [];
+    if (uploadedMediaNames.length) {
+      logs.push(`[step3] Composer uploaded media names excluded: ${uploadedMediaNames.join(", ")}`);
+    }
+
+    await typePrompt(page, imagePrompt, logs, promptBox);
+    const beforeGenerationSources = await collectImageSources(page);
+    logs.push(
+      `[step5] Baseline after upload/prompt before submit, visible image sources=${beforeGenerationSources.length}`,
+    );
+    await submitPrompt(page, logs);
+    await page.waitForTimeout(5000);
+
+    const generatedSource = await waitForNewImageSource(
+      page,
+      beforeGenerationSources,
+      Number(parsed.timeout_ms || 1200000),
+      logs,
+      uploadedMediaNames,
+      promptBox,
+    );
+    const downloadedImagePath = await saveImageFromSource(
+      context,
+      page,
+      generatedSource,
+      outputDir,
+      parsed.download_resolution,
+      logs,
+    );
+    const qcResult = await runPostGenerationQc(downloadedImagePath);
+    if (!qcResult.pass) throw new Error(`QC failed: ${qcResult.reason}`);
+    logs.push(`[qc] PASS ${qcResult.reason}`);
+
+    const screenshotAfter = path.join(outputDir, `flow-after-${nowStamp()}.png`);
+    await page.screenshot({ path: screenshotAfter, fullPage: true });
+    artifacts.push({ type: "screenshot_after", path: relativePath(screenshotAfter) });
+
+    const relativeDownloadedImagePath = relativePath(downloadedImagePath);
+    artifacts.push({ type: "generated_image", path: relativeDownloadedImagePath });
+
+    let gallerySync = null;
+    try {
+      gallerySync = await publishGeneratedImageToUpTekGallery(downloadedImagePath, {
+        imagePaths,
+        imagePrompt,
+        workspaceRoot: process.cwd(),
+        productModel: typeof parsed.product_model === "string" ? parsed.product_model.trim() : "",
+      });
+      logs.push(
+        `[step7] Synced generated image to UpTek gallery ${gallerySync.companyId}/${gallerySync.departmentId} with productModel=${gallerySync.productModel}: ${gallerySync.copiedPath}`,
+      );
+    } catch (error) {
+      logs.push(
+        `[step7] Warning: generated image sync to UpTek gallery failed: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+    }
+
+    const data = {
+      target_gemini_url: targetGeminiUrl,
+      image_prompt: imagePrompt,
+      downloaded_image_path: relativeDownloadedImagePath,
+      used_image_paths: imagePaths,
+      reference_image_sha256: imagePaths[0] ? computeFileSha256(imagePaths[0]) : null,
+      image_qc_status: "PASS",
+      image_qc_reason: qcResult.reason,
+      company_gallery_synced: Boolean(gallerySync),
+      company_gallery_path: gallerySync?.copiedPath || null,
+      company_gallery_company_id: gallerySync?.companyId || "UpTek",
+      company_gallery_department_id: gallerySync?.departmentId || "Phong_Marketing",
+      company_gallery_product_model: gallerySync?.productModel || null,
+      company_gallery_url: gallerySync?.galleryUrl || null,
+      company_gallery_image_id: gallerySync?.imageId || null,
+      company_gallery_media_file_id: gallerySync?.mediaFileId || null,
+    };
+    const chatReply = buildChatImageReplyPayload({
+      imagePath: downloadedImagePath,
+      data,
+      artifacts,
+    });
+
+    printResult(
+      buildResult({
+        success: true,
+        message: chatReply?.assistantText || "Đây là ảnh vừa tạo cho bạn:",
+        data: { ...data, ...(chatReply?.data || {}) },
+        artifacts: chatReply?.artifacts || artifacts,
         logs,
-      },
-      async () => {
-        let context = null;
-        let generationCompleted = false;
-        try {
-          const opened = await openFlowPage(parsed, logs);
-          context = opened.context;
-          const page = opened.page;
-
-          const screenshotBefore = path.join(outputDir, `flow-before-${nowStamp()}.png`);
-          await page.screenshot({ path: screenshotBefore, fullPage: true });
-          artifacts.push({ type: "screenshot_before", path: relativePath(screenshotBefore) });
-
-          let promptBox = null;
-          if (imagePaths.length > 0) {
-            promptBox = await uploadImages(page, imagePaths, logs);
-          }
-          const uploadedMediaNames = promptBox
-            ? await collectComposerMediaNames(page, promptBox)
-            : [];
-          if (uploadedMediaNames.length) {
-            logs.push(
-              `[step3] Composer uploaded media names excluded: ${uploadedMediaNames.join(", ")}`,
-            );
-          }
-
-          const promptState = await typePrompt(page, imagePrompt, logs, promptBox);
-          const beforeGenerationSources = await collectImageSources(page);
-          logs.push(
-            `[step5] Baseline after upload/prompt before submit, visible image sources=${beforeGenerationSources.length}`,
-          );
-          await submitPrompt(
-            page,
-            logs,
-            promptState.promptBox || promptBox,
-            promptState.promptLocator,
-            promptState.normalizedPrompt,
-          );
-          await page.waitForTimeout(5000);
-
-          const generatedSource = await waitForNewImageSource(
-            page,
-            beforeGenerationSources,
-            Number(parsed.timeout_ms || 1200000),
-            logs,
-            uploadedMediaNames,
-            promptBox,
-          );
-          const downloadedImagePath = await saveImageFromSource(
-            context,
-            page,
-            generatedSource,
-            outputDir,
-            parsed.download_resolution,
-            logs,
-          );
-          const qcResult = await runPostGenerationQc(downloadedImagePath, referenceImageHashes);
-          if (!qcResult.pass) throw new Error(`QC failed: ${qcResult.reason}`);
-          logs.push(`[qc] PASS ${qcResult.reason}`);
-          generationCompleted = true;
-
-          const screenshotAfter = path.join(outputDir, `flow-after-${nowStamp()}.png`);
-          await page.screenshot({ path: screenshotAfter, fullPage: true });
-          artifacts.push({ type: "screenshot_after", path: relativePath(screenshotAfter) });
-
-          const relativeDownloadedImagePath = relativePath(downloadedImagePath);
-          artifacts.push({ type: "generated_image", path: relativeDownloadedImagePath });
-
-          let gallerySync = null;
-          try {
-            gallerySync = await publishGeneratedImageToUpTekGallery(downloadedImagePath, {
-              imagePaths,
-              imagePrompt,
-              workspaceRoot: process.cwd(),
-              productModel:
-                typeof parsed.product_model === "string" ? parsed.product_model.trim() : "",
-            });
-            logs.push(
-              `[step7] Synced generated image to UpTek gallery ${gallerySync.companyId}/${gallerySync.departmentId} with productModel=${gallerySync.productModel}: ${gallerySync.copiedPath}`,
-            );
-          } catch (error) {
-            logs.push(
-              `[step7] Warning: generated image sync to UpTek gallery failed: ${
-                error instanceof Error ? error.message : String(error)
-              }`,
-            );
-          }
-
-          const data = {
-            target_gemini_url: targetGeminiUrl,
-            image_prompt: imagePrompt,
-            downloaded_image_path: relativeDownloadedImagePath,
-            used_image_paths: imagePaths,
-            reference_image_sha256: imagePaths[0] ? computeFileSha256(imagePaths[0]) : null,
-            image_qc_status: "PASS",
-            image_qc_reason: qcResult.reason,
-            company_gallery_synced: Boolean(gallerySync),
-            company_gallery_path: gallerySync?.copiedPath || null,
-            company_gallery_company_id: gallerySync?.companyId || "UpTek",
-            company_gallery_department_id: gallerySync?.departmentId || "Phong_Marketing",
-            company_gallery_product_model: gallerySync?.productModel || null,
-            company_gallery_url: gallerySync?.galleryUrl || null,
-            company_gallery_image_id: gallerySync?.imageId || null,
-            company_gallery_media_file_id: gallerySync?.mediaFileId || null,
-          };
-          const chatReply = buildChatImageReplyPayload({
-            imagePath: downloadedImagePath,
-            data,
-            artifacts,
-          });
-
-          printResult(
-            buildResult({
-              success: true,
-              message: chatReply?.assistantText || "Đây là ảnh vừa tạo cho bạn:",
-              data: { ...data, ...(chatReply?.data || {}) },
-              artifacts: chatReply?.artifacts || artifacts,
-              logs,
-            }),
-          );
-        } finally {
-          if (context) {
-            if (parsed.auto_close_browser || generationCompleted) {
-              await context.close().catch(() => {});
-            } else {
-              const browser = context.browser?.();
-              if (browser?.disconnect) {
-                browser.disconnect();
-                logs.push(
-                  "[cleanup] Auto close browser is disabled; disconnected Playwright and kept browser open",
-                );
-              } else {
-                logs.push("[cleanup] Auto close browser is disabled; leaving browser context open");
-              }
-            }
-          }
-        }
-      },
+      }),
     );
   } catch (error) {
     logs.push(`[fail] ${error.stack || error.message}`);
-    const errorCode = String(error.message || "").startsWith("FLOW_SUBMIT_FAILED")
-      ? "FLOW_SUBMIT_FAILED"
-      : "FLOW_FAILED";
     printResult(
       buildResult({
         success: false,
@@ -1713,9 +1166,11 @@ async function runPostGenerationQc(imagePath, referenceImageHashes = new Set()) 
         data: { target_gemini_url: targetGeminiUrl, image_prompt: imagePrompt },
         artifacts,
         logs,
-        error: { code: errorCode, details: error.message },
+        error: { code: "FLOW_FAILED", details: error.message },
       }),
     );
     process.exit(1);
+  } finally {
+    if (context) await context.close().catch(() => {});
   }
 })();

@@ -48,11 +48,10 @@ async function resolveAutomationRootConversation(params) {
     employeeId: params.employeeId,
     brief: params.brief || "",
     sessionKey: params.sessionKey || null,
-  };
-  if (params.managerInstanceId) {
-    body.managerInstanceId = params.managerInstanceId;
-  }
-  return callInternal("POST", "/internal/workflows/resolve-root", body);
+
+    rootConversationId: params.rootConversationId || null,
+  });
+
 }
 
 async function createSubAgentConversation(params) {

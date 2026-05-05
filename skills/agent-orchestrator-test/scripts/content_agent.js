@@ -11,6 +11,7 @@
 const path = require("path");
 const { spawnSync } = require("child_process");
 const memory = require("./memory");
+const mediaAgent = require("./media_agent");
 
 const REPO_ROOT = path.resolve(__dirname, "..", "..", "..");
 
@@ -100,6 +101,16 @@ function fetchTrendingHashtags(keyword) {
     // Skill not available or failed — degrade gracefully
   }
   return [];
+}
+
+function normalizeContentReportedPath(value) {
+  const trimmed = String(value || "")
+    .trim()
+    .replace(/^[`'"]+|[`'"]+$/g, "");
+  if (!trimmed) return "";
+  return trimmed
+    .replace(/([A-Za-z]:\\Users\\Administrator)\.openclaw(?=\\|$)/gi, "$1\\.openclaw")
+    .replace(/([A-Za-z]:\/Users\/Administrator)\.openclaw(?=\/|$)/gi, "$1/.openclaw");
 }
 
 /**
@@ -251,8 +262,10 @@ function parseContentResult(reply) {
   const approvedContent = extractBlock(text, "APPROVED_CONTENT_BEGIN", "APPROVED_CONTENT_END");
   const productName = extractField(text, "PRODUCT_NAME");
   const productUrl = extractField(text, "PRODUCT_URL");
-  const imageDir = extractField(text, "IMAGE_DOWNLOAD_DIR");
-  const primaryProductImage = extractField(text, "PRIMARY_PRODUCT_IMAGE");
+  const imageDir = normalizeContentReportedPath(extractField(text, "IMAGE_DOWNLOAD_DIR"));
+  const primaryProductImage = mediaAgent.normalizeAgentReportedPath(
+    extractField(text, "PRIMARY_PRODUCT_IMAGE"),
+  );
 
   if (!approvedContent) {
     throw new Error("nv_content reply bi thieu APPROVED_CONTENT block.");
