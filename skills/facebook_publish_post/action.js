@@ -1,12 +1,25 @@
 import { access, readFile } from "node:fs/promises";
 import path from "node:path";
+import { loadFacebookEnv } from "../facebook_shared/load-env.js";
+
+loadFacebookEnv();
 
 const DEFAULTS = {
-  page_id: "643048852218433",
-  access_token: "EAANUeplbZCAwBRDtmbZCZAXJH6xt1Wavxe0OiZAbIBV2nFwFZApZC6GsP0nKXO1BrMBoBaDUZBMpOjCOZAyUL9zC2iQh9spFumXC2KcT1THFvZCBjLeONUfyw4R7a0ZCn3bZAqNRglxjrh3GOVtZCIObHg3ArMqfOZC7RIJo6rvSn2FszW45e4KZCXfSAwddj5WRXmpnotnmoMzDwf1N6Myc6bb6py",
   media_paths: [],
   dry_run: false,
+  graph_version: process.env.FACEBOOK_GRAPH_API_VERSION || "v20.0",
 };
+
+const TARGET_PAGES = [
+  {
+    page_id: "1021996431004626",
+    access_token: "EAAUnu2nAp08BRXf1OSuTB7Bxxe7oYA4Js2behf3JMBbrA2TaquIjfLogbxl6zYe8C2lDn91j8vZCZBJPoZAn1jZCEY98ZAVH8IyjibcLNv0BtD3RegfqPTl14ukMzZApZCLchxI4TeisFm8nwi8TOqcJHsLSRn3AADHMZCgc1uhrDR0ZBbWunSN1C910ZAi2XwAxOl0DMdrZAdxsRu9XZC4OJN1O"
+  },
+  {
+    page_id: "1129362243584971",
+    access_token: "EAAUnu2nAp08BRUpLU9JM1S7ZAYUQoG8vtjjuOYU4uqP8r4Pu5H9v5KrlbaSIE1jgFBptyExWPfyQWzc54PDHDaJXZCqEz7CcTzdJFz0LCdJXYvslbnJZAPNndbktC1SGIqyZCJtt4Ivn6HXoHzmZC39OyiEHs6HwgElgq9qopfi2aWMNUUuV56MnSSNHqSHCX8CA3xO8mngdZAQw11qe54"
+  }
+];
 
 function buildResult({ success, message, data = {}, artifacts = [], logs = [], error = null }) {
   return { success, message, data, artifacts, logs, error };
@@ -18,7 +31,11 @@ function printResult(result) {
 
 function parseList(value) {
   if (Array.isArray(value)) return value.map((item) => String(item).trim()).filter(Boolean);
-  if (typeof value === "string") return value.split(/\r?\n|;|,/g).map((item) => item.trim()).filter(Boolean);
+  if (typeof value === "string")
+    return value
+      .split(/\r?\n|;|,/g)
+      .map((item) => item.trim())
+      .filter(Boolean);
   return [];
 }
 
@@ -47,13 +64,12 @@ function parseArgs(argv) {
 
 function validateInput(params) {
   const missing = [];
-  const hasCaption = (typeof params.caption_long === "string" && params.caption_long.trim() !== "") || 
-                     (typeof params.caption_short === "string" && params.caption_short.trim() !== "");
-  
+  const hasCaption =
+    (typeof params.caption_long === "string" && params.caption_long.trim() !== "") ||
+    (typeof params.caption_short === "string" && params.caption_short.trim() !== "");
+
   if (!hasCaption) missing.push("caption_long_or_caption_short");
-  if (!params.page_id || String(params.page_id).trim() === "") missing.push("page_id");
-  if (!params.access_token || String(params.access_token).trim() === "") missing.push("access_token");
-  
+
   return missing;
 }
 
@@ -61,110 +77,245 @@ async function ensureReadableFiles(pathsToCheck) {
   for (const filePath of pathsToCheck) await access(filePath);
 }
 
+function isVideoFile(filePath) {
+  const ext = path.extname(filePath || "").toLowerCase();
+  return [".mp4", ".mov", ".avi", ".webm", ".mkv"].includes(ext);
+}
+
+async function uploadUnpublishedMedia({ pageId, accessToken, filePath, logs }) {
+  const graphVersion = process.env.FACEBOOK_GRAPH_API_VERSION || DEFAULTS.graph_version;
+  const video = isVideoFile(filePath);
+  const endpoint = video ? "/videos" : "/photos";
+  const apiUrl = `https://graph.facebook.com/${graphVersion}/${pageId}${endpoint}`;
+
+  const formData = new FormData();
+  formData.append("access_token", accessToken);
+  formData.append("published", "false");
+
+  const fileBuffer = await readFile(filePath);
+  const mimeType = video ? "video/mp4" : "image/jpeg";
+  const blob = new Blob([fileBuffer], { type: mimeType });
+  formData.append("source", blob, path.basename(filePath));
+
+  logs.push(`[upload] Uploading unpublished ${video ? "video" : "photo"}: ${filePath}`);
+  const response = await fetch(apiUrl, {
+    method: "POST",
+    body: formData,
+  });
+  const result = await response.json();
+  if (!response.ok || result.error) {
+    throw new Error(result.error ? result.error.message : JSON.stringify(result));
+  }
+
+  const mediaId = result.id || result.post_id || result.video_id;
+  if (!mediaId) {
+    throw new Error(`Upload ${path.basename(filePath)} khong tra ve media ID hop le`);
+  }
+
+  return {
+    mediaId,
+    mediaType: video ? "video" : "photo",
+    raw: result,
+  };
+}
+
 (async function main() {
   const parsed = parseArgs(process.argv);
   const logs = [...parsed.logs, "[start] facebook_publish_post (Graph API) invoked"];
-  
+
   const missing = validateInput(parsed);
   if (missing.length > 0) {
-    printResult(buildResult({ success: false, message: "Missing required inputs", logs, error: { code: "VALIDATION_ERROR", details: missing.join(", ") }}));
+    printResult(
+      buildResult({
+        success: false,
+        message: "Missing required inputs",
+        logs,
+        error: { code: "VALIDATION_ERROR", details: missing.join(", ") },
+      }),
+    );
     process.exit(1);
   }
 
-  const caption = (typeof parsed.caption_long === "string" && parsed.caption_long.trim() !== "")
-    ? parsed.caption_long.trim()
-    : parsed.caption_short.trim();
+  const caption =
+    typeof parsed.caption_long === "string" && parsed.caption_long.trim() !== ""
+      ? parsed.caption_long.trim()
+      : parsed.caption_short.trim();
   const mediaPaths = parseList(parsed.media_paths).map((item) => path.normalize(item));
-  const pageId = String(parsed.page_id).trim();
-  const accessToken = String(parsed.access_token).trim();
+  const graphVersion = String(parsed.graph_version || DEFAULTS.graph_version).trim();
 
-  logs.push(`[input] page_id=${pageId}`);
+  logs.push(`[input] pages_count=${TARGET_PAGES.length}`);
   logs.push(`[input] media_count=${mediaPaths.length}`);
 
   if (parsed.dry_run) {
     logs.push("[dry-run] Skip actual API call.");
-    printResult(buildResult({ success: true, message: "Dry run completed.", data: { caption, media_paths: mediaPaths }, logs }));
+    printResult(
+      buildResult({
+        success: true,
+        message: "Dry run completed.",
+        data: {
+          caption,
+          media_paths: mediaPaths,
+          pages: TARGET_PAGES.map((p) => p.page_id),
+        },
+        logs,
+      }),
+    );
     return;
   }
 
-  try {
-    if (mediaPaths.length > 0) {
+  if (mediaPaths.length > 0) {
+    try {
       await ensureReadableFiles(mediaPaths);
       logs.push("[step1] Media files verified");
+    } catch (e) {
+      printResult(
+        buildResult({
+          success: false,
+          message: "Media file not found or inaccessible",
+          logs,
+          error: { code: "FILE_ERROR", details: e.message },
+        }),
+      );
+      process.exit(1);
     }
-
-    const file = mediaPaths.length > 0 ? mediaPaths[0] : null; 
-    const ext = file ? path.extname(file).toLowerCase() : "";
-    const isVideo = [".mp4", ".mov", ".avi", ".webm", ".mkv"].includes(ext);
-
-    let endpoint = "/feed"; 
-    if (file) {
-      endpoint = isVideo ? "/videos" : "/photos"; 
-    }
-
-    const apiUrl = `https://graph.facebook.com/v20.0/${pageId}${endpoint}`;
-    logs.push(`[step2] Target API Endpoint: ${apiUrl}`);
-
-    const formData = new FormData();
-    formData.append("access_token", accessToken);
-
-    if (endpoint === "/feed") {
-      formData.append("message", caption);
-    } else if (endpoint === "/photos") {
-      formData.append("message", caption);
-    } else if (endpoint === "/videos") {
-      formData.append("description", caption); 
-    }
-
-    if (file) {
-      logs.push(`[step3] Reading file into memory: ${file}`);
-      const fileBuffer = await readFile(file);
-      const mimeType = isVideo ? "video/mp4" : "image/jpeg"; 
-      const blob = new Blob([fileBuffer], { type: mimeType });
-      formData.append("source", blob, path.basename(file));
-    }
-
-    logs.push("[step4] Sending HTTP POST request to Facebook Graph API...");
-    
-    const response = await fetch(apiUrl, {
-      method: "POST",
-      body: formData,
-    });
-
-    const result = await response.json();
-
-    if (!response.ok || result.error) {
-      throw new Error(result.error ? result.error.message : JSON.stringify(result));
-    }
-
-    // --- SỬA ĐỔI QUAN TRỌNG Ở ĐÂY: Xử lý logic lấy ID ---
-    // API có thể trả về 'id', 'post_id', hoặc 'video_id' tùy thuộc vào Endpoint
-    const finalPostId = result.id || result.post_id || result.video_id;
-
-    logs.push(`[step5] Post published successfully! FB Response ID: ${finalPostId}`);
-
-    printResult(buildResult({
-      success: true,
-      message: "Facebook post published successfully via Graph API",
-      data: {
-        page_id: pageId,
-        // Đảm bảo trường post_id luôn chứa đúng ID để truyền cho kỹ năng Get Metrics
-        post_id: finalPostId, 
-        media_uploaded: !!file,
-        media_type: isVideo ? "video" : (file ? "photo" : "text"),
-        raw_fb_response: result // Log lại toàn bộ cục response của FB để dễ debug
-      },
-      logs
-    }));
-
-  } catch (error) {
-    logs.push(`[fail] Flow failed: ${error.message}`);
-    printResult(buildResult({
-      success: false,
-      message: "Failed to publish post via Graph API",
-      logs,
-      error: { code: "API_ERROR", details: error.message }
-    }));
-    process.exit(1);
   }
+
+  const results = [];
+  let hasError = false;
+
+  for (const page of TARGET_PAGES) {
+    const pageId = String(page.page_id).trim();
+    const accessToken = String(page.access_token).trim();
+    logs.push(`\n--- Processing page: ${pageId} ---`);
+
+    try {
+      if (mediaPaths.length > 1) {
+        logs.push(
+          `[step2-${pageId}] Multiple media detected, using attached_media flow for page ${pageId}`,
+        );
+
+        const uploads = [];
+        for (const filePath of mediaPaths) {
+          uploads.push(
+            await uploadUnpublishedMedia({
+              pageId,
+              accessToken,
+              filePath,
+              logs,
+            }),
+          );
+        }
+
+        const apiUrl = `https://graph.facebook.com/${graphVersion}/${pageId}/feed`;
+        const formData = new FormData();
+        formData.append("access_token", accessToken);
+        formData.append("message", caption);
+        uploads.forEach((upload, index) => {
+          formData.append(`attached_media[${index}]`, JSON.stringify({ media_fbid: upload.mediaId }));
+        });
+
+        logs.push(`[step3-${pageId}] Creating combined feed post...`);
+        const response = await fetch(apiUrl, {
+          method: "POST",
+          body: formData,
+        });
+        const result = await response.json();
+        if (!response.ok || result.error) {
+          throw new Error(result.error ? result.error.message : JSON.stringify(result));
+        }
+
+        const finalPostId = result.id || result.post_id || result.video_id;
+        logs.push(`[step4-${pageId}] Success! FB Response ID: ${finalPostId}`);
+
+        results.push({
+          page_id: pageId,
+          success: true,
+          post_id: finalPostId,
+          attached_media_count: uploads.length,
+          raw_fb_response: result,
+        });
+        continue;
+      }
+
+      const file = mediaPaths.length > 0 ? mediaPaths[0] : null;
+      const ext = file ? path.extname(file).toLowerCase() : "";
+      const isVideo = [".mp4", ".mov", ".avi", ".webm", ".mkv"].includes(ext);
+
+      let endpoint = "/feed";
+      if (file) {
+        endpoint = isVideo ? "/videos" : "/photos";
+      }
+
+      const apiUrl = `https://graph.facebook.com/${graphVersion}/${pageId}${endpoint}`;
+      logs.push(`[step2-${pageId}] Target API Endpoint: ${apiUrl}`);
+
+      const formData = new FormData();
+      formData.append("access_token", accessToken);
+
+      if (endpoint === "/feed") {
+        formData.append("message", caption);
+      } else if (endpoint === "/photos") {
+        formData.append("message", caption);
+      } else if (endpoint === "/videos") {
+        formData.append("description", caption);
+      }
+
+      if (file) {
+        logs.push(`[step3-${pageId}] Attached file: ${file}`);
+        const fileBuffer = await readFile(file);
+        const mimeType = isVideo ? "video/mp4" : "image/jpeg";
+        const blob = new Blob([fileBuffer], { type: mimeType });
+        formData.append("source", blob, path.basename(file));
+      }
+
+      logs.push(`[step4-${pageId}] Sending HTTP POST request...`);
+
+      const response = await fetch(apiUrl, {
+        method: "POST",
+        body: formData,
+      });
+
+      const result = await response.json();
+
+      if (!response.ok || result.error) {
+        throw new Error(result.error ? result.error.message : JSON.stringify(result));
+      }
+
+      const finalPostId = result.id || result.post_id || result.video_id;
+      logs.push(`[step5-${pageId}] Success! FB Response ID: ${finalPostId}`);
+
+      results.push({
+        page_id: pageId,
+        success: true,
+        post_id: finalPostId,
+        raw_fb_response: result,
+      });
+    } catch (error) {
+      logs.push(`[fail-${pageId}] Flow failed: ${error.message}`);
+      if (/\(#200\)|permissions error/i.test(String(error.message || ""))) {
+        logs.push(
+          `[hint-${pageId}] Permissions error for page ${pageId}. Check that access token has pages_manage_posts/pages_read_engagement.`,
+        );
+      }
+      results.push({
+        page_id: pageId,
+        success: false,
+        error: error.message,
+      });
+      hasError = true;
+    }
+  }
+
+  printResult(
+    buildResult({
+      success: !hasError,
+      message: hasError
+        ? "Some or all posts failed to publish"
+        : "All Facebook posts published successfully",
+      data: {
+        results,
+      },
+      logs,
+    }),
+  );
 })();

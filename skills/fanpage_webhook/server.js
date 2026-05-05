@@ -50,6 +50,16 @@ app.use(
 
 const FACEBOOK_PAGE_ACCESS_TOKEN =
   process.env.FACEBOOK_PAGE_ACCESS_TOKEN || process.env.PAGE_ACCESS_TOKEN || '';
+
+const HARDCODED_PAGES = {
+  "1021996431004626": "EAANUeplbZCAwBRV5cJoU08nIySrQfhoyln4Hf7JOhcUXxRHxMDjN6XaZAckdmV4EiiC7B4HVqZAagIMSlR6L3ZBKrZABpfM4F6AuHVZCyzDp880CEACQAtUi0bo5ZAF7hPyxHdfgzQx5kvkqTBav47ocjmhH00hSzZAWsp1VwlKhfCeWGAGx0mbJiybkZBjUQ78i12cZAuZA8AWNmd2iP3PKlp8GwZDZD",
+  "1129362243584971": "EAANUeplbZCAwBRcIpRwhl4ZBm0snseVLldRUE4C4MCSZCv6fZCQkR2A90rx2ZCiZAsQF4BjYguJcfpaq9hfzpocMSSS8RYCROPQCOho8vCMm0n8xOV7lV7Wm2EKjZArnhTqWOPHjFIZBHzw5om62jZAW70tYiNzV4h2t2v9FZBZB0Wc3zF3zNcZAQgzLIXZBy4d2F1CTfbtwJLDuE1lUkcRS0qub1ZBgZDZD",
+};
+
+function getPageAccessToken(pageId) {
+  return HARDCODED_PAGES[pageId] || FACEBOOK_PAGE_ACCESS_TOKEN;
+}
+
 const FACEBOOK_VERIFY_TOKEN = process.env.FACEBOOK_VERIFY_TOKEN || process.env.VERIFY_TOKEN || '';
 const FB_APP_SECRET = process.env.FB_APP_SECRET || '';
 const OPENCLAW_HOME =
@@ -119,7 +129,8 @@ function recordEvent(stage, details = {}) {
 
 function assertRequiredConfiguration() {
   const missing = [];
-  if (!FACEBOOK_PAGE_ACCESS_TOKEN.trim()) missing.push('FACEBOOK_PAGE_ACCESS_TOKEN');
+  const hasHardcodedPages = Object.keys(HARDCODED_PAGES).length > 0;
+  if (!FACEBOOK_PAGE_ACCESS_TOKEN.trim() && !hasHardcodedPages) missing.push('FACEBOOK_PAGE_ACCESS_TOKEN or hardcoded pages');
   if (!FACEBOOK_VERIFY_TOKEN.trim()) missing.push('FACEBOOK_VERIFY_TOKEN/VERIFY_TOKEN');
   if (!FB_APP_SECRET.trim()) missing.push('FB_APP_SECRET');
   if (missing.length > 0) {
@@ -486,15 +497,17 @@ async function callOpenClaw(message, senderPsid) {
   }
 }
 
-async function sendMetaMessage(senderPsid, text) {
+async function sendMetaMessage(senderPsid, text, pageId) {
   const body = {
     recipient: { id: senderPsid },
     message: { text: text || 'Xin lỗi, hiện tại mình chưa có câu trả lời phù hợp.' },
   };
-  const url = `https://graph.facebook.com/v20.0/me/messages?access_token=${encodeURIComponent(FACEBOOK_PAGE_ACCESS_TOKEN)}`;
+  const accessToken = getPageAccessToken(pageId);
+  const url = `https://graph.facebook.com/v20.0/me/messages?access_token=${encodeURIComponent(accessToken)}`;
   counters.sendApiCalls += 1;
   recordEvent('send-api.start', {
     senderPsid,
+    pageId,
     textPreview: redactText(text),
   });
   console.log(`[fanpage-webhook][send-api] start recipient=${senderPsid}`);
@@ -641,7 +654,7 @@ async function processJob(job) {
   try {
     const guard = await resolveProductGuard(job.message);
     if (guard.required && !guard.ok) {
-      await sendMetaMessage(job.senderPsid, guard.fallbackReply);
+      await sendMetaMessage(job.senderPsid, guard.fallbackReply, job.pageId);
       markMessageSent(job.senderPsid);
       return;
     }
@@ -652,7 +665,7 @@ async function processJob(job) {
         : job.message;
 
     const reply = await callOpenClaw(messageForAgent, job.senderPsid);
-    await sendMetaMessage(job.senderPsid, reply);
+    await sendMetaMessage(job.senderPsid, reply, job.pageId);
     markMessageSent(job.senderPsid);
     recordEvent('queue.process.success', {
       senderPsid: job.senderPsid,
@@ -697,7 +710,7 @@ app.get('/admin/config-check', (_req, res) => {
   const suspiciousFbAppSecret =
     fbAppSecret.includes('FACEBOOK_VERIFY_TOKEN=') || fbAppSecret.includes('FB_APP_SECRET=');
   res.json({
-    hasFacebookPageAccessToken: Boolean(FACEBOOK_PAGE_ACCESS_TOKEN),
+    hasFacebookPageAccessToken: Boolean(FACEBOOK_PAGE_ACCESS_TOKEN) || Object.keys(HARDCODED_PAGES).length > 0,
     hasFacebookVerifyToken: Boolean(FACEBOOK_VERIFY_TOKEN),
     hasFbAppSecret: Boolean(FB_APP_SECRET),
     hasOpenClawAgentId: Boolean(OPENCLAW_AGENT_ID),
@@ -836,6 +849,7 @@ app.post('/webhook', (req, res) => {
           senderPsid,
           message: incomingText,
           messageId,
+          pageId: recipientPsid,
         });
       } catch (error) {
         recordError('webhook.iteration', error);
@@ -844,7 +858,7 @@ app.post('/webhook', (req, res) => {
   }
 });
 
-const PORT = Number.parseInt(process.env.PORT || '3000', 10) || 3000;
+const PORT = Number.parseInt(process.env.PORT || '3002', 10) || 3002;
 
 assertRequiredConfiguration();
 setInterval(cleanProcessedMessageIds, Math.max(30_000, Math.floor(DEDUPE_TTL_MS / 3))).unref();

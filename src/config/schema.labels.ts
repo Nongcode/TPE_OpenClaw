@@ -253,6 +253,7 @@ export const FIELD_LABELS: Record<string, string> = {
   "gateway.controlUi.root": "Control UI Assets Root",
   "gateway.controlUi.allowedOrigins": "Control UI Allowed Origins",
   "gateway.controlUi.employeeDirectory": "Control UI Employee Directory",
+  "gateway.controlUi.employeeDirectory[].managerInstanceId": "Manager Instance ID",
   "gateway.controlUi.employeeDirectory[].canViewAllSessions": "Can View All Sessions",
   "gateway.controlUi.employeeDirectory[].visibleAgentIds": "Visible Agent IDs",
   "gateway.controlUi.demoLogin": "Control UI Demo Login",

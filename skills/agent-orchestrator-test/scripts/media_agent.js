@@ -13,7 +13,7 @@ const path = require("path");
 const memory = require("./memory");
 
 const REPO_ROOT = path.resolve(__dirname, "..", "..", "..");
-const DEFAULT_LOGO_DIR = "C:/Users/Administrator/.openclaw/assets/logos";
+const DEFAULT_LOGO_DIR = "C:/Users/PHAMDUCLONG/.openclaw/assets/logos";
 const DEFAULT_LOGO_PATH = `${DEFAULT_LOGO_DIR}/logo.png`;
 
 function extractBlock(source, startMarker, endMarker) {
@@ -37,6 +37,29 @@ function isPlaceholderGeneratedPath(value) {
   ].includes(normalized);
 }
 
+function isTransientGeneratedImagePath(value) {
+  const normalized = String(value || "").trim().replace(/\\/g, "/").toLowerCase();
+  if (!normalized) return false;
+  return /(?:^|\/)gemini-image-screenshot-[^/]+\.(png|jpg|jpeg|webp)$/.test(normalized);
+}
+
+function normalizeAgentReportedPath(value) {
+  const trimmed = String(value || "")
+    .trim()
+    .replace(/^[`'"]+|[`'"]+$/g, "");
+  if (!trimmed) return "";
+
+  return trimmed
+    .replace(/([A-Za-z]:\\Users\\Administrator)\.openclaw(?=\\|$)/gi, "$1\\.openclaw")
+    .replace(/([A-Za-z]:\/Users\/Administrator)\.openclaw(?=\/|$)/gi, "$1/.openclaw");
+}
+
+function normalizeAgentReportedPaths(values) {
+  return (values || [])
+    .map((item) => normalizeAgentReportedPath(item))
+    .filter(Boolean);
+}
+
 /**
  * Lazy-load sharp — trả null nếu chưa cài.
  */
@@ -52,7 +75,7 @@ function tryLoadSharp() {
  * Resolve danh sach logo references tu .openclaw/assets/logos.
  */
 function resolveLogoAssetPaths(openClawHome, limit = 8) {
-  const baseDir = path.join(openClawHome || "C:/Users/Administrator/.openclaw", "assets", "logos");
+  const baseDir = path.join(openClawHome || "C:/Users/PHAMDUCLONG/.openclaw", "assets", "logos");
   if (!fs.existsSync(baseDir)) {
     return fs.existsSync(DEFAULT_LOGO_PATH) ? [path.normalize(DEFAULT_LOGO_PATH)] : [];
   }
@@ -66,6 +89,11 @@ function resolveLogoAssetPaths(openClawHome, limit = 8) {
   } catch {
     return fs.existsSync(DEFAULT_LOGO_PATH) ? [path.normalize(DEFAULT_LOGO_PATH)] : [];
   }
+}
+
+function resolveMediaOutputDir(openClawHome) {
+  const baseDir = path.join(openClawHome || "C:/Users/Administrator/.openclaw", "workspace_media", "artifacts", "images");
+  return path.normalize(baseDir);
 }
 
 /**
@@ -94,6 +122,11 @@ function buildMediaSystemPrompt(agentId, openClawHome) {
     "- Khong publish",
     "- Khong gia lap duong dan file",
     "- Neu skill tao anh/video tra ve loi, phai noi ro loi that tu tool",
+    "- Khi goi gemini_generate_image tren Windows/PowerShell, uu tien tao file JSON tam va goi action.js bang tham so --input_file.",
+    "- Khong duoc thu nhieu cach goi lung tung neu da co cach goi --input_file hoat dong.",
+    "- Khong doc lai noi dung SKILL.md ra chat, khong ke lai command thu nghiem, khong dump log terminal dai dong vao cau tra loi workflow.",
+    "- Khong duoc tu sua file code/skill trong luc dang thuc thi media thong thuong. Neu phat hien loi he thong, dung lai va bao dung loi that thay vi tu hot-fix trong lane.",
+    "- Uu tien tra ket qua workflow gon: thanh cong thi chi bao ket qua; that bai thi chi bao loi cot loi va de xuat buoc tiep theo.",
     rulesSection,
   ].join("\n");
 }
@@ -108,9 +141,11 @@ function buildMediaPromptRequestPrompt(params) {
     logoPaths = resolveLogoAssetPaths(openClawHome),
   } = params;
   const systemPrompt = buildMediaSystemPrompt("nv_media", openClawHome);
+  const guidelineSection = memory.buildWorkflowGuidelinesPromptSection(state.global_guidelines || []);
 
   const lines = [
     systemPrompt,
+    guidelineSection,
     "",
     "BAN DANG XU LY WORKFLOW AGENT-ORCHESTRATOR-TEST.",
     `workflow_id: ${workflowId}`,
@@ -160,9 +195,11 @@ function buildMediaPromptReviseRequestPrompt(params) {
     logoPaths = resolveLogoAssetPaths(openClawHome),
   } = params;
   const systemPrompt = buildMediaSystemPrompt("nv_media", openClawHome);
+  const guidelineSection = memory.buildWorkflowGuidelinesPromptSection(state.global_guidelines || []);
 
   const lines = [
     systemPrompt,
+    guidelineSection,
     "",
     "BAN DANG XU LY WORKFLOW AGENT-ORCHESTRATOR-TEST.",
     `workflow_id: ${workflowId}`,
@@ -221,8 +258,12 @@ function buildMediaGeneratePrompt(params) {
   } = params;
   const agentId = "nv_media";
   const systemPrompt = buildMediaSystemPrompt(agentId, openClawHome);
+  const guidelineSection = memory.buildWorkflowGuidelinesPromptSection(state.global_guidelines || []);
+  const imageActionPath = path.join(REPO_ROOT, "skills", "gemini_generate_image", "action.js").replace(/\\/g, "/");
 
   const productImagePath = state.content?.primaryProductImage || "";
+  const productModel = state.content?.productModel || state.content?.product_model || "";
+  const mediaOutputDir = resolveMediaOutputDir(openClawHome);
   const promptContext = [
     promptPackage.imagePrompt ? `IMAGE_PROMPT_DUOC_GIAO:\n${promptPackage.imagePrompt}` : "",
     promptPackage.videoPrompt ? `VIDEO_PROMPT_DUOC_GIAO:\n${promptPackage.videoPrompt}` : "",
@@ -232,9 +273,11 @@ function buildMediaGeneratePrompt(params) {
     `Brief goc: ${state.original_brief}`,
     state.content?.productName ? `Ten san pham: ${state.content.productName}` : "",
     state.content?.productUrl ? `URL san pham: ${state.content.productUrl}` : "",
+    productModel ? `Model san pham bat buoc giu dung: ${productModel}` : "",
     state.content?.imageDir ? `Thu muc anh goc: ${state.content.imageDir}` : "",
     productImagePath ? `Anh san pham goc bat buoc gui cho skill: ${productImagePath}` : "",
     logoPaths.length > 0 ? `Logo cong ty bat buoc gui cho skill anh: ${logoPaths.join(" ; ")}` : "",
+    `Thu muc output media bat buoc: ${mediaOutputDir}`,
     "",
     "Noi dung da duyet:",
     state.content?.approvedContent || "",
@@ -245,9 +288,14 @@ function buildMediaGeneratePrompt(params) {
   const imageInstruction = [
     "NEU CAN TAO ANH:",
     "- Goi skill gemini_generate_image trong lane cua ban.",
+    `- Tren Windows/PowerShell, tao 1 file JSON tam chua image_prompt + image_paths + output_dir${productModel ? " + product_model" : ""} roi goi: node ${imageActionPath} --input_file <duong_dan_file_json>.`,
     "- Dung DUNG IMAGE_PROMPT_DUOC_GIAO, khong tu y doi nghia.",
     "- image_paths BAT BUOC gom: [anh san pham goc, ...tat ca logo cong ty].",
+    productModel ? `- product_model BAT BUOC la: ${productModel}.` : "- Neu da co model san pham trong du lieu workflow, phai truyen product_model vao JSON input cua skill.",
+    `- output_dir BAT BUOC la: ${mediaOutputDir}. Khong duoc de tool tu suy ra theo cwd.`,
     "- Muc tieu la tao ra anh quang cao cuoi cung tu reference that, khong phai background-only.",
+    "- Khong doc lai SKILL.md ra chat. Khong thu lenh sai truoc roi moi sua. Khong tua thich sua file skill trong luc dang lam media.",
+    "- Neu tool loi, chi tom tat loi that gon nhat; khong chen transcript command, process poll, hay log terminal raw vao reply.",
     "- Sau khi tao xong, ghi dung cac marker sau:",
     "IMAGE_PROMPT_BEGIN",
     "<prompt anh da dung>",
@@ -292,6 +340,7 @@ function buildMediaGeneratePrompt(params) {
 
   const lines = [
     systemPrompt,
+    guidelineSection,
     "",
     "BAN DANG XU LY WORKFLOW AGENT-ORCHESTRATOR-TEST.",
     `workflow_id: ${workflowId}`,
@@ -330,10 +379,12 @@ function buildMediaRevisePrompt(params) {
   } = params;
   const agentId = "nv_media";
   const systemPrompt = buildMediaSystemPrompt(agentId, openClawHome);
+  const guidelineSection = memory.buildWorkflowGuidelinesPromptSection(state.global_guidelines || []);
 
   const productImageInfo = state.content?.primaryProductImage
     ? `Anh san pham goc bat buoc gui cho skill: ${state.content.primaryProductImage}`
     : "";
+  const mediaOutputDir = resolveMediaOutputDir(openClawHome);
 
   const context = [
     `Brief goc: ${state.original_brief}`,
@@ -342,6 +393,7 @@ function buildMediaRevisePrompt(params) {
     state.content?.imageDir ? `Thu muc anh goc: ${state.content.imageDir}` : "",
     productImageInfo,
     logoPaths.length > 0 ? `Logo cong ty bat buoc gui cho skill anh: ${logoPaths.join(" ; ")}` : "",
+    `Thu muc output media bat buoc: ${mediaOutputDir}`,
     "",
     "Noi dung da duyet:",
     state.content?.approvedContent || "",
@@ -390,6 +442,7 @@ function buildMediaRevisePrompt(params) {
 
   const lines = [
     systemPrompt,
+    guidelineSection,
     "",
     "BAN DANG XU LY WORKFLOW AGENT-ORCHESTRATOR-TEST.",
     `workflow_id: ${workflowId}`,
@@ -403,6 +456,7 @@ function buildMediaRevisePrompt(params) {
     `User yeu cau sua lai ${isBoth ? "anh va video" : isVideo ? "video" : "anh"}.`,
     "Hay thuc thi lai media theo dung prompt package da duoc giao va sua theo nhan xet cua sep.",
     "Khong duoc bo qua reference product image. Khi tao anh, khong duoc bo qua logo paths.",
+    `Khi tao anh, output_dir BAT BUOC la: ${mediaOutputDir}.`,
     "",
     markerInstructions,
     "",
@@ -453,7 +507,7 @@ function parseImageResult(reply) {
     const forwardSlashMatches = source.match(/[A-Za-z]:\/[^\r\n"]+/g) || [];
     const repoMatches = source.match(/artifacts\/[^\r\n"]+/g) || [];
     const candidates = [...backslashMatches, ...forwardSlashMatches, ...repoMatches]
-      .map((item) => item.trim().replace(/[`"'.,]+$/g, ""))
+      .map((item) => normalizeAgentReportedPath(item.trim().replace(/[`"'.,]+$/g, "")))
       .filter(Boolean);
     for (const candidate of candidates) {
       const ext = path.extname(candidate).toLowerCase();
@@ -479,21 +533,27 @@ function parseImageResult(reply) {
   };
 
   const imagePrompt = extractBlock(text, "IMAGE_PROMPT_BEGIN", "IMAGE_PROMPT_END");
-  const usedProductImage = extractField(text, "USED_PRODUCT_IMAGE");
-  const usedLogoPaths = extractField(text, "USED_LOGO_PATHS")
+  const usedProductImage = normalizeAgentReportedPath(extractField(text, "USED_PRODUCT_IMAGE"));
+  const usedLogoPaths = normalizeAgentReportedPaths(
+    extractField(text, "USED_LOGO_PATHS")
     .split(/\s*;\s*/g)
     .map((item) => item.trim())
-    .filter(Boolean);
+    .filter(Boolean),
+  );
 
   // Ưu tiên extractField, nếu chưa có thì scan toàn bộ reply
   let generatedImagePath = extractField(text, "GENERATED_IMAGE_PATH");
+  generatedImagePath = normalizeAgentReportedPath(generatedImagePath);
   // Normalize forward/backslash
-  if (isPlaceholderGeneratedPath(generatedImagePath)) {
+  if (isPlaceholderGeneratedPath(generatedImagePath) || isTransientGeneratedImagePath(generatedImagePath)) {
     generatedImagePath = "";
   } else if (generatedImagePath) {
     generatedImagePath = path.resolve(generatedImagePath);
   } else {
     generatedImagePath = extractFirstExistingPath(text, [".png", ".jpg", ".jpeg", ".webp"]);
+    if (isTransientGeneratedImagePath(generatedImagePath)) {
+      generatedImagePath = "";
+    }
   }
 
   if (!imagePrompt) {
@@ -535,14 +595,17 @@ function parseVideoResult(reply) {
 
   const videoPrompt = extractBlock(text, "VIDEO_PROMPT_BEGIN", "VIDEO_PROMPT_END");
   let generatedVideoPath = extractField(text, "GENERATED_VIDEO_PATH");
+  generatedVideoPath = normalizeAgentReportedPath(generatedVideoPath);
   if (isPlaceholderGeneratedPath(generatedVideoPath)) {
     generatedVideoPath = "";
   }
-  const usedProductImage = extractField(text, "USED_PRODUCT_IMAGE");
-  const usedLogoPaths = extractField(text, "USED_LOGO_PATHS")
+  const usedProductImage = normalizeAgentReportedPath(extractField(text, "USED_PRODUCT_IMAGE"));
+  const usedLogoPaths = normalizeAgentReportedPaths(
+    extractField(text, "USED_LOGO_PATHS")
     .split(/\s*;\s*/g)
     .map((item) => item.trim())
-    .filter(Boolean);
+    .filter(Boolean),
+  );
 
   return {
     videoPrompt: videoPrompt || "",
@@ -828,6 +891,7 @@ module.exports = {
   parseImageResult,
   parseMediaResult,
   parseVideoResult,
+  normalizeAgentReportedPath,
   resolveLogoAssetPaths,
   routeMediaType,
   trackPromptVersion,

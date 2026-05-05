@@ -140,6 +140,41 @@ function cleanExtractedKeyword(value) {
     .trim();
 }
 
+function cleanDirectProductUrl(rawUrl) {
+  const trimmed = String(rawUrl || "").trim().replace(/^["'<(\[]+/, "").replace(/["'>)\].,]+$/, "");
+  if (!trimmed) return "";
+  try {
+    return new URL(trimmed).href;
+  } catch {
+    return "";
+  }
+}
+
+export function extractDirectProductUrl(source, targetSite = "") {
+  const text = String(source || "");
+  if (!text) {
+    return "";
+  }
+
+  const matches = text.match(/https?:\/\/[^\s"'<>`]+/gi) || [];
+  for (const rawMatch of matches) {
+    const candidate = cleanDirectProductUrl(rawMatch);
+    if (!candidate) continue;
+    if (targetSite && !hostMatchesTarget(candidate, targetSite)) continue;
+    if (!isProductUrl(candidate, targetSite || new URL(candidate).hostname)) continue;
+    return candidate;
+  }
+
+  const direct = cleanDirectProductUrl(text);
+  if (!direct) {
+    return "";
+  }
+  if (targetSite && !hostMatchesTarget(direct, targetSite)) {
+    return "";
+  }
+  return isProductUrl(direct, targetSite || new URL(direct).hostname) ? direct : "";
+}
+
 export function extractProductIntentKeyword(source) {
   const text = String(source || "").replace(/\s+/g, " ").trim();
   if (!text) {
@@ -192,6 +227,68 @@ function tokenizeSearchText(value) {
     .filter(Boolean);
 }
 
+const GENERIC_PRODUCT_TOKENS = new Set([
+  "thiet",
+  "bi",
+  "kiem",
+  "tra",
+  "goc",
+  "dat",
+  "banh",
+  "xe",
+  "cong",
+  "nghe",
+  "dung",
+  "cho",
+  "loai",
+  "mau",
+  "va",
+  "tu",
+  "dong",
+  "may",
+  "san",
+  "pham",
+]);
+
+const COLOR_TOKENS = ["do", "xanh", "den", "trang", "vang", "bac", "cam", "xam"];
+const FEATURE_PHRASES = [
+  "tu dong",
+  "xoay tu dong",
+  "4 robot",
+  "8 camera",
+  "12 camera",
+  "2 camera",
+];
+const TECHNOLOGY_TOKENS = ["3d", "ccd", "camera", "robot", "laser"];
+
+function uniqueTokens(tokens) {
+  return [...new Set(tokens.filter(Boolean))];
+}
+
+function buildDistinctiveSignals(keyword) {
+  const normalized = normalizeSearchText(keyword);
+  const tokens = tokenizeSearchText(keyword);
+  const numericTokens = uniqueTokens(tokens.filter((token) => /^\d+[a-z]*$/.test(token)));
+  const colors = uniqueTokens(tokens.filter((token) => COLOR_TOKENS.includes(token)));
+  const techTokens = uniqueTokens(tokens.filter((token) => TECHNOLOGY_TOKENS.includes(token)));
+  const phraseSignals = FEATURE_PHRASES.filter((phrase) => normalized.includes(phrase));
+  const distinctiveTokens = uniqueTokens(
+    tokens.filter(
+      (token) =>
+        !GENERIC_PRODUCT_TOKENS.has(token) &&
+        (token.length >= 4 || /^\d+[a-z]*$/.test(token) || COLOR_TOKENS.includes(token) || TECHNOLOGY_TOKENS.includes(token)),
+    ),
+  );
+
+  return {
+    colors,
+    numericTokens,
+    phraseSignals,
+    techTokens,
+    distinctiveTokens,
+  };
+}
+
 function extractModelTokens(value) {
   const source = String(value || "").toUpperCase();
   const matches = source.match(/[A-Z]{1,6}-\d+(?:\.\d+)?(?:-\d+[A-Z0-9]*)+/g) || [];
@@ -203,6 +300,7 @@ function buildKeywordSignals(keyword, categoryHint = "") {
   const normalizedKeyword = normalizeSearchText(effectiveKeyword);
   const tokens = tokenizeSearchText(effectiveKeyword);
   const modelTokens = extractModelTokens(effectiveKeyword);
+  const distinctiveSignals = buildDistinctiveSignals(effectiveKeyword);
   const categoryHints = [];
   const addCategoryHint = (value) => {
     const normalized = normalizeSearchText(value);
@@ -227,8 +325,16 @@ function buildKeywordSignals(keyword, categoryHint = "") {
     normalizedKeyword,
     tokens,
     modelTokens,
+    ...distinctiveSignals,
     categoryHints,
   };
+}
+
+function shouldPreferShopCrawl(keywordSignals) {
+  if ((keywordSignals.modelTokens || []).length > 0) return true;
+  if ((keywordSignals.phraseSignals || []).length > 0 && (keywordSignals.colors || []).length > 0) return true;
+  if ((keywordSignals.techTokens || []).length > 0 && (keywordSignals.numericTokens || []).length > 0) return true;
+  return (keywordSignals.distinctiveTokens || []).length >= 5;
 }
 
 function scoreProductCandidate(candidate, keywordSignals) {
@@ -246,6 +352,48 @@ function scoreProductCandidate(candidate, keywordSignals) {
   for (const token of keywordSignals.tokens) {
     if (haystack.includes(token)) {
       score += 10 + token.length;
+    }
+  }
+
+  for (const token of keywordSignals.distinctiveTokens || []) {
+    if (haystack.includes(token)) {
+      score += 120 + token.length * 2;
+    } else {
+      score -= 90;
+    }
+  }
+
+  for (const phrase of keywordSignals.phraseSignals || []) {
+    if (haystack.includes(phrase)) {
+      score += 260;
+    } else {
+      score -= 180;
+    }
+  }
+
+  for (const color of keywordSignals.colors || []) {
+    if (haystack.includes(color)) {
+      score += 240;
+    } else {
+      const conflictingColor = COLOR_TOKENS.some((entry) => entry !== color && haystack.includes(entry));
+      score += conflictingColor ? -450 : -180;
+    }
+  }
+
+  for (const tech of keywordSignals.techTokens || []) {
+    if (haystack.includes(tech)) {
+      score += 220;
+    } else {
+      const conflictingTech = TECHNOLOGY_TOKENS.some((entry) => entry !== tech && haystack.includes(entry));
+      score += conflictingTech ? -420 : -150;
+    }
+  }
+
+  for (const numeric of keywordSignals.numericTokens || []) {
+    if (haystack.includes(numeric)) {
+      score += 180;
+    } else {
+      score -= 160;
     }
   }
 
@@ -282,13 +430,49 @@ function hasStrongKeywordMatch(candidate, keywordSignals) {
     `${candidate.title || ""} ${candidate.url || ""} ${candidate.category?.name || ""}`,
   );
   const matchedTokens = keywordSignals.tokens.filter((token) => haystack.includes(token));
+  const matchedDistinctiveTokens = (keywordSignals.distinctiveTokens || []).filter((token) => haystack.includes(token));
+  const matchedPhrases = (keywordSignals.phraseSignals || []).filter((phrase) => haystack.includes(phrase));
+  const matchedColors = (keywordSignals.colors || []).filter((color) => haystack.includes(color));
+  const matchedTechTokens = (keywordSignals.techTokens || []).filter((token) => haystack.includes(token));
+  const matchedNumericTokens = (keywordSignals.numericTokens || []).filter((token) => haystack.includes(token));
+
   if (keywordSignals.modelTokens.length > 0) {
     return matchedTokens.length >= 1;
+  }
+  if ((keywordSignals.colors || []).length > 0 && matchedColors.length < keywordSignals.colors.length) {
+    return false;
+  }
+  if ((keywordSignals.techTokens || []).length > 0 && matchedTechTokens.length === 0) {
+    return false;
+  }
+  if ((keywordSignals.numericTokens || []).length > 0 && matchedNumericTokens.length === 0) {
+    return false;
+  }
+  if ((keywordSignals.phraseSignals || []).length > 0 && matchedPhrases.length === 0) {
+    return false;
+  }
+  if ((keywordSignals.distinctiveTokens || []).length >= 4) {
+    return matchedDistinctiveTokens.length >= Math.ceil(keywordSignals.distinctiveTokens.length * 0.75);
   }
   if (keywordSignals.tokens.length <= 2) {
     return matchedTokens.length >= keywordSignals.tokens.length;
   }
   return matchedTokens.length >= Math.max(2, Math.ceil(keywordSignals.tokens.length * 0.6));
+}
+
+export function pickBestProductCandidateForKeyword(candidates, keyword, categoryHint = "") {
+  const keywordSignals = buildKeywordSignals(keyword, categoryHint);
+  const ranked = (Array.isArray(candidates) ? candidates : [])
+    .map((candidate) => ({
+      ...candidate,
+      score: scoreProductCandidate(candidate, keywordSignals),
+    }))
+    .sort((left, right) => right.score - left.score);
+
+  if (!ranked[0] || ranked[0].score <= 0) {
+    return null;
+  }
+  return hasStrongKeywordMatch(ranked[0], keywordSignals) ? ranked[0] : null;
 }
 
 async function collectProductCandidates(page) {
@@ -436,6 +620,9 @@ export class BaseScraper {
     this.keyword = String(options.keyword || "").trim();
     this.effectiveKeyword = extractProductIntentKeyword(this.keyword) || this.keyword;
     this.targetSite = String(options.target_site || options.targetSite || "uptek.vn").trim();
+    this.directProductUrl =
+      extractDirectProductUrl(options.product_url || options.productUrl || "", this.targetSite) ||
+      extractDirectProductUrl(this.keyword, this.targetSite);
     this.categoryHint = String(options.category_hint || options.categoryHint || "").trim();
     this.browserPath = String(options.browser_path || options.browserPath || "").trim();
     this.headless = options.headless !== false;
@@ -515,8 +702,8 @@ export class BaseScraper {
   }
 
   async openProductPage() {
-    if (!this.keyword) {
-      throw new Error("Missing keyword");
+    if (!this.keyword && !this.directProductUrl) {
+      throw new Error("Missing keyword or product URL");
     }
 
     const executablePath = await this.resolveBrowserPath();
@@ -537,7 +724,115 @@ export class BaseScraper {
       let matchedCandidate = null;
       let lastError = null;
       const keywordSignals = buildKeywordSignals(this.effectiveKeyword, this.categoryHint);
+
+      const findProductViaShopCrawl = async () => {
+        const shopUrl = new URL("/shop", `https://${this.targetSite}`).href;
+        await page.goto(shopUrl, { waitUntil: "domcontentloaded" });
+        await page.waitForLoadState("networkidle").catch(() => {});
+
+        const rootCollection = await collectProductCandidates(page);
+        const rootCategoryIndex = await getShopCategoryIndex(page);
+        const prioritizedCategories = [...rootCategoryIndex]
+          .map((entry) => ({
+            ...entry,
+            score: scoreProductCandidate(
+              {
+                title: entry.name,
+                url: entry.url,
+                category: { name: entry.name, url: entry.url },
+              },
+              keywordSignals,
+            ),
+          }))
+          .sort((left, right) => right.score - left.score);
+
+        const categoryQueue = [
+          ...new Set(
+            prioritizedCategories
+              .filter((entry) => entry.score > 0)
+              .slice(0, 10)
+              .map((entry) => entry.url),
+          ),
+          ...new Set(rootCollection.categoryLinks),
+        ].slice(0, 24);
+        const allCandidates = [...rootCollection.products];
+
+        for (const categoryUrl of categoryQueue) {
+          try {
+            await page.goto(categoryUrl, { waitUntil: "domcontentloaded" });
+            await page.waitForLoadState("networkidle").catch(() => {});
+            const categoryCollection = await collectProductCandidates(page);
+            allCandidates.push(...categoryCollection.products);
+
+            const paginationQueue = [...new Set(categoryCollection.pageLinks)].slice(0, 8);
+            for (const paginationUrl of paginationQueue) {
+              try {
+                await page.goto(paginationUrl, { waitUntil: "domcontentloaded" });
+                await page.waitForLoadState("networkidle").catch(() => {});
+                const pagedCollection = await collectProductCandidates(page);
+                allCandidates.push(...pagedCollection.products);
+              } catch (error) {
+                this.debugLog(
+                  `category page crawl failed ${paginationUrl}: ${error instanceof Error ? error.message : String(error)}`,
+                );
+              }
+            }
+          } catch (error) {
+            this.debugLog(
+              `category crawl failed ${categoryUrl}: ${error instanceof Error ? error.message : String(error)}`,
+            );
+          }
+        }
+
+        const mergedCandidates = [];
+        const candidateByUrl = new Map();
+        for (const entry of allCandidates) {
+          const existing = candidateByUrl.get(entry.url);
+          if (!existing) {
+            candidateByUrl.set(entry.url, { ...entry });
+            mergedCandidates.push(candidateByUrl.get(entry.url));
+            continue;
+          }
+          if (!existing.title && entry.title) {
+            existing.title = entry.title;
+          }
+          if (!existing.category && entry.category) {
+            existing.category = entry.category;
+          }
+        }
+
+        const bestCandidate = pickBestProductCandidateForKeyword(
+          mergedCandidates,
+          this.effectiveKeyword,
+          this.categoryHint,
+        );
+        if (!bestCandidate) {
+          throw new Error(`No shop candidate matched keyword ${this.effectiveKeyword}`);
+        }
+        return bestCandidate;
+      };
+
+      if (this.directProductUrl) {
+        productUrl = this.directProductUrl;
+        this.debugLog(`using direct product url=${productUrl}`);
+      }
+
+      if (!productUrl && shouldPreferShopCrawl(keywordSignals)) {
+        try {
+          matchedCandidate = await findProductViaShopCrawl();
+          productUrl = matchedCandidate.url;
+          this.debugLog(`matched product url via prioritized shop crawl=${productUrl}`);
+        } catch (error) {
+          lastError = error;
+          this.debugLog(
+            `prioritized shop crawl failed: ${error instanceof Error ? error.message : String(error)}`,
+          );
+          await page.goto("about:blank").catch(() => {});
+        }
+      }
+
       for (const engine of SEARCH_ENGINES) {
+        if (productUrl) break;
         try {
           const searchUrl = engine.buildUrl(this.targetSite, this.effectiveKeyword);
           this.debugLog(`${engine.name} search url=${searchUrl}`);
@@ -557,101 +852,10 @@ export class BaseScraper {
 
       if (!productUrl) {
         try {
-          const shopUrl = new URL("/shop", `https://${this.targetSite}`).href;
-          await page.goto(shopUrl, { waitUntil: "domcontentloaded" });
-          await page.waitForLoadState("networkidle").catch(() => {});
-
-          const rootCollection = await collectProductCandidates(page);
-          const rootCategoryIndex = await getShopCategoryIndex(page);
-          const prioritizedCategories = [...rootCategoryIndex]
-            .map((entry) => ({
-              ...entry,
-              score: scoreProductCandidate(
-                {
-                  title: entry.name,
-                  url: entry.url,
-                  category: { name: entry.name, url: entry.url },
-                },
-                keywordSignals,
-              ),
-            }))
-            .sort((left, right) => right.score - left.score);
-
-          const categoryQueue = [
-            ...new Set(
-              prioritizedCategories
-                .filter((entry) => entry.score > 0)
-                .slice(0, 10)
-                .map((entry) => entry.url),
-            ),
-            ...new Set(rootCollection.categoryLinks),
-          ].slice(0, 24);
-          const allCandidates = [...rootCollection.products];
-
-          for (const categoryUrl of categoryQueue) {
-            try {
-              await page.goto(categoryUrl, { waitUntil: "domcontentloaded" });
-              await page.waitForLoadState("networkidle").catch(() => {});
-              const categoryCollection = await collectProductCandidates(page);
-              allCandidates.push(...categoryCollection.products);
-
-              const paginationQueue = [...new Set(categoryCollection.pageLinks)].slice(0, 8);
-              for (const paginationUrl of paginationQueue) {
-                try {
-                  await page.goto(paginationUrl, { waitUntil: "domcontentloaded" });
-                  await page.waitForLoadState("networkidle").catch(() => {});
-                  const pagedCollection = await collectProductCandidates(page);
-                  allCandidates.push(...pagedCollection.products);
-                } catch (error) {
-                  this.debugLog(
-                    `category page crawl failed ${paginationUrl}: ${error instanceof Error ? error.message : String(error)}`,
-                  );
-                }
-              }
-            } catch (error) {
-              this.debugLog(
-                `category crawl failed ${categoryUrl}: ${error instanceof Error ? error.message : String(error)}`,
-              );
-            }
-          }
-
-          const mergedCandidates = [];
-          const candidateByUrl = new Map();
-          for (const entry of allCandidates) {
-            const existing = candidateByUrl.get(entry.url);
-            if (!existing) {
-              candidateByUrl.set(entry.url, { ...entry });
-              mergedCandidates.push(candidateByUrl.get(entry.url));
-              continue;
-            }
-            if (!existing.title && entry.title) {
-              existing.title = entry.title;
-            }
-            if (!existing.category && entry.category) {
-              existing.category = entry.category;
-            }
-          }
-
-          const ranked = mergedCandidates
-            .map((entry) => ({
-              ...entry,
-              score: scoreProductCandidate(entry, keywordSignals),
-            }))
-            .sort((left, right) => right.score - left.score);
-
-          if (this.debug) {
-            for (const candidate of ranked.slice(0, 5)) {
-              this.debugLog(
-                `candidate score=${candidate.score} title=${candidate.title || "<empty>"} url=${candidate.url}`,
-              );
-            }
-          }
-
-          if (ranked[0] && ranked[0].score > 0 && hasStrongKeywordMatch(ranked[0], keywordSignals)) {
-            matchedCandidate = ranked[0];
-            productUrl = ranked[0].url;
-            this.debugLog(`matched product url via shop crawl=${productUrl}`);
-          }
+          await page.goto("about:blank").catch(() => {});
+          matchedCandidate = await findProductViaShopCrawl();
+          productUrl = matchedCandidate.url;
+          this.debugLog(`matched product url via shop crawl=${productUrl}`);
         } catch (error) {
           lastError = error;
           this.debugLog(

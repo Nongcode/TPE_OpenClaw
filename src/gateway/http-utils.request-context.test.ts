@@ -42,4 +42,19 @@ describe("resolveGatewayRequestContext", () => {
 
     expect(result.sessionKey).toContain("openresponses-user:alice");
   });
+
+  it("canonicalizes personal request keys to the requested agent store session", () => {
+    const result = resolveGatewayRequestContext({
+      req: createReq({
+        "x-openclaw-agent-id": "pho_phong",
+        "x-openclaw-session-key": "chat:pho_phong:conv_123",
+      }),
+      model: "openclaw",
+      sessionPrefix: "openai",
+      defaultMessageChannel: "webchat",
+    });
+
+    expect(result.agentId).toBe("pho_phong");
+    expect(result.sessionKey).toBe("agent:pho_phong:chat:pho_phong:conv_123");
+  });
 });

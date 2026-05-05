@@ -48,6 +48,11 @@ function which(cmd) {
 function resolveRunner() {
   const pnpm = which("pnpm");
   if (pnpm) {
+    if (process.platform === "win32") {
+      // Use PATH-resolved pnpm.cmd to avoid shell splitting absolute paths
+      // like "C:\\Program Files\\..." when shell=true is required for .cmd.
+      return { cmd: "pnpm.cmd", kind: "pnpm" };
+    }
     return { cmd: pnpm, kind: "pnpm" };
   }
   return null;

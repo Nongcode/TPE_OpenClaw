@@ -23,6 +23,14 @@ function normalizeEmployeeKey(raw: string | null | undefined): string | undefine
   return value || undefined;
 }
 
+function normalizeManagerInstanceId(raw: string | null | undefined): string | undefined {
+  const value = raw?.trim() ?? "";
+  if (!value) {
+    return undefined;
+  }
+  return /^[a-z0-9][a-z0-9_.:-]{0,127}$/i.test(value) ? value : undefined;
+}
+
 export function normalizeBootstrapAgentId(raw: string | null | undefined): string | undefined {
   const value = raw?.trim().toLowerCase() ?? "";
   if (!value) {
@@ -127,16 +135,18 @@ function buildDirectoryAccessPolicy(
   });
   const employeeId = entry.employeeId?.trim() || fallbackIdentity.employeeId;
   const employeeName = entry.employeeName?.trim() || fallbackIdentity.employeeName;
+  const managerInstanceId = normalizeManagerInstanceId(entry.managerInstanceId);
   return {
     employeeId: employeeId || undefined,
     employeeName: employeeName || undefined,
+    managerInstanceId,
     lockedAgentId,
     lockedSessionKey,
     lockAgent: entry.lockAgent === true || entry.lockSession === true,
     lockSession: entry.lockSession === true,
     autoConnect: entry.autoConnect === true,
     enforcedByServer: true,
-    canViewAllSessions: visibility.canViewAllSessions,
+    canViewAllSessions: visibility.canViewAllSessions === true,
     visibleAgentIds: visibility.visibleAgentIds,
   };
 }
@@ -144,6 +154,7 @@ function buildDirectoryAccessPolicy(
 export function buildClientDeclaredAccessPolicy(params: {
   employeeId?: string;
   employeeName?: string;
+  managerInstanceId?: string;
   lockedAgentId?: string;
   lockedSessionKey?: string;
   canViewAllSessions?: boolean;
@@ -156,7 +167,13 @@ export function buildClientDeclaredAccessPolicy(params: {
   const lockedSessionKey =
     normalizeBootstrapSessionKey(params.lockedSessionKey) ??
     (lockedAgentId ? `agent:${lockedAgentId}:main` : undefined);
-  if (!lockedAgentId && !lockedSessionKey && !params.employeeId && !params.employeeName) {
+  if (
+    !lockedAgentId &&
+    !lockedSessionKey &&
+    !params.employeeId &&
+    !params.employeeName &&
+    !params.managerInstanceId
+  ) {
     return undefined;
   }
   const resolvedLockedAgentId =
@@ -173,13 +190,14 @@ export function buildClientDeclaredAccessPolicy(params: {
   return {
     employeeId: params.employeeId?.trim() || undefined,
     employeeName: params.employeeName?.trim() || undefined,
+    managerInstanceId: normalizeManagerInstanceId(params.managerInstanceId),
     lockedAgentId: resolvedLockedAgentId,
     lockedSessionKey: lockedSessionKey ?? `agent:${resolvedLockedAgentId}:main`,
     lockAgent: params.lockAgent === true || params.lockSession === true,
     lockSession: params.lockSession === true,
     autoConnect: params.autoConnect === true,
     enforcedByServer: false,
-    canViewAllSessions: visibility.canViewAllSessions,
+    canViewAllSessions: visibility.canViewAllSessions === true,
     visibleAgentIds: visibility.visibleAgentIds,
   };
 }

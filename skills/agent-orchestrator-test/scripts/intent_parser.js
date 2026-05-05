@@ -7,7 +7,7 @@
  */
 
 const { normalizeText } = require("../../agent-orchestrator/scripts/common");
-const transport = require("../../agent-orchestrator/scripts/transport");
+const transport = require("./transport");
 
 /**
  * Danh sách intent hợp lệ.
@@ -23,9 +23,49 @@ const VALID_INTENTS = [
 
 const VALID_MEDIA_TYPES = ["image", "video", "both"];
 
+function containsAny(text, patterns) {
+  return patterns.some((pattern) => text.includes(pattern));
+}
+
+const GENERIC_REJECT_SIGNALS = [
+  "sua lai",
+  "lam lai",
+  "xau qua",
+  "xau",
+  "chua dep",
+  "chua on",
+  "chua dat",
+  "chua ok",
+  "khong on",
+  "khong dep",
+  "lam cho",
+  "them",
+  "bo sung",
+  "doi",
+  "chinh lai",
+  "rut gon",
+  "ngan lai",
+];
+
+const STATUS_QUERY_SIGNALS = [
+  "den dau roi",
+  "toi dau roi",
+  "xong chua",
+  "tien do",
+  "bao gio xong",
+  "dang lam toi dau",
+  "dang tao toi dau",
+];
+
 function detectTrainingTargetAgent(normalizedMessage) {
   if (/\b(prompt|nhan vien prompt|viet prompt)\b/.test(normalizedMessage)) {
     return "nv_prompt";
+  }
+  if (/\b(media_video|nhan vien video|media video)\b/.test(normalizedMessage)) {
+    return "media_video";
+  }
+  if (/\bvideo|clip\b/.test(normalizedMessage)) {
+    return "media_video";
   }
   if (/\b(media|anh|video|hinh)\b/.test(normalizedMessage)) {
     return "nv_media";
@@ -73,7 +113,7 @@ function buildIntentSystemPrompt() {
     '- Neu sep noi "sua bai da dang" hoac de cap post ID, dung EDIT_PUBLISHED.',
     '- Neu sep noi "dat lich", "hen gio", "schedule", dung SCHEDULE.',
     '- Neu sep noi "nho", "quy tac", "luu y", "tu gio tro di", dung TRAIN.',
-    '- target_agent: "nv_content" khi lien quan content, "nv_prompt" khi day prompt/rules prompt, "nv_media" khi lien quan media, "all" khi tao moi, "self" khi pho_phong tu xu ly.',
+    '- target_agent: "nv_content" khi lien quan content, "nv_prompt" khi day prompt/rules prompt, "nv_media" khi lien quan media anh, "media_video" khi lien quan tao/sua/train video, "all" khi tao moi, "self" khi pho_phong tu xu ly.',
     "- Chi tra JSON thuan tuy. Khong markdown. Khong giai thich.",
   ].join("\n");
 }
@@ -200,10 +240,12 @@ function parseIntentByKeywords(message) {
 
   // EDIT_MEDIA
   if (
-    /\b(sua anh|lam lai anh|anh chua dat|media chua dat|chinh anh|doi anh|sua hinh|sua prompt|viet lai prompt|prompt chua on|prompt chua dat|chinh prompt)\b/.test(normalized)
+    /\b(sua anh|lam lai anh|anh chua dat|media chua dat|chinh anh|doi anh|sua hinh|sua video|lam lai video|video chua dat|chinh video|sua prompt|viet lai prompt|prompt chua on|prompt chua dat|chinh prompt|them mau|doi mau|them logo|doi nen|them chu|bo chu|doi bo cuc)\b/.test(normalized)
   ) {
     const targetAgent = /\b(prompt|viet lai prompt|sua prompt|chinh prompt)\b/.test(normalized)
       ? "nv_prompt"
+      : /\b(video|clip)\b/.test(normalized)
+        ? "media_video"
       : "nv_media";
     return {
       intent: "EDIT_MEDIA",
@@ -217,7 +259,7 @@ function parseIntentByKeywords(message) {
 
   // EDIT_CONTENT
   if (
-    /\b(sua content|sua bai|viet lai|content chua dat|bai chua dat|chinh content|sua noi dung)\b/.test(normalized)
+    /\b(sua content|sua bai|viet lai|content chua dat|bai chua dat|chinh content|sua noi dung|rut gon bai|viet ngan|ngan lai|sua lai bai viet)\b/.test(normalized)
   ) {
     return {
       intent: "EDIT_CONTENT",
@@ -299,36 +341,63 @@ async function parseIntent(params) {
  */
 function classifyPendingDecision(message, currentStage) {
   const normalized = normalizeText(message);
+  if (containsAny(normalized, STATUS_QUERY_SIGNALS)) {
+    return "unknown";
+  }
 
   if (currentStage === "awaiting_content_approval") {
     const approveSignals = [
       "duyet content", "duyet bai", "ok content", "ok bai",
       "dong y content", "cho lam anh", "tao anh", "lam anh",
       "duyet noi dung", "content ok", "bai ok",
+      "anh duyet", "duyet nhe", "duyet nha", "duyet roi",
     ];
     const rejectSignals = [
       "sua content", "viet lai", "chua duyet content", "bai chua dat",
       "chua duyet bai", "sua bai", "sua noi dung", "chinh content",
+      "rut gon bai", "viet ngan", "ngan lai", "them thong so", "doi van phong",
     ];
 
     if (rejectSignals.some((s) => normalized.includes(s))) return "reject";
+    if (
+      containsAny(normalized, GENERIC_REJECT_SIGNALS) &&
+      !containsAny(normalized, ["tao video", "dang ngay", "hen gio", "schedule"])
+    ) {
+      return "reject";
+    }
+    if (/^(duyet|ok|oke|dong y)(\s|$)/.test(normalized)) return "approve";
     if (approveSignals.some((s) => normalized.includes(s))) return "approve";
     return "unknown";
   }
 
   if (currentStage === "awaiting_media_approval") {
+    if (
+      /\b(tao video|lam video|them video|tao them video|video quang cao)\b/.test(normalized)
+    ) {
+      return "generate_video";
+    }
+
     const approveSignals = [
       "duyet media", "duyet anh", "ok anh", "ok media",
       "dang bai", "publish", "dang len page", "dang facebook",
       "duyet hinh", "anh ok", "media ok",
+      "anh duyet", "duyet nhe", "duyet nha", "duyet roi",
     ];
     const rejectSignals = [
       "sua anh", "lam lai anh", "chua duyet media", "anh chua dat",
       "media chua dat", "chua duyet anh", "chinh anh", "doi anh",
       "sua prompt", "viet lai prompt", "prompt chua on", "prompt chua dat", "chinh prompt",
+      "them mau", "doi mau", "them logo", "doi nen", "doi bo cuc", "lam ro san pham",
     ];
 
     if (rejectSignals.some((s) => normalized.includes(s))) return "reject";
+    if (
+      containsAny(normalized, GENERIC_REJECT_SIGNALS) &&
+      !containsAny(normalized, ["dang ngay", "publish", "tao video", "lam video", "them video", "hen gio", "schedule"])
+    ) {
+      return "reject";
+    }
+    if (/^(duyet|ok|oke|dong y)(\s|$)/.test(normalized)) return "approve";
     if (approveSignals.some((s) => normalized.includes(s))) return "approve";
     return "unknown";
   }
@@ -336,6 +405,33 @@ function classifyPendingDecision(message, currentStage) {
   if (currentStage === "awaiting_publish_decision") {
     if (/\b(dang ngay|publish ngay|dang luon)\b/.test(normalized)) return "publish_now";
     if (/\b(hen gio|dat lich|schedule|dang luc)\b/.test(normalized)) return "schedule";
+    if (
+      /\b(tao video|lam video|them video|tao them video|co tao video|lam them video|tao video quang cao)\b/.test(normalized) ||
+      /^(co|có|ok|oke)\s*(tao video|lam video|them video)?$/i.test(String(message || "").trim())
+    ) {
+      return "generate_video";
+    }
+    if (/\b(khong can video|bo qua video|khong tao video|chi dang bai|khong lam video)\b/.test(normalized)) {
+      return "skip_video";
+    }
+    return "unknown";
+  }
+
+  if (currentStage === "awaiting_video_approval") {
+    const approveSignals = [
+      "duyet video", "video ok", "ok video", "duyet media video",
+      "duyet clip", "clip ok",
+    ];
+    const rejectSignals = [
+      "sua video", "lam lai video", "video chua dat", "clip chua dat",
+      "sua prompt video", "viet lai prompt video", "prompt video chua on",
+      "prompt video chua dat", "chinh prompt video",
+      "doi canh", "doi goc quay", "them logo", "doi mau", "them voice", "doi voice",
+    ];
+
+    if (rejectSignals.some((s) => normalized.includes(s))) return "reject";
+    if (containsAny(normalized, GENERIC_REJECT_SIGNALS)) return "reject";
+    if (approveSignals.some((s) => normalized.includes(s))) return "approve";
     return "unknown";
   }
 

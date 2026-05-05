@@ -18,6 +18,20 @@ const KNOWLEDGE_FILE_CANDIDATES = [
   "knowledge.md",
 ];
 
+const DEFAULT_VIDEO_PROMPT_TEMPLATE = [
+  "Tạo video giới thiệu sản phẩm tĩnh, bám sát tuyệt đối 100% hình dáng, cấu trúc, màu sắc và tỷ lệ của sản phẩm trong ảnh tham chiếu.",
+  "",
+  "YÊU CẦU BẮT BUỘC VỀ HÌNH ẢNH VÀ CHUYỂN ĐỘNG:",
+  "- Cảnh quay tĩnh: Sản phẩm đứng im, không hoạt động, không có chuyển động cơ học hay thay đổi trạng thái.",
+  "- Camera motion: Chuyển động máy quay chỉ di chuyển xoay mượt mà (orbit/pan) xung quanh sản phẩm gốc để khoe góc cạnh.",
+  "- Tuyệt đối tuân thủ ảnh gốc: Không tự ý biến tấu sang mẫu khác, hãng khác, kết cấu khác.",
+  "- Không có con người: Tuyệt đối không có con người xuất hiện trong bất kỳ khung hình nào.",
+  "- Không có Text: Tuyệt đối không lồng chữ, text, thông số hay typography vào khung hình.",
+  "- Logo công ty: Bắt buộc sử dụng file logo công ty đính kèm (đã tách nền sạch) đặt cố định ở góc dưới cùng bên phải video. Tuyệt đối không dùng/nhầm lẫn với logo thương hiệu của bản thân sản phẩm.",
+  "- Bối cảnh: Không gian thực tế, ánh sáng trong trẻo, sạch sẽ, tập trung 100% sự chú ý vào sản phẩm.",
+  '- Logo "Tân Phát Etek - Hội Tụ Tinh Hoa Giải Pháp" phải được viết chính xác bằng tiếng Việt, tuyệt đối không được viết sai chính tả tên logo công ty, không biến tấu logo.',
+].join("\n");
+
 function safeReadFile(filePath) {
   try {
     if (!fs.existsSync(filePath)) {
@@ -101,22 +115,35 @@ function buildPromptSystemPrompt(agentId, openClawHome) {
     "Ban la nv_prompt, chuyen gia viet prompt tao anh va video quang cao san pham.",
     "",
     "NHIEM VU CHINH:",
+    "- Truoc khi viet prompt, bat buoc doc va ap dung tat ca quy tac da luu trong rules.json cua workspace_prompt.",
     "- Nhan brief tu workflow media va viet prompt image, video, hoac ca hai tuy theo yeu cau.",
     "- Prompt phai giu nguyen cau truc san pham that trong anh goc, khong duoc bien dang hay che them chi tiet la.",
     "- Prompt phai su dung anh san pham goc va logo cong ty nhu reference bat buoc.",
     "- Neu tao anh quang cao, can mo ta cach dat logo tren mot bo phan phu hop cua san pham trong bo cuc cuoi.",
     "- Neu tao video, can mo ta ro product reference, camera motion, opening shot, va cach hien logo trong khung hinh.",
+    "- Neu tao video, bat buoc nhan manh: khong long text vao video, san pham phai dung hinh goc, logo tach nen dat goc duoi ben phai, va canh quay phai chan that tuyet doi.",
+    "- Neu workflow dang tao VIDEO prompt lan dau va chua co feedback sua prompt, phai xuat dung NGUYEN VAN mau prompt video mac dinh, khong duoc viet lai thanh bien the khac.",
     "- Phan biet ro khi nao can IMAGE prompt, VIDEO prompt, hoac ca hai.",
     "",
     "NGUYEN TAC BAT BUOC:",
+    "- BAO TOAN SAN PHAM TUYET DOI: Bat buoc dung anh goc san pham lam reference chinh. Hinh san pham trong prompt video/anh phai trung thanh tuyet doi voi anh goc, khong duoc bien tau sang mau khac, hang khac, ket cau khac.",
+    "- RANG BUOC CHUYEN DONG CHO VIDEO: Boi canh va camera motion chi xoay quanh anh san pham tinh. Tuyet doi khong mo ta san pham dang hoat dong, dang thay doi trang thai, hay co co che chuyen dong phi thuc te.",
+    "- RANG BUOC CON NGUOI VA VAN BAN: Tuyet doi khong co con nguoi xuat hien trong video. Tuyet doi khong co bat ky text/chữ/caption/title/sticker nao trong khung hinh video.",
+    "- RANG BUOC LOGO: Bat buoc dung file logo CONG TY that, tach nen sach, gan co dinh o goc duoi ben phai video. Khong duoc nham voi logo thuong hieu cua san pham.",
+    "- RANG BUOC QUY TRINH: Khong viet lai content. Khong publish. Mọi reply workflow phai giu nguyen workflow_id va step_id.",
+    "- RANG BUOC NGON NGU VA VAI TRO: Bat buoc dung 100% tieng Viet co dau. Khong tu nhan la tro ly ky thuat, C-3PO, hay debug agent.",
     "- Khong duoc viet prompt kieu chung chung, mo ho, hay chi noi 'anh dep, cao cap'.",
     "- Phai uu tien tinh xac thuc cua san pham that hon hieu ung trang tri.",
     "- Khong duoc sua doi ket cau, kich thuoc, vi tri bo phan, mau sac chinh cua san pham neu brief khong cho phep.",
     "- Neu prompt tao anh, phai nhan manh day la anh quang cao cuoi cung, khong phai chi la background.",
+    "- Neu prompt tao video, tuyet doi khong duoc chen text vao khung hinh, khong duoc tao canh vo ly, va phai giu logo dung o goc duoi ben phai neu brief yeu cau.",
     "- Logo phai duoc dat mot cach tu nhien, sac net, khong chen de, khong sai thuong hieu.",
     "- Tra ve prompt bang tieng Viet.",
-    knowledgeSection,
+    "",
+    "MAU VIDEO PROMPT MAC DINH (NEU LA LAN DRAFT DAU TIEN THI PHAI DUNG Y NGUYEN):",
+    DEFAULT_VIDEO_PROMPT_TEMPLATE,
     rulesSection,
+    knowledgeSection,
   ].join("\n");
 }
 
@@ -129,11 +156,29 @@ function buildPromptDraftPrompt(params) {
     openClawHome,
     logoPaths = [],
     mediaRequestBrief = "",
+    workflowGuidelines = [],
   } = params;
   const systemPrompt = buildPromptSystemPrompt("nv_prompt", openClawHome);
+  const retrievalQuery = [
+    state.original_brief || "",
+    state.content?.productName || "",
+    state.content?.approvedContent || "",
+    mediaRequestBrief,
+  ]
+    .filter(Boolean)
+    .join("\n");
+  const successSection = memory.buildSuccessExamplesPromptSection(
+    "nv_prompt",
+    openClawHome,
+    retrievalQuery,
+    3,
+  );
+  const guidelineSection = memory.buildWorkflowGuidelinesPromptSection(workflowGuidelines);
 
   const lines = [
     systemPrompt,
+    successSection,
+    guidelineSection,
     "",
     "BAN DANG XU LY WORKFLOW AGENT-ORCHESTRATOR-TEST.",
     `workflow_id: ${workflowId}`,
@@ -163,6 +208,10 @@ function buildPromptDraftPrompt(params) {
     "- Prompt phai huong toi anh/video quang cao cuoi cung co san pham that va logo.",
     "- Can nhan manh: giu dung ket cau san pham goc, giu dung mau chinh, giu dung cac bo phan co khi quan trong.",
     "- Can nhan manh: dung anh san pham goc va logo reference, khong duoc tu ve lai mot san pham khac.",
+    "- Neu co VIDEO prompt, VIDEO_PROMPT_BEGIN/END phai chua dung NGUYEN VAN mau prompt video mac dinh ben duoi.",
+    "",
+    "VIDEO PROMPT MAU BAT BUOC:",
+    DEFAULT_VIDEO_PROMPT_TEMPLATE,
     "",
     "MARKER BAT BUOC:",
     "PROMPT_DECISION: <image|video|both>",
@@ -193,11 +242,30 @@ function buildPromptRevisePrompt(params) {
     openClawHome,
     logoPaths = [],
     mediaRequestBrief = "",
+    workflowGuidelines = [],
   } = params;
   const systemPrompt = buildPromptSystemPrompt("nv_prompt", openClawHome);
+  const retrievalQuery = [
+    state.original_brief || "",
+    state.content?.productName || "",
+    state.content?.approvedContent || "",
+    mediaRequestBrief,
+    feedback,
+  ]
+    .filter(Boolean)
+    .join("\n");
+  const successSection = memory.buildSuccessExamplesPromptSection(
+    "nv_prompt",
+    openClawHome,
+    retrievalQuery,
+    3,
+  );
+  const guidelineSection = memory.buildWorkflowGuidelinesPromptSection(workflowGuidelines);
 
   const lines = [
     systemPrompt,
+    successSection,
+    guidelineSection,
     "",
     "BAN DANG XU LY WORKFLOW AGENT-ORCHESTRATOR-TEST.",
     `workflow_id: ${workflowId}`,
@@ -236,6 +304,10 @@ function buildPromptRevisePrompt(params) {
     "- Hay sua prompt theo dung nhan xet cua sep.",
     "- Neu nhan xet noi ve prompt, bo cuc, tinh chan that cua san pham, vi tri logo, anh sang, chat luong khung hinh, phai sua dung diem do.",
     "- Van phai giu san pham trung thanh voi anh goc.",
+    "- Neu sua VIDEO prompt, phai lay VIDEO_PROMPT_CU lam nen va chinh dung theo feedback moi; khong duoc bo mat cac rang buoc cot loi neu sep chua yeu cau bo.",
+    "",
+    "VIDEO PROMPT MAU GOC DE DOI CHIEU:",
+    DEFAULT_VIDEO_PROMPT_TEMPLATE,
     "",
     "MARKER BAT BUOC:",
     "PROMPT_DECISION: <image|video|both>",
@@ -314,6 +386,7 @@ function trackPromptVersion(workflowDir, workflowId, promptData) {
 }
 
 module.exports = {
+  DEFAULT_VIDEO_PROMPT_TEMPLATE,
   buildPromptDraftPrompt,
   buildPromptRevisePrompt,
   buildPromptSystemPrompt,

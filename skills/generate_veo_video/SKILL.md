@@ -1,21 +1,45 @@
 # generate_veo_video
 
-Tự động mở Google Flow và tạo video bằng Veo.
+Tu dong mo Google Flow va tao video bang Veo.
+
+## Debug DOM before generate
+
+```bash
+node skills/generate_veo_video/action.js --input_file skills/generate_veo_video/test-input.json --dry-run-dom
+```
+
+Che do nay chi mo Flow, capture DOM debug, va xuat cac file duoi `artifacts/videos/debug/`:
+
+- `flow-body.html`
+- `flow-accessibility.json`
+- `flow-visible-text.txt`
+- `flow-selectors.json`
+- `flow-screenshot.png`
 
 ## Input JSON
 
 ```json
 {
   "project_url": "https://labs.google/fx/vi/tools/flow/project/....",
-  "prompt": "Tạo video quảng cáo máy cân bằng lốp trong gara ô tô hiện đại, ánh sáng cao cấp, logo Tân Phát Etek ở góc phải, chuyển động camera mượt, 9:16",
+  "prompt": "Tao video quang cao san pham",
   "reference_image": "D:/CodeAiTanPhat/assets/product.png",
-  "aspect_ratio": "9:16",
-  "multiplier": "1",
-  "model": "Veo 3.1 - Quality",
+  "logo_paths": ["D:/CodeAiTanPhat/assets/logo.png"],
+  "browser_path": "C:/Program Files/CocCoc/Browser/Application/browser.exe",
+  "user_data_dir": "C:/Users/Administrator/AppData/Local/CocCoc/Browser/User Data",
+  "profile_name": "Profile 2",
   "output_dir": "D:/CodeAiTanPhat/outputs/veo",
-  "user_data_dir": "D:/CodeAiTanPhat/.flow-profile",
-  "headless": false,
+  "cdp_url": "",
   "timeout_ms": 1200000,
-  "manual_login_timeout_ms": 180000
+  "step_timeout_ms": 180000,
+  "download_resolution": "720p",
+  "auto_close_browser": false,
+  "video_count": 2,
+  "generation_mode": "sequential",
+  "retry_count": 3,
+  "dom_debug": true,
+  "debug_only": true,
+  "save_step_screenshots": true,
+  "fail_fast_on_quota": true,
+  "per_video_prompt_suffixes": []
 }
 ```

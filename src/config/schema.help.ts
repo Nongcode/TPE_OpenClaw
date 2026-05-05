@@ -392,6 +392,8 @@ export const FIELD_HELP: Record<string, string> = {
     "Allowed browser origins for Control UI/WebChat websocket connections (full origins only, e.g. https://control.example.com). Required for non-loopback Control UI deployments unless dangerous Host-header fallback is explicitly enabled.",
   "gateway.controlUi.employeeDirectory":
       "Optional employee access directory for the Control UI. Map employee identities to a locked agent/session so each signed-in employee lands in the correct chat lane by default.",
+  "gateway.controlUi.employeeDirectory[].managerInstanceId":
+      "Optional manager instance ID attached to this employee. Automation workflows can use this to keep two signed-in pho_phong users on separate manager state and worker sessions.",
   "gateway.controlUi.employeeDirectory[].canViewAllSessions":
       "Grant this employee visibility into every agent session. Use sparingly for top-level supervisor roles such as main or quan_ly.",
   "gateway.controlUi.employeeDirectory[].visibleAgentIds":

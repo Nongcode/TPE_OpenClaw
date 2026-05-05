@@ -102,21 +102,24 @@ function writeSse(res: ServerResponse, data: unknown) {
 
 function buildAgentCommandInput(params: {
   prompt: { message: string; extraSystemPrompt?: string; images?: ImageContent[] };
+  agentId: string;
   sessionKey: string;
   runId: string;
   messageChannel: string;
+  abortSignal?: AbortSignal;
 }) {
   return {
     message: params.prompt.message,
     extraSystemPrompt: params.prompt.extraSystemPrompt,
     images: params.prompt.images,
+    agentId: params.agentId,
     sessionKey: params.sessionKey,
     runId: params.runId,
     deliver: false as const,
     messageChannel: params.messageChannel,
     bestEffortDeliver: false as const,
-    // HTTP API callers are authenticated operator clients for this gateway context.
     senderIsOwner: true as const,
+    abortSignal: params.abortSignal,
   };
 }
 
@@ -431,7 +434,7 @@ export async function handleOpenAiHttpRequest(
   const model = typeof payload.model === "string" ? payload.model : "openclaw";
   const user = typeof payload.user === "string" ? payload.user : undefined;
 
-  const { sessionKey, messageChannel } = resolveGatewayRequestContext({
+  const { agentId, sessionKey, messageChannel } = resolveGatewayRequestContext({
     req,
     model,
     user,
@@ -467,15 +470,18 @@ export async function handleOpenAiHttpRequest(
 
   const runId = `chatcmpl_${randomUUID()}`;
   const deps = createDefaultDeps();
+  const abortController = new AbortController();
   const commandInput = buildAgentCommandInput({
     prompt: {
       message: prompt.message,
       extraSystemPrompt: prompt.extraSystemPrompt,
       images: images.length > 0 ? images : undefined,
     },
+    agentId,
     sessionKey,
     runId,
     messageChannel,
+    abortSignal: abortController.signal,
   });
 
   if (!stream) {
@@ -512,6 +518,17 @@ export async function handleOpenAiHttpRequest(
   let wroteRole = false;
   let sawAssistantDelta = false;
   let closed = false;
+
+  // Giữ kết nối SSE không bị ngắt bởi Next.js Proxy/Browser khi agent đang chạy task dài
+  const keepAliveInterval = setInterval(() => {
+    if (!closed) {
+      res.write(": keep-alive\n\n");
+    }
+  }, 15000);
+
+  const cleanupKeepAlive = () => {
+    clearInterval(keepAliveInterval);
+  };
 
   const unsubscribe = onAgentEvent((evt) => {
     if (evt.runId !== runId) {
@@ -555,6 +572,8 @@ export async function handleOpenAiHttpRequest(
 
   req.on("close", () => {
     closed = true;
+    abortController.abort();
+    cleanupKeepAlive();
     unsubscribe();
   });
 
@@ -601,9 +620,12 @@ export async function handleOpenAiHttpRequest(
     } finally {
       if (!closed) {
         closed = true;
+        cleanupKeepAlive();
         unsubscribe();
         writeDone(res);
         res.end();
+      } else {
+        cleanupKeepAlive();
       }
     }
   })();

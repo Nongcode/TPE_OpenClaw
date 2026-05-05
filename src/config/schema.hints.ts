@@ -77,6 +77,7 @@ const FIELD_PLACEHOLDERS: Record<string, string> = {
   "gateway.controlUi.allowedOrigins": "https://control.example.com",
   "gateway.controlUi.employeeDirectory[].employeeId": "emp-01",
   "gateway.controlUi.employeeDirectory[].employeeName": "Nguyen Van A",
+  "gateway.controlUi.employeeDirectory[].managerInstanceId": "mgr_pho_phong_A",
   "gateway.controlUi.employeeDirectory[].lockedAgentId": "nv_content",
   "gateway.controlUi.employeeDirectory[].lockedSessionKey": "agent:nv_content:main",
   "gateway.controlUi.employeeDirectory[].canViewAllSessions": "false",

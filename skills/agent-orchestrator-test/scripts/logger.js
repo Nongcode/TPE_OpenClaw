@@ -1,163 +1,138 @@
 /**
- * logger.js — Human-readable logging cho workflow orchestrator.
+ * logger.js - Human-readable logging for the orchestrator.
  *
- * Mọi output terminal đều bằng tiếng Việt tự nhiên, không in raw JSON.
- * Mỗi payload giữa các agent đều kèm trường human_message.
+ * Interactive runs can print progress to stderr. JSON mode must stay
+ * machine-safe, so stderr logging can be disabled at runtime.
  */
 
 const ICONS = {
-  start: "🚀",
-  handoff: "📋",
-  wait: "⏳",
-  approve: "✅",
-  reject: "❌",
-  learn: "🧠",
-  publish: "📤",
-  schedule: "📅",
-  edit: "✏️",
-  media: "🎨",
-  content: "📝",
-  error: "💥",
-  info: "ℹ️",
-  video: "🎬",
-  trend: "📊",
+  start: "[START]",
+  handoff: "[HANDOFF]",
+  wait: "[WAIT]",
+  approve: "[APPROVE]",
+  reject: "[REJECT]",
+  learn: "[LEARN]",
+  publish: "[PUBLISH]",
+  schedule: "[SCHEDULE]",
+  edit: "[EDIT]",
+  media: "[MEDIA]",
+  content: "[CONTENT]",
+  error: "[ERROR]",
+  info: "[INFO]",
+  video: "[VIDEO]",
+  trend: "[TREND]",
 };
+
+let loggingEnabled = true;
+let syncContext = null;
 
 function timestamp() {
   return new Date().toLocaleString("vi-VN", { timeZone: "Asia/Ho_Chi_Minh" });
 }
 
 function separator() {
-  return "─".repeat(60);
+  return "-".repeat(60);
 }
 
-/**
- * In một dòng log chung với icon + timestamp.
- */
+function write(text) {
+  if (!loggingEnabled) {
+    return;
+  }
+  process.stderr.write(String(text || ""));
+}
+
 function log(icon, message) {
-  const prefix = ICONS[icon] || "•";
-  process.stderr.write(`${prefix} [${timestamp()}] ${message}\n`);
+  const prefix = ICONS[icon] || "[LOG]";
+  write(`${prefix} [${timestamp()}] ${String(message || "")}\n`);
 }
 
-/**
- * Log bắt đầu một phase mới trong workflow.
- */
 function logPhase(phase, humanMessage) {
-  process.stderr.write(`\n${separator()}\n`);
+  write(`\n${separator()}\n`);
   log("start", `PHASE: ${phase}`);
   if (humanMessage) {
-    process.stderr.write(`   ${humanMessage}\n`);
+    write(`   ${humanMessage}\n`);
   }
-  process.stderr.write(`${separator()}\n`);
+  write(`${separator()}\n`);
 }
 
-/**
- * Log khi Phó phòng giao việc cho nhân viên.
- */
 function logHandoff(from, to, humanMessage) {
-  log("handoff", `${from} → ${to}`);
-  process.stderr.write(`   "${humanMessage}"\n`);
+  log("handoff", `${from} -> ${to}`);
+  write(`   "${humanMessage}"\n`);
 }
 
-/**
- * Log khi hệ thống dừng chờ User duyệt.
- */
 function logApprovalWait(stage, preview) {
-  process.stderr.write(`\n`);
-  log("wait", `ĐANG CHỜ DUYỆT — Giai đoạn: ${stage}`);
-  if (preview) {
-    process.stderr.write(`\n${separator()}\n`);
-    process.stderr.write(`NỘI DUNG CHỜ DUYỆT:\n\n`);
-    const previewText = String(preview).trim();
-    // Giới hạn preview ~ 2000 ký tự cho terminal
-    if (previewText.length > 2000) {
-      process.stderr.write(`${previewText.slice(0, 2000)}\n...[rút gọn]\n`);
-    } else {
-      process.stderr.write(`${previewText}\n`);
-    }
-    process.stderr.write(`${separator()}\n`);
+  write("\n");
+  log("wait", `DANG CHO DUYET - Giai doan: ${stage}`);
+  if (!preview) {
+    return;
   }
+
+  write(`\n${separator()}\n`);
+  write("NOI DUNG CHO DUYET:\n\n");
+
+  const previewText = String(preview).trim();
+  if (previewText.length > 2000) {
+    write(`${previewText.slice(0, 2000)}\n...[rut gon]\n`);
+  } else {
+    write(`${previewText}\n`);
+  }
+
+  write(`${separator()}\n`);
 }
 
-/**
- * Log khi User phê duyệt.
- */
 function logApproved(stage) {
-  log("approve", `User đã DUYỆT giai đoạn: ${stage}`);
+  log("approve", `User da DUYET giai doan: ${stage}`);
 }
 
-/**
- * Log khi User từ chối.
- */
 function logRejected(stage, feedback) {
-  log("reject", `User ĐÃ TỪ CHỐI giai đoạn: ${stage}`);
+  log("reject", `User da TU CHOI giai doan: ${stage}`);
   if (feedback) {
-    process.stderr.write(`   Nhận xét: "${feedback}"\n`);
+    write(`   Nhan xet: "${feedback}"\n`);
   }
+  postAutomationEvent(`Bị từ chối giai đoạn: ${stage}. Nhận xét: ${feedback || ""}`, "assistant", "regular");
 }
 
-/**
- * Log khi hệ thống học từ feedback (ghi vào memory).
- */
 function logLearning(agentId, rule) {
-  log("learn", `${agentId} tự học quy tắc mới`);
-  process.stderr.write(`   Quy tắc: "${rule}"\n`);
+  log("learn", `${agentId} tu hoc quy tac moi`);
+  write(`   Quy tac: "${rule}"\n`);
 }
 
-/**
- * Log lỗi.
- */
 function logError(stage, error) {
   const message = error instanceof Error ? error.message : String(error);
-  log("error", `LỖI tại ${stage}: ${message}`);
+  log("error", `LOI tai ${stage}: ${message}`);
 }
 
-/**
- * Log publish thành công.
- */
 function logPublished(postId) {
-  log("publish", `Bài viết đã được đăng thành công!`);
+  log("publish", "Bai viet da duoc dang thanh cong.");
   if (postId) {
-    process.stderr.write(`   Post ID: ${postId}\n`);
+    write(`   Post ID: ${postId}\n`);
   }
 }
 
-/**
- * Log schedule thành công.
- */
 function logScheduled(scheduleTime) {
-  log("schedule", `Bài viết đã được hẹn giờ đăng!`);
+  log("schedule", "Bai viet da duoc hen gio dang.");
   if (scheduleTime) {
-    process.stderr.write(`   Thời gian: ${scheduleTime}\n`);
+    write(`   Thoi gian: ${scheduleTime}\n`);
   }
 }
 
-/**
- * Log edit bài đã đăng.
- */
 function logEdited(postId) {
-  log("edit", `Bài viết đã được cập nhật!`);
+  log("edit", "Bai viet da duoc cap nhat.");
   if (postId) {
-    process.stderr.write(`   Post ID: ${postId}\n`);
+    write(`   Post ID: ${postId}\n`);
   }
 }
 
-/**
- * Log intent đã parse được.
- */
 function logIntent(intent) {
-  log("info", `Ý định nhận diện: ${intent.intent}`);
+  log("info", `Y dinh nhan dien: ${intent.intent}`);
   if (intent.media_type_requested && intent.media_type_requested !== "image") {
-    process.stderr.write(`   Loại media: ${intent.media_type_requested}\n`);
+    write(`   Loai media: ${intent.media_type_requested}\n`);
   }
   if (intent.target_agent) {
-    process.stderr.write(`   Nhân viên phụ trách: ${intent.target_agent}\n`);
+    write(`   Nhan vien phu trach: ${intent.target_agent}\n`);
   }
 }
 
-/**
- * Build trường human_message cho payload giao tiếp giữa agent.
- */
 function buildHumanMessage(from, to, action, detail) {
   if (action === "prompt_draft") {
     return `Content da duyet, NV Prompt viet prompt ${detail || "media"} theo bo quy tac hien tai.`;
@@ -168,31 +143,75 @@ function buildHumanMessage(from, to, action, detail) {
   if (action === "media_prepare_prompt") {
     return "Content da duyet, NV Media tiep nhan brief media va chot yeu cau gui NV Prompt.";
   }
+  if (action === "video_prepare_prompt") {
+    return "Content va anh da duyet, Media_Video tiep nhan brief video va chot yeu cau gui NV Prompt.";
+  }
   if (action === "media_prepare_revise") {
     return `NV Media tiep nhan feedback media va tong hop lai yeu cau prompt: ${detail}`;
+  }
+  if (action === "video_prepare_revise") {
+    return `Media_Video tiep nhan feedback video va tong hop lai yeu cau prompt: ${detail}`;
   }
   if (action === "prompt_from_media") {
     return `NV Media gui brief cho NV Prompt de viet prompt ${detail || "media"} chi tiet.`;
   }
+  if (action === "prompt_from_video") {
+    return `Media_Video gui brief cho NV Prompt de viet prompt ${detail || "video"} chi tiet.`;
+  }
   if (action === "prompt_back_to_media") {
     return `NV Prompt da viet xong prompt ${detail || "media"}, chuyen lai cho NV Media thuc thi.`;
   }
+  if (action === "prompt_back_to_video") {
+    return `NV Prompt da viet xong prompt ${detail || "video"}, chuyen lai cho Media_Video thuc thi.`;
+  }
+
   const messages = {
-    content_draft: `Sếp vừa giao bài mới, anh em Content nhận brief và làm nhé: ${detail}`,
-    content_revise: `Content cần sửa lại theo nhận xét: ${detail}`,
-    media_generate: `Content đã được duyệt, anh em Media vào tạo ảnh nhé!`,
-    media_revise: `Ảnh cần sửa lại theo nhận xét: ${detail}`,
-    publish: `Tất cả đã được duyệt, đăng bài lên Fanpage luôn!`,
-    schedule: `Tất cả đã được duyệt, hẹn giờ đăng bài theo lịch!`,
-    edit_post: `Sếp muốn sửa bài đã đăng, anh em Content cập nhật lại nhé!`,
-    learn_rule: `Rút kinh nghiệm từ lần sửa này, ghi lại quy tắc mới.`,
+    content_draft: `Sep vua giao bai moi, anh em Content nhan brief va lam nhe: ${detail}`,
+    content_revise: `Content can sua lai theo nhan xet: ${detail}`,
+    media_generate: "Content da duoc duyet, anh em Media vao tao anh nhe!",
+    media_revise: `Anh can sua lai theo nhan xet: ${detail}`,
+    publish: "Tat ca da duoc duyet, dang bai len Fanpage luon!",
+    schedule: "Tat ca da duoc duyet, hen gio dang bai theo lich!",
+    edit_post: "Sep muon sua bai da dang, anh em Content cap nhat lai nhe!",
+    learn_rule: "Rut kinh nghiem tu lan sua nay, ghi lai quy tac moi.",
   };
-  return messages[action] || `${from} giao việc cho ${to}: ${detail || action}`;
+
+  return messages[action] || `${from} giao viec cho ${to}: ${detail || action}`;
+}
+
+function setEnabled(enabled) {
+  loggingEnabled = enabled !== false;
+}
+
+function isEnabled() {
+  return loggingEnabled;
+}
+
+function setSyncContext(context) {
+  syncContext = context && typeof context === "object" ? { ...context } : null;
+}
+
+function postAutomationEvent(content, role = "assistant", type = "regular") {
+  if (!syncContext) {
+    return;
+  }
+  const beClient = require("./be-client");
+  void beClient.pushAutomationEvent({
+    ...syncContext,
+    role,
+    type,
+    content,
+    timestamp: Date.now(),
+  }).catch(() => {
+    // Logging must not break orchestration.
+  });
 }
 
 module.exports = {
   buildHumanMessage,
+  isEnabled,
   log,
+  setSyncContext,
   logApprovalWait,
   logApproved,
   logEdited,
@@ -204,4 +223,5 @@ module.exports = {
   logPublished,
   logRejected,
   logScheduled,
+  setEnabled,
 };

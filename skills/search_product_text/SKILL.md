@@ -28,6 +28,12 @@ Ví dụ:
 node skills/search_product_text/action.js --keyword "cầu nâng 2 trụ" --target_site "uptek.vn"
 ```
 
+Khi đã có đúng link sản phẩm, ưu tiên truyền thẳng URL thay vì để skill tự search:
+
+```bash
+node skills/search_product_text/action.js --product_url "https://uptek.vn/shop/ten-san-pham-12345" --target_site "uptek.vn"
+```
+
 Khi biết trước nhóm/ngành hàng, truyền thêm `--category_hint` để tăng độ chính xác:
 
 ```bash
@@ -39,6 +45,8 @@ Hoặc truyền JSON:
 ```bash
 node skills/search_product_text/action.js "{\"keyword\":\"cầu nâng 2 trụ\",\"target_site\":\"tanphatetek.com\",\"category_hint\":\"Cầu nâng\"}"
 ```
+
+Nếu JSON/brief có chứa URL sản phẩm của đúng site đích, skill sẽ ưu tiên bám URL đó trước khi fallback sang search bằng keyword.
 
 ## Đầu ra
 

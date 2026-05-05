@@ -11,6 +11,7 @@ const path = require("path");
 const { loadOpenClawConfig, resolveOpenClawHome } = require("../../agent-orchestrator/scripts/common");
 
 const MAX_RULES_DEFAULT = 50;
+const MAX_SUCCESS_EXAMPLES_DEFAULT = 80;
 
 /**
  * Tìm workspace directory cho một agent dựa trên config.
@@ -37,6 +38,11 @@ function resolveAgentWorkspace(agentId, openClawHome) {
 function rulesFilePath(agentId, openClawHome) {
   const workspace = resolveAgentWorkspace(agentId, openClawHome);
   return path.join(workspace, "rules.json");
+}
+
+function successMemoryFilePath(agentId, openClawHome) {
+  const workspace = resolveAgentWorkspace(agentId, openClawHome);
+  return path.join(workspace, "success-memory.json");
 }
 
 /**
@@ -66,6 +72,30 @@ function loadRules(agentId, openClawHome) {
   };
 }
 
+function loadSuccessExamples(agentId, openClawHome) {
+  const filePath = successMemoryFilePath(agentId, openClawHome);
+  try {
+    if (fs.existsSync(filePath)) {
+      const raw = fs.readFileSync(filePath, "utf8").replace(/^\uFEFF/, "");
+      const data = JSON.parse(raw);
+      return {
+        agent_id: agentId,
+        examples: Array.isArray(data.examples) ? data.examples : [],
+        max_examples: data.max_examples || MAX_SUCCESS_EXAMPLES_DEFAULT,
+        updated_at: data.updated_at || null,
+      };
+    }
+  } catch {
+    // ignore malformed file and fall back to default
+  }
+  return {
+    agent_id: agentId,
+    examples: [],
+    max_examples: MAX_SUCCESS_EXAMPLES_DEFAULT,
+    updated_at: null,
+  };
+}
+
 /**
  * Ghi rules.json.
  */
@@ -77,6 +107,20 @@ function saveRules(agentId, openClawHome, rulesData) {
     agent_id: agentId,
     rules: rulesData.rules || [],
     max_rules: rulesData.max_rules || MAX_RULES_DEFAULT,
+    updated_at: new Date().toISOString(),
+  };
+  fs.writeFileSync(filePath, `${JSON.stringify(payload, null, 2)}\n`, "utf8");
+  return payload;
+}
+
+function saveSuccessExamples(agentId, openClawHome, successData) {
+  const filePath = successMemoryFilePath(agentId, openClawHome);
+  const dir = path.dirname(filePath);
+  fs.mkdirSync(dir, { recursive: true });
+  const payload = {
+    agent_id: agentId,
+    examples: successData.examples || [],
+    max_examples: successData.max_examples || MAX_SUCCESS_EXAMPLES_DEFAULT,
     updated_at: new Date().toISOString(),
   };
   fs.writeFileSync(filePath, `${JSON.stringify(payload, null, 2)}\n`, "utf8");
@@ -121,6 +165,138 @@ function appendRule(agentId, openClawHome, newRule) {
   return saveRules(agentId, openClawHome, data);
 }
 
+function appendSuccessExample(agentId, openClawHome, example) {
+  const brief = String(example?.brief || "").trim();
+  const approvedResult = String(example?.approved_result || "").trim();
+  if (!brief || !approvedResult) {
+    return null;
+  }
+
+  const data = loadSuccessExamples(agentId, openClawHome);
+  const workflowId = String(example?.workflow_id || "").trim();
+  const kind = String(example?.kind || "").trim() || "generic";
+  const duplicate = data.examples.some(
+    (entry) =>
+      (workflowId && entry.workflow_id === workflowId && String(entry.kind || "") === kind) ||
+      (String(entry.brief || "").trim() === brief &&
+        String(entry.approved_result || "").trim() === approvedResult),
+  );
+  if (duplicate) {
+    return data;
+  }
+
+  data.examples.push({
+    id: `success_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+    workflow_id: workflowId || null,
+    kind,
+    brief,
+    approved_result: approvedResult,
+    prompt: String(example?.prompt || "").trim(),
+    content: String(example?.content || "").trim(),
+    product_name: String(example?.product_name || "").trim(),
+    media_type: String(example?.media_type || "").trim(),
+    feedback: String(example?.feedback || "").trim(),
+    global_guidelines: Array.isArray(example?.global_guidelines)
+      ? example.global_guidelines.map((item) => String(item || "").trim()).filter(Boolean)
+      : [],
+    approved_at: example?.approved_at || new Date().toISOString(),
+  });
+
+  while (data.examples.length > data.max_examples) {
+    data.examples.shift();
+  }
+
+  return saveSuccessExamples(agentId, openClawHome, data);
+}
+
+function buildSearchableSuccessText(example) {
+  return [
+    example?.brief,
+    example?.approved_result,
+    example?.prompt,
+    example?.content,
+    example?.product_name,
+    ...(Array.isArray(example?.global_guidelines) ? example.global_guidelines : []),
+  ]
+    .map((item) => String(item || "").trim().toLowerCase())
+    .filter(Boolean)
+    .join(" \n ");
+}
+
+function tokenizeForMatch(value) {
+  return [...new Set(
+    String(value || "")
+      .toLowerCase()
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .replace(/[^a-z0-9\s]/g, " ")
+      .split(/\s+/)
+      .map((token) => token.trim())
+      .filter((token) => token.length >= 3),
+  )];
+}
+
+function searchSuccessExamples(agentId, openClawHome, query, limit = 3) {
+  const tokens = tokenizeForMatch(query);
+  const data = loadSuccessExamples(agentId, openClawHome);
+  if (data.examples.length === 0) {
+    return [];
+  }
+
+  const scored = data.examples
+    .map((example) => {
+      const haystack = buildSearchableSuccessText(example);
+      let score = 0;
+      for (const token of tokens) {
+        if (haystack.includes(token)) {
+          score += 1;
+        }
+      }
+      if (String(example?.product_name || "").trim()) {
+        score += 0.2;
+      }
+      return { example, score };
+    })
+    .filter((entry) => entry.score > 0 || tokens.length === 0)
+    .sort(
+      (left, right) =>
+        right.score - left.score ||
+        String(right.example?.approved_at || "").localeCompare(String(left.example?.approved_at || "")),
+    )
+    .slice(0, limit)
+    .map((entry) => entry.example);
+
+  return scored;
+}
+
+function buildSuccessExamplesPromptSection(agentId, openClawHome, query, limit = 3) {
+  const matches = searchSuccessExamples(agentId, openClawHome, query, limit);
+  if (matches.length === 0) {
+    return "";
+  }
+
+  const lines = [
+    "",
+    "SO TAY KINH NGHIEM DUOC SEP DUYET TRUOC DAY:",
+    "Truoc khi tao ban moi, doc nhanh cac mau da duoc duyet ben duoi va uu tien hoc dung phong cach/yeu cau lap lai:",
+    "",
+  ];
+
+  matches.forEach((example, index) => {
+    lines.push(`[Mau ${index + 1}] Brief: ${String(example.brief || "").trim()}`);
+    if (example.product_name) {
+      lines.push(`San pham: ${example.product_name}`);
+    }
+    if (Array.isArray(example.global_guidelines) && example.global_guidelines.length > 0) {
+      lines.push(`Guideline da duyet: ${example.global_guidelines.join(" | ")}`);
+    }
+    lines.push(`Ket qua da duyet: ${String(example.approved_result || "").trim().slice(0, 800)}`);
+    lines.push("");
+  });
+
+  return lines.join("\n");
+}
+
 /**
  * Build đoạn text để nhúng vào System Prompt của agent.
  * Trả "" nếu không có rule nào.
@@ -143,6 +319,23 @@ function buildRulesPromptSection(agentId, openClawHome) {
   });
 
   lines.push("");
+  return lines.join("\n");
+}
+
+function buildWorkflowGuidelinesPromptSection(guidelines) {
+  const normalized = [...new Set(
+    (guidelines || []).map((item) => String(item || "").trim()).filter(Boolean),
+  )];
+  if (normalized.length === 0) {
+    return "";
+  }
+
+  const lines = [
+    "",
+    "GLOBAL GUIDELINE CUA WORKFLOW HIEN TAI (BAT BUOC AP DUNG XUYEN SUOT):",
+    ...normalized.map((item, index) => `[${index + 1}] ${item}`),
+    "",
+  ];
   return lines.join("\n");
 }
 
@@ -220,12 +413,19 @@ function getRejectStats(historyDir) {
 
 module.exports = {
   appendRule,
+  appendSuccessExample,
   buildLearningPrompt,
   buildRulesPromptSection,
+  buildSuccessExamplesPromptSection,
+  buildWorkflowGuidelinesPromptSection,
   getRejectStats,
   learnFromFeedbackSync,
   loadRules,
+  loadSuccessExamples,
   resolveAgentWorkspace,
   rulesFilePath,
+  saveSuccessExamples,
   saveRules,
+  searchSuccessExamples,
+  successMemoryFilePath,
 };
